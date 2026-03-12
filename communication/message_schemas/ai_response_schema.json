@@ -1,0 +1,34 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "GrokAIResponse",
+  "description": "Expected JSON response from Grok Vision API",
+  "type": "object",
+  "required": ["question", "options", "answer", "answer_content"],
+  "properties": {
+    "question": {
+      "type": "string",
+      "description": "Extracted question text from the screenshot"
+    },
+    "options": {
+      "type": "object",
+      "required": ["A", "B", "C", "D"],
+      "properties": {
+        "A": { "type": "string" },
+        "B": { "type": "string" },
+        "C": { "type": "string" },
+        "D": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "answer": {
+      "type": "string",
+      "enum": ["A", "B", "C", "D"],
+      "description": "The letter of the correct option"
+    },
+    "answer_content": {
+      "type": "string",
+      "description": "The full text of the correct option"
+    }
+  },
+  "additionalProperties": false
+}

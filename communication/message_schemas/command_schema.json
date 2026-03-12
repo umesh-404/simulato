@@ -1,0 +1,37 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SimulatoMessage",
+  "description": "General message format for Simulato device communication",
+  "type": "object",
+  "required": ["type"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "enum": [
+        "DEVICE_REGISTER",
+        "REGISTER_ACK",
+        "HEARTBEAT",
+        "HEARTBEAT_ACK",
+        "REMOTE_COMMAND",
+        "COMMAND_ACK",
+        "SYSTEM_ALERT",
+        "OPERATOR_DECISION",
+        "PI_COMMAND",
+        "PI_RESPONSE"
+      ]
+    },
+    "device_id": {
+      "type": "string",
+      "description": "Unique device identifier"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp"
+    },
+    "payload": {
+      "type": "object",
+      "description": "Message-specific data"
+    }
+  }
+}

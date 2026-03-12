@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+.pytest_cache/
+
+# Environment Variables
+.env
+
+# Logs and Data
+logs/*.log
+database/*.db
+runs/
+experiments/
+
+# IDEs
+.idea/
+.vscode/
+
+# Project Specific
+simulato-mobile-v1.apk
+fix_sh.py
+restore_imports.py
+clean_imports.py

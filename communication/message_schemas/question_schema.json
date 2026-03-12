@@ -1,0 +1,54 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "StoredQuestion",
+  "description": "Schema for a stored question record in the database",
+  "type": "object",
+  "required": [
+    "question_id",
+    "canonical_text",
+    "option_a",
+    "option_b",
+    "option_c",
+    "option_d",
+    "correct_answer",
+    "version"
+  ],
+  "properties": {
+    "question_id": {
+      "type": "integer",
+      "description": "Auto-incremented primary key"
+    },
+    "canonical_text": {
+      "type": "string",
+      "description": "Deterministic canonical form of the question"
+    },
+    "sha256_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA256 hash of the canonical text"
+    },
+    "simhash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{16}$",
+      "description": "SimHash fingerprint for fuzzy matching"
+    },
+    "option_a": { "type": "string" },
+    "option_b": { "type": "string" },
+    "option_c": { "type": "string" },
+    "option_d": { "type": "string" },
+    "correct_answer": {
+      "type": "string",
+      "description": "Text content of the correct answer (not the letter)"
+    },
+    "answer_letter": {
+      "type": "string",
+      "enum": ["A", "B", "C", "D", ""],
+      "description": "Original letter designation from AI"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Version number (immutable records — Canonical Law 7)"
+    }
+  }
+}
