@@ -68,6 +68,21 @@ class ImageReceiver:
         image_bytes = base64.b64decode(base64_data)
         return self.receive_image(image_bytes, device_id)
 
+    def capture_immediate(self) -> Optional[bytes]:
+        """
+        Request an immediate capture for verification.
+
+        Returns the latest image bytes if available, or None if
+        no capture callback is configured or capture fails.
+
+        Note: In the live system, this is wired to request a new
+        image from the Capture Phone via WebSocket. For now it
+        returns the last received image bytes for verification.
+        """
+        if self._latest_path and self._latest_path.exists():
+            return self._latest_path.read_bytes()
+        return None
+
     @property
     def capture_count(self) -> int:
         return self._capture_count

@@ -2,9 +2,9 @@
 
 ## Project: Simulato
 
-Version: 1.1
+Version: 1.2
 Status: Full Implementation Complete
-Last Updated: 2026-03-05
+Last Updated: 2026-03-12
 
 ---
 
@@ -141,6 +141,12 @@ All implementation follows:
 
 ## 3.9 Hardware Control — Raspberry Pi Interface (Phase 8)
 
+- [x] `raspberry_pi/hid_controller.py`
+- [x] **HIDPi library integration** — imports `hidpi.Mouse` for absolute clicks
+- [x] Fallback to raw 6-byte reports (`<BHHb`) if HIDPi not installed
+- [x] Absolute pointer coordinates (0–32767 range)
+- [x] Scroll wheel support via HIDPi `Mouse.scroll()`
+- [x] `raspberry_pi/device_config.py` — `hidg0` = keyboard, `hidg1` = mouse (matches HIDPi descriptor)
 - [x] `controller/hardware_control/pi_client.py`
 - [x] TCP socket client with JSON protocol
 - [x] Command validation against VALID_COMMANDS set
@@ -161,6 +167,7 @@ All implementation follows:
 - [x] Deterministic file naming: `capture_NNNN_timestamp.jpg`
 - [x] Base64 and raw bytes reception
 - [x] Public `run_dir` property for artifact access
+- [x] `capture_immediate()` for post-click verification screenshots
 - [x] `controller/capture_pipeline/scroll_detector.py`
 - [x] Multi-heuristic scroll detection: scrollbar, clipped text, content distribution
 - [x] Right-edge scrollbar analysis with continuous dark region detection
@@ -239,7 +246,7 @@ All implementation follows:
 - [x] **Runtime AI Provider Switching:** `SET_AI_PROVIDER` command from Remote Control phone dropdown
 - [x] **Local AI Task Suite:** Scroll verification, answer state checking, screen classification
 - [x] Answer decision engine integration
-- [x] Click execution with verification + retry + alert (Canonical Law 5)
+- [x] Click execution with `_verify_option_click()` (Local AI or CV) + retry + alert (Law 5)
 - [x] NEXT click with verification + retry + alert (Canonical Law 5)
 - [x] **Autonomous capture loop** — automatically trigger next capture after NEXT click
 - [x] Full snapshot storage per question (Canonical Law 10)
@@ -247,8 +254,8 @@ All implementation follows:
 
 ## 3.15 Raspberry Pi Side
 
-- [x] `raspberry_pi/device_config.py` — listen host/port, HID device paths
-- [x] `raspberry_pi/hid_controller.py` — USB HID report writing (absolute pointer)
+- [x] `raspberry_pi/device_config.py` — `hidg0`=keyboard, `hidg1`=mouse (matches HIDPi)
+- [x] `raspberry_pi/hid_controller.py` — HIDPi library import + 6-byte absolute mouse fallback
 - [x] `raspberry_pi/command_listener.py` — TCP server, JSON protocol, command → HID execution
 
 ## 3.16 Calibration
@@ -376,7 +383,7 @@ All implementation follows:
 
 ## 7.4 Deployment — COMPLETE
 
-- [x] Pi USB HID gadget mode configuration script (`scripts/setup_pi_hid.sh`)
+- [x] Pi USB HID gadget mode via HIDPi (`HIDPi/HIDPi_Setup.py` + systemd service)
 - [x] Pi startup script (`start_pi.sh`) — handles HID gadget setup + listener
 - [x] PC startup script (`start.bat` / `scripts/start_controller.sh`)
 - [x] WiFi network configuration guide (`docs/WIFI_SETUP_GUIDE.md`)

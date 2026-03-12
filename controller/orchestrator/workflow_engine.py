@@ -22,6 +22,7 @@ Each step is logged and artifacts are saved for replay (Canonical Law 2, 11).
 """
 
 import json
+import time
 import threading
 from pathlib import Path
 from typing import Optional
@@ -403,20 +404,10 @@ class WorkflowEngine:
         self._click.click_option(letter)
         
         # Give UI time to update
-        import time
         time.sleep(1.0)
         
         # Verify click
-        if LOCAL_AI_ASSIST_ENABLED:
-            # Capture immediate to check visual state
-            image_bytes = self._receiver.capture_immediate()
-            if image_bytes:
-                verify_path = self._receiver.receive_image(image_bytes)
-                verified, _ = check_is_answered(verify_path)
-            else:
-                verified = False
-        else:
-            verified = self._verify.verify_click(letter).verified
+        verified = self._verify_option_click(letter)
 
         if verified:
             logger.info("Click verified for option %s", letter)
@@ -424,9 +415,10 @@ class WorkflowEngine:
 
         logger.warning("Click verification failed for %s — retrying", letter)
         self._click.click_option(letter)
-        result = self._verify.verify_click(letter)
+        time.sleep(1.0)
+        verified = self._verify_option_click(letter)
 
-        if result.verified:
+        if verified:
             logger.info("Retry click verified for option %s", letter)
             return
 
@@ -436,6 +428,23 @@ class WorkflowEngine:
             AlertType.VERIFICATION_FAILURE,
             f"Click verification failed for option {letter} after retry",
         )
+
+    def _verify_option_click(self, letter: str) -> bool:
+        """
+        Verify whether an option click was registered.
+
+        Uses Local AI (Qwen) if enabled, otherwise falls back
+        to the CV-based verification engine.
+        """
+        if LOCAL_AI_ASSIST_ENABLED:
+            image_bytes = self._receiver.capture_immediate()
+            if image_bytes:
+                verify_path = self._receiver.receive_image(image_bytes)
+                verified, _ = check_is_answered(verify_path)
+                return verified
+            return False
+        else:
+            return self._verify.verify_click(letter).verified
 
     def _capture_scroll_frames(self, direction: str) -> list[Path]:
         """

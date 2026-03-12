@@ -122,7 +122,7 @@ The following structure is the authoritative project layout (see REPOSITORY_STRU
 
     communication/message_schemas/ (JSON schemas)
     config/                        (grid_map_template.json)
-    scripts/                       (start_controller.sh, start_pi.sh, setup_pi_hid.sh, replay_run.sh)
+    scripts/                       (start_controller.sh, start_pi.sh, replay_run.sh)
     tests/                         (unit/, integration/, system_tests/)
     logs/
     datasets/
@@ -529,7 +529,7 @@ Testing scenarios:
 Steps:
 
 1.  install software on PC
-2.  configure Raspberry Pi (run `scripts/setup_pi_hid.sh`)
+2.  configure Raspberry Pi (run `sudo python3 HIDPi/HIDPi_Setup.py`, reboot)
 3.  install Simulato Android APK on both phones
 4.  connect all five devices to the same WiFi network
 5.  create `.env` configuration file on PC with `PI_HOST` and `GROK_API_KEY`
