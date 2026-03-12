@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Simulato</string>
+    <string name="capture_mode">Capture Device</string>
+    <string name="remote_mode">Remote Controller</string>
+    <string-array name="ai_providers">
+        <item>Gemini</item>
+        <item>Grok</item>
+    </string-array>
+</resources>

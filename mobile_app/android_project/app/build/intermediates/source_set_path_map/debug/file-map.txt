@@ -1,0 +1,42 @@
+com.simulato.app-savedstate-1.2.1-0 C:\Users\jumes\.gradle\caches\transforms-3\0299077d3e18bb9b1d51300f42ef6426\transformed\savedstate-1.2.1\res
+com.simulato.app-core-runtime-2.2.0-1 C:\Users\jumes\.gradle\caches\transforms-3\03e4202569b1ae44414ae7de52471fc1\transformed\core-runtime-2.2.0\res
+com.simulato.app-emoji2-views-helper-1.2.0-2 C:\Users\jumes\.gradle\caches\transforms-3\1d4074c463b58e011d8b5bf1fca888c3\transformed\emoji2-views-helper-1.2.0\res
+com.simulato.app-camera-view-1.3.1-3 C:\Users\jumes\.gradle\caches\transforms-3\3942365539aac72df7106949f535bbf2\transformed\camera-view-1.3.1\res
+com.simulato.app-lifecycle-runtime-2.7.0-4 C:\Users\jumes\.gradle\caches\transforms-3\3cf0fcffe4b3ebfe0ccdb2671a630927\transformed\lifecycle-runtime-2.7.0\res
+com.simulato.app-drawerlayout-1.1.1-5 C:\Users\jumes\.gradle\caches\transforms-3\427a9b859a225d298c1802fc9626a763\transformed\drawerlayout-1.1.1\res
+com.simulato.app-appcompat-resources-1.6.1-6 C:\Users\jumes\.gradle\caches\transforms-3\4ed38f9fd24934a094a49921a1dbb1f3\transformed\appcompat-resources-1.6.1\res
+com.simulato.app-lifecycle-viewmodel-ktx-2.7.0-7 C:\Users\jumes\.gradle\caches\transforms-3\591af0d1d4c95f2406ca25f34db1fca6\transformed\lifecycle-viewmodel-ktx-2.7.0\res
+com.simulato.app-startup-runtime-1.1.1-8 C:\Users\jumes\.gradle\caches\transforms-3\59a4434d1e0e5c03ab932670cd474a10\transformed\startup-runtime-1.1.1\res
+com.simulato.app-camera-lifecycle-1.3.1-9 C:\Users\jumes\.gradle\caches\transforms-3\5e468debe722bb20f1a3d678911d8b0c\transformed\camera-lifecycle-1.3.1\res
+com.simulato.app-recyclerview-1.1.0-10 C:\Users\jumes\.gradle\caches\transforms-3\66230b76d8404c405520a73196b02820\transformed\recyclerview-1.1.0\res
+com.simulato.app-lifecycle-viewmodel-2.7.0-11 C:\Users\jumes\.gradle\caches\transforms-3\6848cafc71ec8442166e40d9af70b9c0\transformed\lifecycle-viewmodel-2.7.0\res
+com.simulato.app-coordinatorlayout-1.1.0-12 C:\Users\jumes\.gradle\caches\transforms-3\6d088fd1dc1be53aad9ffcbe8bfeaed8\transformed\coordinatorlayout-1.1.0\res
+com.simulato.app-lifecycle-livedata-core-ktx-2.7.0-13 C:\Users\jumes\.gradle\caches\transforms-3\7243f0f3b981f1c9645bad31d9a73419\transformed\lifecycle-livedata-core-ktx-2.7.0\res
+com.simulato.app-lifecycle-process-2.7.0-14 C:\Users\jumes\.gradle\caches\transforms-3\72eeb17c9b3c3b97efc2f6da0dcf8de9\transformed\lifecycle-process-2.7.0\res
+com.simulato.app-cardview-1.0.0-15 C:\Users\jumes\.gradle\caches\transforms-3\7ad6a2c6a9bd47d587342f94678f6fab\transformed\cardview-1.0.0\res
+com.simulato.app-lifecycle-viewmodel-savedstate-2.7.0-16 C:\Users\jumes\.gradle\caches\transforms-3\7cf3523bb09a38d0985b8c235a8e1dd4\transformed\lifecycle-viewmodel-savedstate-2.7.0\res
+com.simulato.app-emoji2-1.2.0-17 C:\Users\jumes\.gradle\caches\transforms-3\82380c2ef295209c75a147cd78bbfc27\transformed\emoji2-1.2.0\res
+com.simulato.app-appcompat-1.6.1-18 C:\Users\jumes\.gradle\caches\transforms-3\82449e3139048e3a21330111b315b0fc\transformed\appcompat-1.6.1\res
+com.simulato.app-annotation-experimental-1.3.1-19 C:\Users\jumes\.gradle\caches\transforms-3\8497dd5e893d91fceda644b05343cbeb\transformed\annotation-experimental-1.3.1\res
+com.simulato.app-camera-video-1.3.1-20 C:\Users\jumes\.gradle\caches\transforms-3\8a0d239710ca7b1395ee51c9f785ab2f\transformed\camera-video-1.3.1\res
+com.simulato.app-fragment-1.3.6-21 C:\Users\jumes\.gradle\caches\transforms-3\93215345f2e1555c31cfe49094917a09\transformed\fragment-1.3.6\res
+com.simulato.app-lifecycle-runtime-ktx-2.7.0-22 C:\Users\jumes\.gradle\caches\transforms-3\94d4e74c1c512246d38910f0cd6025f9\transformed\lifecycle-runtime-ktx-2.7.0\res
+com.simulato.app-material-1.11.0-23 C:\Users\jumes\.gradle\caches\transforms-3\9da7ba67e3a8fa58b324ee0b34636051\transformed\material-1.11.0\res
+com.simulato.app-lifecycle-livedata-core-2.7.0-24 C:\Users\jumes\.gradle\caches\transforms-3\a6257a573ceb0902c0d2969dffbbd4de\transformed\lifecycle-livedata-core-2.7.0\res
+com.simulato.app-camera-core-1.3.1-25 C:\Users\jumes\.gradle\caches\transforms-3\af6bc3790da08eeec6d1b3aa8b117d84\transformed\camera-core-1.3.1\res
+com.simulato.app-core-ktx-1.12.0-26 C:\Users\jumes\.gradle\caches\transforms-3\ba2ba087a96411c428138f7fd4df14c0\transformed\core-ktx-1.12.0\res
+com.simulato.app-viewpager2-1.0.0-27 C:\Users\jumes\.gradle\caches\transforms-3\c193e785cca8d8dab478cfa8a7d54eb0\transformed\viewpager2-1.0.0\res
+com.simulato.app-transition-1.2.0-28 C:\Users\jumes\.gradle\caches\transforms-3\c4cc88e0a2e1796c7ec9189dc9acec8f\transformed\transition-1.2.0\res
+com.simulato.app-activity-1.8.0-29 C:\Users\jumes\.gradle\caches\transforms-3\ca54f0b4c64fe7145844f1c2eaaf4574\transformed\activity-1.8.0\res
+com.simulato.app-constraintlayout-2.1.4-30 C:\Users\jumes\.gradle\caches\transforms-3\d7ab982a221341d282e2f0d6fc4f2d8c\transformed\constraintlayout-2.1.4\res
+com.simulato.app-camera-camera2-1.3.1-31 C:\Users\jumes\.gradle\caches\transforms-3\d8be38353f40abf92312c7d215879ffa\transformed\camera-camera2-1.3.1\res
+com.simulato.app-profileinstaller-1.3.0-32 C:\Users\jumes\.gradle\caches\transforms-3\e0f963bc6b325dfac1e238a6eabaf5ec\transformed\profileinstaller-1.3.0\res
+com.simulato.app-core-1.12.0-33 C:\Users\jumes\.gradle\caches\transforms-3\e301ef7b03c70a30fa9dbfc1c07bd30d\transformed\core-1.12.0\res
+com.simulato.app-lifecycle-livedata-2.7.0-34 C:\Users\jumes\.gradle\caches\transforms-3\f06454ac7a498945e50848db6e7d9fcf\transformed\lifecycle-livedata-2.7.0\res
+com.simulato.app-pngs-35 D:\Python Projects\simulato\mobile_app\android_project\app\build\generated\res\pngs\debug
+com.simulato.app-resValues-36 D:\Python Projects\simulato\mobile_app\android_project\app\build\generated\res\resValues\debug
+com.simulato.app-packageDebugResources-37 D:\Python Projects\simulato\mobile_app\android_project\app\build\intermediates\incremental\debug\packageDebugResources\merged.dir
+com.simulato.app-packageDebugResources-38 D:\Python Projects\simulato\mobile_app\android_project\app\build\intermediates\incremental\debug\packageDebugResources\stripped.dir
+com.simulato.app-merged_res-39 D:\Python Projects\simulato\mobile_app\android_project\app\build\intermediates\merged_res\debug
+com.simulato.app-debug-40 D:\Python Projects\simulato\mobile_app\android_project\app\src\debug\res
+com.simulato.app-main-41 D:\Python Projects\simulato\mobile_app\android_project\app\src\main\res

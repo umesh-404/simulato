@@ -1,0 +1,14 @@
+[
+    {
+        "merged": "com.simulato.app-merged_res-39:/layout_activity_remote_control.xml.flat",
+        "source": "com.simulato.app-main-40:/layout/activity_remote_control.xml"
+    },
+    {
+        "merged": "com.simulato.app-merged_res-39:/layout_activity_home.xml.flat",
+        "source": "com.simulato.app-main-40:/layout/activity_home.xml"
+    },
+    {
+        "merged": "com.simulato.app-merged_res-39:/layout_activity_capture.xml.flat",
+        "source": "com.simulato.app-main-40:/layout/activity_capture.xml"
+    }
+]
