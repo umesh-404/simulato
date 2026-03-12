@@ -371,7 +371,9 @@ All implementation follows:
 
 ## 7.3 Integration & Testing — COMPLETE
 
-- [ ] End-to-end test: PC + Pi + Capture Phone + Remote Phone (requires hardware)
+- [x] End-to-end test: Pi HID verified on Pi 5 with connected host
+- [x] Android APK built and installed on Capture + Remote phones
+- [ ] Full 5-device integration test (requires exam laptop + all devices on WiFi)
 - [x] Unit tests for canonicalizer (10 tests — all pass)
 - [x] Unit tests for hash engine (16 tests — all pass)
 - [x] Unit tests for option matcher (9 tests — all pass)
@@ -384,12 +386,14 @@ All implementation follows:
 ## 7.4 Deployment — COMPLETE
 
 - [x] Pi USB HID gadget mode via HIDPi (`HIDPi/HIDPi_Setup.py` + systemd service)
-- [x] Pi startup script (`start_pi.sh`) — handles HID gadget setup + listener
-- [x] PC startup script (`start.bat` / `scripts/start_controller.sh`)
+- [x] Pi startup script (`start_pi.sh`) — handles HIDPi check + listener
+- [x] PC startup script (`start.bat`) — auto-starts Ollama + auto-pulls model + starts controller
+- [x] Linux controller startup script (`scripts/start_controller.sh`)
 - [x] WiFi network configuration guide (`docs/WIFI_SETUP_GUIDE.md`)
 - [x] Deployment checklist document (`docs/DEPLOYMENT_CHECKLIST.md`)
 - [x] Replay run script (`scripts/replay_run.sh`)
 - [x] Top-level `README.md` with 5-device deployment guide
+- [x] **Complete setup guide** (`docs/SETUP_GUIDE.md`) — zero-to-running for all devices
 
 ## 7.5 Remaining (Hardware-Dependent)
 

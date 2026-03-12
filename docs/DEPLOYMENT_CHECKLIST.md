@@ -32,14 +32,18 @@ sudo ./start_pi.sh
 
 ## 3. Main Control PC
 
-- [ ] `.env` file configured with `GROK_API_KEY`, `GEMINI_API_KEY`, and `PI_HOST`
+- [ ] Ollama installed (https://ollama.com/download)
+- [ ] `.env` file configured with `GROK_API_KEY` or `GEMINI_API_KEY`, and `PI_HOST`
 - [ ] Python virtual environment activated
 - [ ] Dependencies installed (`pip install -r requirements.txt`)
-- [ ] Controller server running via `start.bat` (this automatically starts Ollama)
+- [ ] Controller running via `start.bat` (auto-starts Ollama + auto-pulls model + starts server)
 - [ ] API responds on port 8000
 
 ```bash
-# Verify
+# Start everything (Ollama + model + controller):
+.\start.bat
+
+# Verify:
 curl http://localhost:8000/api/status
 ```
 

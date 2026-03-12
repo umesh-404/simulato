@@ -2,15 +2,17 @@
 
 Wait, hold on. This system is a distributed 5-device setup. You won't "clone the repo" onto the Android Phones, but you *will* clone it onto the **Mother PC** and your **Raspberry Pi**.
 
+> **📖 For the full step-by-step guide, see [`docs/SETUP_GUIDE.md`](docs/SETUP_GUIDE.md)**
+
 Here is exactly how to deploy the entire system from scratch very easily:
 
 ## 1. Network Setup
 Ensure the following 5 devices are connected to the **same WiFi network**:
 - Your Main Control PC ("Mother PC")
-- Raspberry Pi Zero W
+- Raspberry Pi 5
 - The "Capture" Android Phone
 - The "Remote Control" Android Phone
-- The Exam Laptop (WiFi doesn't actually matter for this one, just the Pi)
+- The Exam Laptop (WiFi doesn't actually matter for this one, just the Pi USB)
 
 ## 2. Raspberry Pi Setup (USB HID Emulation)
 *The Pi emulates a USB mouse to physically click answers on the Exam Laptop.*
