@@ -80,6 +80,22 @@ if errorlevel 1 (
 :check_model_skip
 
 :: -----------------------------------------------
+:: Step 2.5: Warm up local AI model
+:: -----------------------------------------------
+echo.
+echo [2.5/3] Warming up local AI model...
+curl -s -X POST http://localhost:11434/api/chat ^
+  -H "Content-Type: application/json" ^
+  -d "{\"model\":\"%MODEL%\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"stream\":false,\"keep_alive\":\"30m\"}" ^
+  --max-time 20 > nul 2>&1
+if errorlevel 1 (
+    echo [WARNING] Local AI warmup failed or timed out.
+    echo          Controller will continue; first local-AI call may be slower.
+) else (
+    echo     -> Local AI warmup complete.
+)
+
+:: -----------------------------------------------
 :: Step 4: Start Python backend
 :: -----------------------------------------------
 echo.

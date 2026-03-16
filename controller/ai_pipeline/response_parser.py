@@ -28,8 +28,8 @@ logger = get_logger("response_parser")
 class GrokResponseOptions(BaseModel):
     A: str
     B: str
-    C: str
-    D: str
+    C: str = ""
+    D: str = ""
 
 
 class GrokResponse(BaseModel):
@@ -106,7 +106,11 @@ def parse_grok_response(raw_text: str) -> GrokResponse:
         logger.error("Schema validation failed: %s | data: %s", e, json.dumps(data)[:300])
         raise ParseError(f"Response schema validation failed: {e}") from e
 
-    declared_content = getattr(response.options, response.answer)
+    declared_content = getattr(response.options, response.answer, "")
+    if not declared_content.strip():
+        raise ParseError(
+            f"Answer '{response.answer}' has no corresponding option text in response options"
+        )
     if response.answer_content.strip() != declared_content.strip():
         logger.warning(
             "answer_content mismatch: answer=%s, options[%s]='%s', answer_content='%s'. "

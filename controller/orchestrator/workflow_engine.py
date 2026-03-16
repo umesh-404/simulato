@@ -37,7 +37,15 @@ from controller.ai_pipeline.ollama_client import (
     OllamaAPIError
 )
 from controller.ai_pipeline.response_parser import GrokResponse, ParseError
-from controller.config import LOCAL_AI_ASSIST_ENABLED, OLLAMA_MODEL, GROK_MODEL, GEMINI_MODEL, DEFAULT_AI_PROVIDER
+from controller.config import (
+    LOCAL_AI_ASSIST_ENABLED,
+    OLLAMA_MODEL,
+    GROK_MODEL,
+    GEMINI_MODEL,
+    DEFAULT_AI_PROVIDER,
+    GROK_API_KEY,
+    GEMINI_API_KEY,
+)
 from controller.answer_engine.decision_engine import (
     decide_answer,
     AnswerDecision,
@@ -295,18 +303,10 @@ class WorkflowEngine:
             # Step 6: Query AI (dispatch to active provider) — only if no image-hash hit
             try:
                 if cached_question is None:
-                    if self._ai_provider == "gemini":
-                        logger.info("Querying cloud Gemini AI (%s)", GEMINI_MODEL)
-                        ai_response = query_gemini(stitched_path)
-                        ai_model_used = GEMINI_MODEL
-                    else:
-                        logger.info("Querying cloud Grok AI (%s)", GROK_MODEL)
-                        ai_response = query_grok(stitched_path)
-                        ai_model_used = GROK_MODEL
-
+                    ai_response, ai_model_used, provider_used = self._query_primary_with_fallback(stitched_path)
                     self._api_calls += 1
                     self._log_event("ai_response", {
-                        "provider": self._ai_provider,
+                        "provider": provider_used,
                         "model": ai_model_used,
                         "question": ai_response.question[:100],
                         "answer": ai_response.answer,
@@ -504,8 +504,13 @@ class WorkflowEngine:
             self._is_waiting_verification_flag = False
             if arrived and self._verification_frame_data is not None:
                 verify_path = self._receiver.receive_image(self._verification_frame_data)
-                verified, _ = check_is_answered(verify_path)
-                return verified
+                verified, selected = check_is_answered(verify_path)
+                if not verified:
+                    return False
+                # Strict verification: clicked option must match selected option.
+                if selected is None:
+                    return False
+                return selected.strip().upper() == letter.strip().upper()
             logger.warning("Verification capture timed out after %ds", VERIFY_FRAME_TIMEOUT)
             return False
         else:
@@ -619,3 +624,29 @@ class WorkflowEngine:
         median = float(np.median(dct_low))
         bits = (dct_low > median).astype(int).flatten()
         return "".join(str(b) for b in bits)
+
+    def _query_primary_with_fallback(self, stitched_path: Path) -> tuple[GrokResponse, str, str]:
+        """
+        Query selected cloud provider first, then fallback once to the other
+        provider if available and primary fails.
+        """
+        if self._ai_provider == "gemini":
+            primary = ("gemini", GEMINI_MODEL, query_gemini, bool(GEMINI_API_KEY))
+            secondary = ("grok", GROK_MODEL, query_grok, bool(GROK_API_KEY))
+        else:
+            primary = ("grok", GROK_MODEL, query_grok, bool(GROK_API_KEY))
+            secondary = ("gemini", GEMINI_MODEL, query_gemini, bool(GEMINI_API_KEY))
+
+        provider_name, model_name, query_fn, enabled = primary
+        if not enabled:
+            raise ParseError(f"Primary AI provider '{provider_name}' is not configured")
+        try:
+            logger.info("Querying cloud %s AI (%s)", provider_name.capitalize(), model_name)
+            return query_fn(stitched_path), model_name, provider_name
+        except (GrokAPIError, GeminiAPIError, ParseError) as primary_error:
+            logger.warning("Primary provider '%s' failed: %s", provider_name, primary_error)
+            fallback_name, fallback_model, fallback_fn, fallback_enabled = secondary
+            if not fallback_enabled:
+                raise primary_error
+            logger.info("Falling back to cloud %s AI (%s)", fallback_name.capitalize(), fallback_model)
+            return fallback_fn(stitched_path), fallback_model, fallback_name

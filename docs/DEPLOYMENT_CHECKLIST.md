@@ -17,7 +17,7 @@ Use this checklist before every exam session to verify all components are ready.
 
 - [ ] `/dev/hidg0` exists (HIDPi keyboard gadget)
 - [ ] `/dev/hidg1` exists (HIDPi mouse gadget)
-- [ ] Command listener running (`python3 -m raspberry_pi.command_listener`)
+- [ ] Command listener running (`sudo ./start_pi.sh` using project venv)
 - [ ] PC can reach Pi on port 9000 (or configured PI_PORT)
 - [ ] Test HID click works (exam laptop moves cursor)
 

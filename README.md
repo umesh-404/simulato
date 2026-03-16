@@ -28,9 +28,9 @@ Ensure the following 5 devices are connected to the **same WiFi network**:
    ```
    *(First time: it will modify firmware config and ask you to reboot. Do `sudo reboot`, then re-run.)*
 4. **Plug the Raspberry Pi's USB-C data port directly into the Exam Laptop.**
-5. Install the HIDPi Python library and start the listener:
+5. Start the listener (the script will create/use a local virtualenv and
+   install HIDPi there automatically):
    ```bash
-   cd HIDPi/library && pip install . && cd ../..
    sudo ./start_pi.sh
    # It is now listening on port 9000 for mouse click commands from the PC
    ```
@@ -84,7 +84,7 @@ Now that everything is running and talking to the Mother PC:
 1. Make sure the Exam Laptop is displaying a testing screen with radio buttons (Option A, B, C, D) and a NEXT button.
 2. On the **Remote Control** phone, tap **START**.
    - If no valid `grid_map.json` exists yet, the controller automatically enters calibration and requests a capture from the Capture Phone.
-   - If calibration fails, the Remote phone shows a blocking alert with **Retry Calibration**.
+   - If calibration fails, adjust framing and press **START** again to retry calibration.
 3. After calibration succeeds, press **CONTINUE** on the Remote phone.
    - This starts (or resumes) the run from the controller.
 4. During the run:

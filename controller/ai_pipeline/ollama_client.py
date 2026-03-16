@@ -19,6 +19,7 @@ from controller.config import (
     OLLAMA_MODEL,
     OLLAMA_TIMEOUT_SECONDS,
     OLLAMA_COOLDOWN_SECONDS,
+    OLLAMA_KEEP_ALIVE,
 )
 from controller.ai_pipeline.aux_prompts import (
     SCROLL_CHECK_PROMPT,
@@ -65,7 +66,8 @@ def _call_ollama_task(image_path: Path, prompt: str) -> dict:
             "seed": 42
         },
         "stream": False,
-        "format": "json"
+        "format": "json",
+        "keep_alive": OLLAMA_KEEP_ALIVE,
     }
 
     global _OLLAMA_UNAVAILABLE_UNTIL

@@ -50,6 +50,9 @@ PI_HOST=192.168.1.xxx
 # Local AI model (auto-pulled by start.bat):
 OLLAMA_MODEL=qwen2.5vl:7b-q4_K_M
 LOCAL_AI_ASSIST_ENABLED=True
+OLLAMA_TIMEOUT_SECONDS=8
+OLLAMA_COOLDOWN_SECONDS=120
+OLLAMA_KEEP_ALIVE=30m
 ```
 
 ### 1.4 Start the Controller
@@ -202,7 +205,7 @@ When the AI gives a different answer than what's in the database:
 | "HID devices not found" on Pi | Run `sudo python3 HIDPi/HIDPi_Setup.py` then `sudo reboot` |
 | Click lands on wrong option | Re-run calibration (CALIBRATE button on Capture phone) |
 | Local AI responses are slow | Normal for first query (~5s). Subsequent queries are faster |
-| Cloud AI fails | Check API key in `.env`. Check internet on PC |
+| Cloud AI fails | Check API keys in `.env` for both Gemini and Grok. Controller now auto-falls back to alternate cloud provider once before alerting |
 
 ---
 

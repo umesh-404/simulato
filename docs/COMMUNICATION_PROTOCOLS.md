@@ -171,8 +171,12 @@ Controller response:
      "status": "received"
     }
 
-The controller decodes the base64 image and processes it through the capture pipeline.
-During **CALIBRATION** state, the image is routed to the calibration workflow instead of the question processing pipeline.
+The controller decodes the base64 image and processes it through the
+capture pipeline. During **CALIBRATION** state, the image is routed to
+the calibration workflow instead of the question processing pipeline.
+During normal runs, images may also be explicitly routed as **scroll
+frames** or **verification frames** when the controller is waiting for
+those specific captures from the Capture Phone.
 
 ---
 

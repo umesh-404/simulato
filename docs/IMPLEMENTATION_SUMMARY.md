@@ -44,6 +44,10 @@ All implementation follows:
 ## 3.1 Core Infrastructure
 
 - [x] `controller/config.py` — centralized configuration (paths, network, timeouts, thresholds); PI_HOST/PI_PORT/CONTROLLER_PORT configurable via env vars
+- [x] Local AI resilience controls via env:
+      `OLLAMA_TIMEOUT_SECONDS` (default 8),
+      `OLLAMA_COOLDOWN_SECONDS` (default 120),
+      `OLLAMA_KEEP_ALIVE` (default 30m)
 - [x] `controller/utils/logger.py` — file + console logging, structured EventLogger (JSONL)
 - [x] `controller/utils/timer.py` — context-manager execution timer
 - [x] `controller/utils/text_normalizer.py` — Unicode NFC, lowercase, whitespace collapse, numeric normalization
@@ -154,6 +158,9 @@ All implementation follows:
 - [x] `PiConnectionError` / `PiCommandError` exceptions
 - [x] `controller/hardware_control/click_dispatcher.py`
 - [x] Letter-to-command mapping (A→CLICK_A, etc.)
+- [x] Calibrated grid→pixel→absolute HID coordinate conversion for all
+      clicks (options, NEXT, scroll regions)
+- [x] Local-AI-assisted NEXT targeting when available
 - [x] `click_option()`, `click_next()`, `scroll_left()`, `scroll_right()`
 - [x] `controller/hardware_control/verification_engine.py`
 - [x] Post-click screenshot capture via callback
@@ -167,7 +174,9 @@ All implementation follows:
 - [x] Deterministic file naming: `capture_NNNN_timestamp.jpg`
 - [x] Base64 and raw bytes reception
 - [x] Public `run_dir` property for artifact access
-- [x] `capture_immediate()` for post-click verification screenshots
+- [x] `latest_path` tracking for newest frame
+- [x] Routing support for scroll frames and post-click verification
+      frames
 - [x] `controller/capture_pipeline/scroll_detector.py`
 - [x] Multi-heuristic scroll detection: scrollbar, clipped text, content distribution
 - [x] Right-edge scrollbar analysis with continuous dark region detection
@@ -243,14 +252,28 @@ All implementation follows:
 - [x] **Scroll-and-recapture loop** — wait for scroll frame via WebSocket + stitch
 - [x] Image stitching
 - [x] Image preprocessing
-- [x] **Tiered AI Integration:** Grok (Cloud) and Gemini (Cloud) as selectable primary solvers, Ollama (Local/Qwen) as auxiliary analyst
-- [x] **Runtime AI Provider Switching:** `SET_AI_PROVIDER` command from Remote Control phone dropdown
-- [x] **Local AI Task Suite:** Scroll verification, answer state checking, screen classification
+- [x] **Tiered AI Integration:** Grok (Cloud) and Gemini (Cloud) as
+      selectable primary solvers, Ollama (Local/Qwen) as auxiliary
+      analyst
+- [x] **Cloud-provider failover:** if the selected primary provider fails
+      (transport/parse), workflow retries once with the alternate provider
+      before raising AI_PARSE_FAILURE
+- [x] **Runtime AI Provider Switching:** `SET_AI_PROVIDER` command from
+      Remote Control phone dropdown
+- [x] **Local AI Task Suite:** Scroll verification (initial + each
+      scroll frame), answer state checking using dedicated verification
+      captures, NEXT button localization, screen classification
+      (QUESTION/LOGIN/ERROR/OTHER) with timeout+cooldown safeguards
 - [x] Answer decision engine integration
-- [x] Click execution with `_verify_option_click()` (Local AI or CV) + retry + alert (Law 5)
+- [x] Click execution with `_verify_option_click()` (Local AI or CV) +
+      retry + alert (Law 5)
+- [x] Strict local-AI verification enforces selected option letter must
+      match the clicked letter (not just "any option selected")
 - [x] NEXT click with verification + retry + alert (Canonical Law 5)
-- [x] End-of-test detection (`TEST_COMPLETE`) when screen does not change after NEXT
-- [x] **Autonomous capture loop** — automatically trigger next capture after NEXT click
+- [x] End-of-test detection (`TEST_COMPLETE`) when screen does not change
+      after NEXT
+- [x] **Autonomous capture loop** — automatically trigger next capture
+      after NEXT click
 - [x] Full snapshot storage per question (Canonical Law 10)
 - [x] Structured event logging for replay (Canonical Law 2)
 

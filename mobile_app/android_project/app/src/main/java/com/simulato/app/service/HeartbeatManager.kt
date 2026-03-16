@@ -18,6 +18,7 @@ class HeartbeatManager(private val apiClient: ApiClient) {
     var lastAckSuccess = false
         private set
 
+    @Synchronized
     fun start() {
         if (isRunning) return
         isRunning = true
@@ -38,6 +39,7 @@ class HeartbeatManager(private val apiClient: ApiClient) {
         AppLogger.i("Heartbeat", "Started (interval=${Constants.HEARTBEAT_INTERVAL_MS}ms)")
     }
 
+    @Synchronized
     fun stop() {
         timer?.cancel()
         timer = null

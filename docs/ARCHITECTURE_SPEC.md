@@ -317,9 +317,12 @@ For each question:
 2.  use the **Local Qwen analyst on every new screen** to:
     -   determine whether the screen is a valid question screen
     -   determine whether the question requires scrolling
-3.  issue scroll command if necessary
-4.  capture additional images
-5.  stitch images into full question image
+3.  if scrolling is needed:
+    -   command the Pi to scroll via HID
+    -   request additional captures from the Capture Phone
+    -   repeat the local scroll check on each scroll frame until the
+        question and options are fully visible
+4.  stitch all frames into a full question image
 
 Final output:
 
@@ -342,14 +345,18 @@ Simulato uses a **Tiered AI Strategy**:
     Control phone dropdown and can be switched at any time via the
     `SET_AI_PROVIDER` command.
 2.  **Auxiliary Analyst (Local Qwen):** Responsible for high-frequency
-    screen understanding and **never used to answer questions**:
+screen understanding and **never used to answer questions**:
     -   Scroll Verification (detecting clipped text), called for **every
-        new screen**.
-    -   Answer Verification (detecting post-click highlights).
+        new screen and each scroll frame**.
+    -   Answer Verification (detecting post-click highlights using
+        dedicated verification captures).
+    -   NEXT Button Localization (suggesting NEXT position in the
+        calibrated grid for more robust NEXT clicks).
     -   Screen Type Identification (login vs. question vs. error).
 
-The local analyst utilizes Ollama (e.g. `qwen2.5vl:7b`) for air-gapped
-or low-latency screen classification.
+The local analyst utilizes Ollama (e.g. `qwen2.5vl:7b-q4_K_M`) for
+air-gapped or low-latency screen classification and is wrapped with a
+short timeout plus cooldown so failures never stall the main pipeline.
 
 Processing steps:
 
@@ -532,7 +539,8 @@ Replay exists for debugging and experiment verification.
 
 Complete run sequence:
 
-1.  operator enters test name
+1.  operator enters test name (if omitted by client, controller uses
+    `default_test` deterministically)
 2.  system loads test context
 3.  system enters RUNNING state
 4.  question captured

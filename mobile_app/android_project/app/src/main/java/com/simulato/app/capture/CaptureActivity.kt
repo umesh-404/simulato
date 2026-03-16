@@ -52,7 +52,12 @@ class CaptureActivity : AppCompatActivity() {
                 runOnUiThread {
                     if (isDestroyed) return@runOnUiThread
                     if (alertType == "TEST_COMPLETE") {
-                        ToneGenerator(AudioManager.STREAM_ALARM, 100).startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 1500)
+                        val tone = ToneGenerator(AudioManager.STREAM_ALARM, 100)
+                        try {
+                            tone.startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 1500)
+                        } finally {
+                            tone.release()
+                        }
                         Toast.makeText(this, message, Toast.LENGTH_LONG).show()
                     }
                 }
@@ -65,7 +70,10 @@ class CaptureActivity : AppCompatActivity() {
             },
             onRemoteCommand = { command ->
                 if (command == "CAPTURE_IMAGE") {
-                    runOnUiThread { captureAndUpload() }
+                    runOnUiThread {
+                        if (isDestroyed) return@runOnUiThread
+                        captureAndUpload()
+                    }
                 }
             },
             onCalibrationResult = { success, message ->

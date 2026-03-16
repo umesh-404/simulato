@@ -28,6 +28,8 @@ class SimulatoWebSocket(
     private val reconnectHandler = Handler(Looper.getMainLooper())
     @Volatile
     private var shouldReconnect = true
+    @Volatile
+    private var connectionGeneration = 0L
 
     @Volatile
     var isConnected = false
@@ -35,6 +37,7 @@ class SimulatoWebSocket(
 
     fun connect() {
         shouldReconnect = true
+        val generation = ++connectionGeneration
         val request = Request.Builder()
             .url(config.wsUrl)
             .build()
@@ -42,6 +45,7 @@ class SimulatoWebSocket(
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
 
             override fun onOpen(webSocket: WebSocket, response: Response) {
+                if (generation != connectionGeneration) return
                 AppLogger.i("WebSocket", "Connected to ${config.wsUrl}")
                 isConnected = true
                 onConnectionChange(true)
@@ -54,6 +58,7 @@ class SimulatoWebSocket(
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
+                if (generation != connectionGeneration) return
                 AppLogger.d("WebSocket", "Received: ${text.take(200)}")
                 try {
                     val json = JsonParser.parseString(text).asJsonObject
@@ -89,6 +94,7 @@ class SimulatoWebSocket(
             }
 
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                if (generation != connectionGeneration) return
                 AppLogger.i("WebSocket", "Closing: $code $reason")
                 isConnected = false
                 onConnectionChange(false)
@@ -96,6 +102,7 @@ class SimulatoWebSocket(
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                if (generation != connectionGeneration) return
                 AppLogger.i("WebSocket", "Closed: $code $reason")
                 isConnected = false
                 onConnectionChange(false)
@@ -103,6 +110,7 @@ class SimulatoWebSocket(
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                if (generation != connectionGeneration) return
                 AppLogger.e("WebSocket", "Connection failed: ${t.message}", t)
                 isConnected = false
                 onConnectionChange(false)
@@ -113,6 +121,7 @@ class SimulatoWebSocket(
 
     fun disconnect() {
         shouldReconnect = false
+        connectionGeneration++
         reconnectHandler.removeCallbacksAndMessages(null)
         webSocket?.close(1000, "User disconnect")
         isConnected = false

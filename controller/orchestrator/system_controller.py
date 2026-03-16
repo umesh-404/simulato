@@ -164,7 +164,7 @@ class SystemController:
         # Auto-calibrate on START if no valid grid_map.json exists.
         from calibration.grid_mapper import GridMap
         try:
-            _ = GridMap.load()
+            grid_map = GridMap.load()
         except Exception:
             logger.info("START requested but system not calibrated — starting calibration flow")
             self._pending_start_payload = {**(payload or {}), "test_name": test_name}
@@ -181,6 +181,15 @@ class SystemController:
         event_logger = EventLogger(self._run_ctx.run_dir)
 
         receiver = ImageReceiver(self._run_ctx.run_dir)
+
+        # Wire verification engine to latest captured frame + calibrated grid,
+        # so CV-based verification remains functional when local AI assist is disabled.
+        self._verification_engine.set_grid_map(grid_map)
+        self._verification_engine.set_capture_callback(
+            lambda: receiver.latest_path
+            if receiver.latest_path is not None
+            else (self._run_ctx.run_dir / "screenshots" / "__missing__.jpg")
+        )
 
         self._workflow = WorkflowEngine(
             state_machine=self._sm,
