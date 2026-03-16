@@ -182,7 +182,20 @@ class RemoteControlActivity : AppCompatActivity() {
             AlertDialog.Builder(this)
                 .setTitle("System Alert")
                 .setMessage("$alertType\n\n$message")
-                .setPositiveButton("OK", null)
+                .setPositiveButton(
+                    when (alertType) {
+                        "CALIBRATION_REQUIRED", "CALIBRATION_FAILED" -> "Retry Calibration"
+                        "CALIBRATION_COMPLETE" -> "CONTINUE"
+                        else -> "OK"
+                    }
+                ) { _, _ ->
+                    when (alertType) {
+                        "CALIBRATION_REQUIRED", "CALIBRATION_FAILED" -> sendCommand(Constants.Commands.CALIBRATE)
+                        "CALIBRATION_COMPLETE" -> sendCommand(Constants.Commands.CONTINUE)
+                        else -> { /* noop */ }
+                    }
+                }
+                .setCancelable(false)
                 .show()
         }
     }

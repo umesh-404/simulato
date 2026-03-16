@@ -57,6 +57,8 @@ class SystemController:
         self._calibration_pending: bool = False
         self._state_before_calibration: Optional[SystemState] = None
         self._active_ai_provider: str = DEFAULT_AI_PROVIDER
+        self._pending_start_payload: Optional[dict] = None
+        self._pending_resume_after_calibration: bool = False
 
     @property
     def state(self) -> SystemState:
@@ -102,6 +104,7 @@ class SystemController:
         handlers = {
             "CALIBRATE": self._handle_calibrate,
             "START": self._handle_start,
+            "CONTINUE": self._handle_continue,
             "PAUSE": self._handle_pause,
             "STOP": self._handle_stop,
             "STATUS": self._handle_status,
@@ -149,13 +152,20 @@ class SystemController:
         if not test_name:
             return {"error": "test_name is required"}
 
-        # Enforce: calibration must exist before starting a run.
+        # Auto-calibrate on START if no valid grid_map.json exists.
         from calibration.grid_mapper import GridMap
         try:
             _ = GridMap.load()
         except Exception:
-            logger.error("START rejected — no valid grid_map.json found. Please calibrate first.")
-            return {"error": "System is not calibrated. Run CALIBRATE from the capture phone before START."}
+            logger.info("START requested but system not calibrated — starting calibration flow")
+            self._pending_start_payload = payload
+            # Start calibration immediately (one attempt). If it fails, operator can retry by pressing START again.
+            self._alert_mgr.raise_alert(
+                AlertType.CALIBRATION_REQUIRED,
+                "Calibration required. Adjust the capture phone framing if needed, then press Retry Calibration.",
+            )
+            self._handle_calibrate({})
+            return {"status": "calibrating", "waiting_for": "calibration"}
 
         self._test_name = test_name
         self._run_ctx = create_run(test_name)
@@ -184,6 +194,27 @@ class SystemController:
         threading.Timer(1.0, self._request_capture).start()
 
         return {"status": "started", "run_id": self._run_ctx.run_id}
+
+    def _handle_continue(self, payload: dict) -> dict:
+        """
+        Operator-confirmed continue after a manual intervention (typically recalibration).
+        If a pending START exists (from auto-calibration on START), this starts the run.
+        If a run already exists and we're PAUSED, this resumes and requests capture.
+        """
+        # Pending START path (auto-calibration then continue)
+        if self._pending_start_payload is not None:
+            pending = self._pending_start_payload
+            self._pending_start_payload = None
+            logger.info("CONTINUE received — starting pending run after calibration")
+            return self._handle_start(pending)
+
+        # Resume path
+        if self._sm.state == SystemState.PAUSED:
+            self._sm.transition_to(SystemState.RUNNING, reason="operator_continue")
+            self._request_capture()
+            return {"status": "resumed"}
+
+        return {"status": "ignored", "reason": f"state={self._sm.state.value}"}
 
     def _handle_pause(self, payload: dict) -> dict:
         self._sm.transition_to(SystemState.PAUSED, reason="operator_pause")
@@ -322,14 +353,22 @@ class SystemController:
             self._state_before_calibration = None
 
             if previous in (SystemState.RUNNING, SystemState.PAUSED) and self._workflow:
-                target_state = previous
-                self._sm.transition_to(target_state, reason="calibration_complete_resume")
+                # Pause and await explicit operator CONTINUE before resuming.
+                self._sm.transition_to(SystemState.PAUSED, reason="calibration_complete_wait_continue")
                 self._broadcast_calibration_result(True, positions_data)
-                # Automatically re-capture the current question
-                self._request_capture()
+                self._alert_mgr.raise_alert(
+                    AlertType.CALIBRATION_COMPLETE,
+                    "Calibration successful. Press CONTINUE on the remote phone to resume.",
+                )
             else:
+                # Initial calibration from START: stay IDLE and wait for CONTINUE (which will start pending run).
                 self._sm.transition_to(SystemState.IDLE, reason="calibration_complete")
                 self._broadcast_calibration_result(True, positions_data)
+                if self._pending_start_payload is not None:
+                    self._alert_mgr.raise_alert(
+                        AlertType.CALIBRATION_COMPLETE,
+                        "Calibration successful. Press CONTINUE on the remote phone to start.",
+                    )
         else:
             logger.warning(
                 "Calibration failed: %s — existing grid_map.json left unchanged",
@@ -338,6 +377,10 @@ class SystemController:
             # Do not overwrite the existing grid map with defaults; require operator to fix framing.
             self._sm.transition_to(SystemState.IDLE, reason="calibration_failed")
             self._broadcast_calibration_result(False, {}, result.message)
+            self._alert_mgr.raise_alert(
+                AlertType.CALIBRATION_FAILED,
+                f"Calibration failed: {result.message}",
+            )
 
     def _broadcast_calibration_result(
         self, success: bool, positions: dict, error: str = ""

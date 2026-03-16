@@ -3,6 +3,8 @@ package com.simulato.app.capture
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.media.AudioManager
+import android.media.ToneGenerator
 import android.view.MotionEvent
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -46,7 +48,14 @@ class CaptureActivity : AppCompatActivity() {
 
         webSocket = SimulatoWebSocket(
             config = config,
-            onAlert = { _, _ -> }, // Capture doesn't handle alerts
+            onAlert = { alertType, message ->
+                runOnUiThread {
+                    if (alertType == "TEST_COMPLETE") {
+                        ToneGenerator(AudioManager.STREAM_ALARM, 100).startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 1500)
+                        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+                    }
+                }
+            },
             onConnectionChange = { connected ->
                 runOnUiThread {
                     binding.txtStatus.text = if (connected) "WS Connected" else "WS Disconnected"

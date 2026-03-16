@@ -79,17 +79,50 @@ def calibrate_from_screenshot(image_path: Path, resolution: tuple[int, int] = (1
 
     contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    option_candidates = []
-    for cnt in contours:
-        x, y, cw, ch = cv2.boundingRect(cnt)
-        aspect = cw / max(ch, 1)
-        area = cw * ch
-        if 1.5 < aspect < 15 and area > (w * h * 0.002) and area < (w * h * 0.15):
-            option_candidates.append((x, y, cw, ch))
+    def _find_option_candidates(cnts, min_area_factor: float, max_area_factor: float, min_aspect: float, max_aspect: float):
+        candidates = []
+        for cnt in cnts:
+            x, y, cw, ch = cv2.boundingRect(cnt)
+            aspect = cw / max(ch, 1)
+            area = cw * ch
+            if min_aspect < aspect < max_aspect and area > (w * h * min_area_factor) and area < (w * h * max_area_factor):
+                candidates.append((x, y, cw, ch))
+        candidates.sort(key=lambda r: r[1])
+        return candidates
 
-    option_candidates.sort(key=lambda r: r[1])
+    # First pass: stricter heuristics
+    option_candidates = _find_option_candidates(
+        contours,
+        min_area_factor=0.002,
+        max_area_factor=0.15,
+        min_aspect=1.5,
+        max_aspect=15.0,
+    )
 
-    logger.info("Found %d option-like regions", len(option_candidates))
+    logger.info("First-pass option-like regions: %d", len(option_candidates))
+
+    # If we didn't find enough, try a more relaxed second pass using a thresholded image.
+    if len(option_candidates) < 4:
+        logger.info("Running relaxed second-pass detection for option regions")
+        # Adaptive threshold to emphasize text/boxes
+        thr = cv2.adaptiveThreshold(
+            gray,
+            255,
+            cv2.ADAPTIVE_THRESH_MEAN_C,
+            cv2.THRESH_BINARY_INV,
+            25,
+            10,
+        )
+        thr_closed = cv2.morphologyEx(thr, cv2.MORPH_CLOSE, kernel, iterations=2)
+        contours2, _ = cv2.findContours(thr_closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        option_candidates = _find_option_candidates(
+            contours2,
+            min_area_factor=0.0005,
+            max_area_factor=0.20,
+            min_aspect=0.8,
+            max_aspect=15.0,
+        )
+        logger.info("Second-pass option-like regions: %d", len(option_candidates))
 
     gm = GridMap()
     gm.resolution = resolution

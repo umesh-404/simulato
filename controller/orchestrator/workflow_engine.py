@@ -96,6 +96,9 @@ class WorkflowEngine:
         self._api_calls = 0
         self._cache_hits = 0
         self._image_hash_hits = 0
+        self._expecting_next_change: bool = False
+        self._no_change_after_next_count: int = 0
+        self._last_raw_phash: str | None = None
 
         # Scroll-frame delivery mechanism
         self._scroll_frame_event = threading.Event()
@@ -182,6 +185,31 @@ class WorkflowEngine:
         with ExecutionTimer(f"question_{self._question_number}"):
             # Step 1: Receive and save image
             image_path = self._receiver.receive_image(image_data)
+
+            # End-of-test detection: after NEXT, the question should change.
+            # If we keep receiving essentially the same screen after NEXT, alert and pause.
+            raw_phash = self._compute_image_phash(image_path)
+            if self._expecting_next_change and raw_phash and self._last_raw_phash:
+                if raw_phash == self._last_raw_phash:
+                    self._no_change_after_next_count += 1
+                    logger.warning(
+                        "No screen change detected after NEXT (%d)",
+                        self._no_change_after_next_count,
+                    )
+                    if self._no_change_after_next_count >= 2:
+                        self._sm.force_error("Test complete or NEXT no longer advances")
+                        self._alerts.raise_alert(
+                            AlertType.TEST_COMPLETE,
+                            "Possible end of test: screen did not change after NEXT. Please check the exam UI.",
+                        )
+                        return None
+                else:
+                    # Changed — reset
+                    self._expecting_next_change = False
+                    self._no_change_after_next_count = 0
+
+            if raw_phash:
+                self._last_raw_phash = raw_phash
 
             # Step 2: Validate screen
             if LOCAL_AI_ASSIST_ENABLED:
@@ -378,6 +406,8 @@ class WorkflowEngine:
         result = self._verify.verify_click("NEXT")
         if result.verified:
             logger.info("NEXT click verified")
+            self._expecting_next_change = True
+            self._no_change_after_next_count = 0
             return
 
         logger.warning("NEXT click verification failed — retrying")
@@ -386,6 +416,8 @@ class WorkflowEngine:
 
         if result.verified:
             logger.info("NEXT retry click verified")
+            self._expecting_next_change = True
+            self._no_change_after_next_count = 0
             return
 
         logger.error("NEXT click verification FAILED after retry")

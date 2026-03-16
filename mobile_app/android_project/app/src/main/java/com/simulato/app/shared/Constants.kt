@@ -26,6 +26,7 @@ object Constants {
     object Commands {
         const val CALIBRATE = "CALIBRATE"
         const val START = "START"
+        const val CONTINUE = "CONTINUE"
         const val PAUSE = "PAUSE"
         const val STOP = "STOP"
         const val STATUS = "STATUS"
