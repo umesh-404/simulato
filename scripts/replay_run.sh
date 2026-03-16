@@ -17,7 +17,7 @@ cd "$PROJECT_DIR"
 
 if [ -z "${1:-}" ]; then
     echo "=== Available Runs ==="
-    python -c "
+    python3 -c "
 from controller.replay.run_loader import list_runs
 runs = list_runs()
 if not runs:
@@ -35,7 +35,7 @@ fi
 RUN_ID="$1"
 echo "=== Replaying run: $RUN_ID ==="
 
-python -c "
+python3 -c "
 from pathlib import Path
 from controller.replay.replay_engine import ReplayEngine
 from controller.replay.run_loader import load_run

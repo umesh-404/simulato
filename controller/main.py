@@ -31,6 +31,8 @@ def main() -> None:
     logger.info("=" * 60)
 
     controller = SystemController()
+    if not controller.connect_pi():
+        logger.warning("Pi not connected at startup; click commands will fail until Pi listener is reachable")
 
     set_command_callback(controller.handle_command)
     set_image_callback(controller.on_image_received)

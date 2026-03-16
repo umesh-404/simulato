@@ -63,7 +63,7 @@ GROK_API_KEY=your_key_here
 OLLAMA_MODEL=qwen2.5vl:7b-q4_K_M
 ```
 
-**Note:** For convenience, you can just run `start.bat` (Windows) or `bash scripts/start_controller.sh` (Linux) which will automatically load the `.env` file.
+**Note:** For convenience, run `start.bat` (Windows) or `bash scripts/start_controller.sh` (Linux). The controller process loads `.env` from project root at startup.
 
 ### Step 5: Configure the phones
 
@@ -79,7 +79,7 @@ ping <pi_ip_address>
 python -c "import socket; s=socket.socket(); s.connect(('<pi_ip_address>', 9000)); print('Pi OK'); s.close()"
 
 # From phone browser: test PC API
-# Navigate to: http://<pc_ip_address>:8000/status
+# Navigate to: http://<pc_ip_address>:8000/api/status
 ```
 
 ## Ports Required

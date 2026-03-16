@@ -21,7 +21,7 @@ from controller.alerts.alert_manager import AlertManager, AlertType, OperatorDec
 from controller.alerts.sound_player import play_alarm
 from controller.capture_pipeline.image_receiver import ImageReceiver
 from controller.hardware_control.click_dispatcher import ClickDispatcher
-from controller.hardware_control.pi_client import PiClient, PiConnectionError
+from controller.hardware_control.pi_client import PiClient, PiConnectionError, PiCommandError
 from controller.hardware_control.verification_engine import VerificationEngine
 from controller.mobile_api.api_server import queue_alert_for_broadcast
 from controller.orchestrator.state_machine import StateMachine, SystemState, InvalidTransitionError
@@ -121,6 +121,12 @@ class SystemController:
         except InvalidTransitionError as e:
             logger.error("Invalid state transition: %s", e)
             return {"error": str(e)}
+        except (PiConnectionError, PiCommandError, ValueError) as e:
+            logger.error("Command handling failed: %s", e)
+            return {"error": str(e)}
+        except Exception as e:
+            logger.exception("Unhandled error while handling command %s", command)
+            return {"error": f"Unhandled error: {e}"}
 
     def _handle_calibrate(self, payload: dict) -> dict:
         # Remember the state we are coming from so we can optionally resume
@@ -148,9 +154,12 @@ class SystemController:
         return {"status": "calibration_started", "waiting_for": "capture"}
 
     def _handle_start(self, payload: dict) -> dict:
-        test_name = payload.get("test_name", "")
+        test_name = (payload.get("test_name", "") or "").strip()
         if not test_name:
-            return {"error": "test_name is required"}
+            # Provide a deterministic default context for mobile clients
+            # that currently do not send test_name in START payload.
+            test_name = "default_test"
+            logger.warning("START received without test_name; using default_test")
 
         # Auto-calibrate on START if no valid grid_map.json exists.
         from calibration.grid_mapper import GridMap
@@ -158,7 +167,7 @@ class SystemController:
             _ = GridMap.load()
         except Exception:
             logger.info("START requested but system not calibrated — starting calibration flow")
-            self._pending_start_payload = payload
+            self._pending_start_payload = {**(payload or {}), "test_name": test_name}
             # Start calibration immediately (one attempt). If it fails, operator can retry by pressing START again.
             self._alert_mgr.raise_alert(
                 AlertType.CALIBRATION_REQUIRED,
@@ -448,6 +457,7 @@ class SystemController:
         if decision == OperatorDecision.SKIP_QUESTION:
             if self._workflow:
                 self._workflow.advance_to_next()
+                self._schedule_next_capture(1.0)
 
         elif decision == OperatorDecision.USE_DATABASE_ANSWER:
             self._execute_conflict_resolution(source="database")
@@ -457,6 +467,7 @@ class SystemController:
 
         elif decision == OperatorDecision.REQUERY_AI:
             logger.info("Re-query AI requested — awaiting next capture for re-processing")
+            self._request_capture()
 
         self._last_conflict_decision = None
 
@@ -489,6 +500,7 @@ class SystemController:
                     logger.info("Operator chose DB answer → clicking %s", option.matched_letter)
                     self._click_dispatcher.click_option(option.matched_letter)
                     self._workflow.advance_to_next()
+                    self._schedule_next_capture(1.0)
                     return
             logger.error("Could not resolve DB answer to a clickable option")
 
@@ -507,8 +519,19 @@ class SystemController:
                     logger.info("Operator chose AI answer → clicking %s", option.matched_letter)
                     self._click_dispatcher.click_option(option.matched_letter)
                     self._workflow.advance_to_next()
+                    self._schedule_next_capture(1.0)
                     return
             logger.error("Could not resolve AI answer to a clickable option")
+
+        self._alert_mgr.raise_alert(
+            AlertType.NO_OPTION_MATCH,
+            f"Could not resolve {source} answer to a clickable option",
+        )
+        self._sm.force_error(f"conflict_resolution_failed:{source}")
+
+    def _schedule_next_capture(self, delay_seconds: float) -> None:
+        import threading
+        threading.Timer(delay_seconds, self._request_capture).start()
 
     # ------------------------------------------------------------------
     # Pi connection management

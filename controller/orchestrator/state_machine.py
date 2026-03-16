@@ -25,7 +25,7 @@ class SystemState(str, Enum):
 # Legal transitions: source_state -> set of allowed target states.
 _VALID_TRANSITIONS: dict[SystemState, set[SystemState]] = {
     SystemState.IDLE: {SystemState.CALIBRATION, SystemState.RUNNING, SystemState.STOPPED},
-    SystemState.CALIBRATION: {SystemState.IDLE, SystemState.ERROR, SystemState.STOPPED},
+    SystemState.CALIBRATION: {SystemState.IDLE, SystemState.PAUSED, SystemState.ERROR, SystemState.STOPPED},
     SystemState.RUNNING: {SystemState.PAUSED, SystemState.ERROR, SystemState.STOPPED},
     SystemState.PAUSED: {SystemState.RUNNING, SystemState.ERROR, SystemState.STOPPED},
     SystemState.ERROR: {SystemState.PAUSED, SystemState.IDLE, SystemState.STOPPED},

@@ -7,6 +7,8 @@ import com.simulato.app.shared.AppConfig
 import com.simulato.app.shared.AppLogger
 import com.simulato.app.shared.Constants
 import okhttp3.*
+import android.os.Handler
+import android.os.Looper
 import java.util.concurrent.TimeUnit
 
 class SimulatoWebSocket(
@@ -23,12 +25,16 @@ class SimulatoWebSocket(
 
     private var webSocket: WebSocket? = null
     private val gson = Gson()
+    private val reconnectHandler = Handler(Looper.getMainLooper())
+    @Volatile
+    private var shouldReconnect = true
 
     @Volatile
     var isConnected = false
         private set
 
     fun connect() {
+        shouldReconnect = true
         val request = Request.Builder()
             .url(config.wsUrl)
             .build()
@@ -84,20 +90,30 @@ class SimulatoWebSocket(
 
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
                 AppLogger.i("WebSocket", "Closing: $code $reason")
-                webSocket.close(1000, null)
                 isConnected = false
                 onConnectionChange(false)
+                scheduleReconnect()
+            }
+
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                AppLogger.i("WebSocket", "Closed: $code $reason")
+                isConnected = false
+                onConnectionChange(false)
+                scheduleReconnect()
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 AppLogger.e("WebSocket", "Connection failed: ${t.message}", t)
                 isConnected = false
                 onConnectionChange(false)
+                scheduleReconnect()
             }
         })
     }
 
     fun disconnect() {
+        shouldReconnect = false
+        reconnectHandler.removeCallbacksAndMessages(null)
         webSocket?.close(1000, "User disconnect")
         isConnected = false
     }
@@ -108,5 +124,13 @@ class SimulatoWebSocket(
         } else {
             AppLogger.w("WebSocket", "Cannot send — not connected")
         }
+    }
+
+    private fun scheduleReconnect() {
+        if (!shouldReconnect) {
+            return
+        }
+        reconnectHandler.removeCallbacksAndMessages(null)
+        reconnectHandler.postDelayed({ connect() }, Constants.RECONNECT_DELAY_MS)
     }
 }

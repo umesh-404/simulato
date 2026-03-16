@@ -15,7 +15,7 @@ HIDPi is a third-party library that converts a Raspberry Pi 4B/5 into a USB HID 
 | **Mouse Report Size** | 5 bytes (`<BHH`) | 6 bytes (`<BHHb`) |
 | **Mouse Type** | Absolute (0-32767) | Absolute (0-32767) ✅ |
 | **Scroll Support** | ❌ Missing | ✅ Byte 6 = wheel |
-| **USB Gadget Setup** | `scripts/setup_pi_hid.sh` | `HIDPi_Setup.py` (systemd service) |
+| **USB Gadget Setup** | `HIDPi/HIDPi_Setup.py` | `HIDPi_Setup.py` (systemd service) |
 | **Click API** | `hid.click_at(x, y)` | `Mouse.click(LEFT, x, y)` |
 | **Keyboard** | Not used | Full keyboard emulation available |
 | **udev Rules** | None (requires `sudo`) | Auto-creates `99-hidg.rules` (`MODE=0666`) |
@@ -52,11 +52,10 @@ All three report writes in `hid_controller.py` (move, press, release) must be up
 
 ### 3. Replace Gadget Setup with HIDPi 
 
-Simulato's `start_pi.sh` currently calls `scripts/setup_pi_hid.sh` (a custom gadget setup). HIDPi's `HIDPi_Setup.py` is **more robust** (systemd auto-start, udev rules, proper uninstall, reboot handling).
+Simulato's `start_pi.sh` calls `HIDPi/HIDPi_Setup.py` for gadget setup. HIDPi's setup is **more robust** (systemd auto-start, udev rules, proper uninstall, reboot handling).
 
 **Change required:**
-- Delete `scripts/setup_pi_hid.sh` (it is replaced by `HIDPi_Setup.py`).
-- Update `start_pi.sh` to run `HIDPi_Setup.py` instead.
+- Keep using `HIDPi/HIDPi_Setup.py` as the canonical setup path.
 
 ### 4. Option A: Use HIDPi Library Directly (Recommended)
 
@@ -124,8 +123,7 @@ python3 -m raspberry_pi.command_listener
 |------|--------|---------|
 | `raspberry_pi/device_config.py` | **MODIFY** | Swap `hidg0` ↔ `hidg1` |
 | `raspberry_pi/hid_controller.py` | **MODIFY** | Fix report format to 6 bytes, OR replace with HIDPi imports |
-| `start_pi.sh` | **MODIFY** | Use `HIDPi_Setup.py` instead of `setup_pi_hid.sh` |
-| `scripts/setup_pi_hid.sh` | **DELETE** | Replaced by HIDPi |
+| `start_pi.sh` | **MODIFY** | Ensure it invokes `HIDPi/HIDPi_Setup.py` |
 | `docs/DEPLOYMENT_CHECKLIST.md` | **MODIFY** | Update Pi setup steps |
 | `README.md` | **MODIFY** | Update Pi setup section |
 

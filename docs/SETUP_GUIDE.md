@@ -101,9 +101,11 @@ cd HIDPi/library && pip install . && cd ~/simulato
 ### 2.3 Start the Listener (Every Session)
 ```bash
 cd ~/simulato
-source venv/bin/activate
 sudo ./start_pi.sh
 ```
+
+`start_pi.sh` automatically prefers `./venv/bin/python` or `./.venv/bin/python`
+if present, so you do not need to manually activate venv before running it.
 
 ### 2.4 Physical Connection
 - **USB-C cable** from Pi → Exam Laptop (for HID mouse/keyboard)

@@ -49,7 +49,7 @@ curl http://localhost:8000/api/status
 
 ## 4. Database
 
-- [ ] SQLite database initialized (`data/simulato.db` exists)
+- [ ] SQLite database initialized (`database/questions.db` exists)
 - [ ] Schema applied (tables: tests, questions, question_snapshots)
 - [ ] Test data loaded (if pre-populated question bank available)
 
@@ -58,7 +58,7 @@ curl http://localhost:8000/api/status
 - [ ] Simulato app installed
 - [ ] App configured with Controller IP address
 - [ ] Camera permissions granted
-- [ ] Device registered with controller (check `/status`)
+- [ ] Device registered with controller (check `/api/status`)
 - [ ] Test image upload successful
 
 ## 6. Remote Control Phone
@@ -102,7 +102,7 @@ curl http://localhost:8000/api/status
 
 - [ ] Logs directory created (`logs/`)
 - [ ] Event log writing confirmed
-- [ ] Run artifacts directory created (`data/runs/`)
+- [ ] Run artifacts directory created (`runs/`)
 - [ ] Screenshot storage working
 
 ---

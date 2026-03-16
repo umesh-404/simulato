@@ -10,6 +10,7 @@ Protocol: JSON over TCP (Communication Protocols Spec Section 11-12).
 import json
 import socket
 import sys
+from pathlib import Path
 from typing import Optional
 
 from raspberry_pi.device_config import LISTEN_HOST, LISTEN_PORT
@@ -24,6 +25,37 @@ def load_grid_map(grid_data: dict) -> None:
     GRID_MAP = {}
     for name, coords in grid_data.items():
         GRID_MAP[name] = (int(coords[0]), int(coords[1]))
+
+
+def _load_grid_map_from_file() -> None:
+    """Load optional fallback coordinates from local config/grid_map.json."""
+    root = Path(__file__).resolve().parent.parent
+    path = root / "config" / "grid_map.json"
+    if not path.exists():
+        print(f"[Pi] No local grid map found at {path}, waiting for command coords")
+        return
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        resolution = data.get("resolution", [1920, 1080])
+        grid_size = data.get("grid_size", [20, 20])
+        positions = data.get("positions", {})
+        width = max(1, int(resolution[0]))
+        height = max(1, int(resolution[1]))
+        cols = max(1, int(grid_size[0]))
+        rows = max(1, int(grid_size[1]))
+        converted: dict[str, tuple[int, int]] = {}
+        for name, grid_coords in positions.items():
+            gc = int(grid_coords[0])
+            gr = int(grid_coords[1])
+            px = int((gc + 0.5) * (width / cols))
+            py = int((gr + 0.5) * (height / rows))
+            ax = max(0, min(32767, int(round(px * 32767 / max(1, width - 1)))))
+            ay = max(0, min(32767, int(round(py * 32767 / max(1, height - 1)))))
+            converted[name] = (ax, ay)
+        load_grid_map(converted)
+        print(f"[Pi] Loaded fallback grid map with {len(converted)} positions")
+    except Exception as e:
+        print(f"[Pi] Failed to load local grid map: {e}")
 
 
 def _command_to_coords(command: str) -> Optional[tuple[int, int]]:
@@ -46,6 +78,7 @@ def _command_to_coords(command: str) -> Optional[tuple[int, int]]:
 def run_listener() -> None:
     """Main listener loop — accepts connections and processes commands."""
     hid = HIDController()
+    _load_grid_map_from_file()
 
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -93,12 +126,21 @@ def _handle_connection(conn: socket.socket, hid: HIDController) -> None:
 def _process_message(message: dict, hid: HIDController) -> dict:
     """Process a single command message."""
     msg_type = message.get("type", "")
-    command = message.get("payload", {}).get("command", "")
+    payload = message.get("payload", {})
+    command = payload.get("command", "")
 
     if msg_type != "PI_COMMAND":
         return {"type": "PI_RESPONSE", "payload": {"status": "error", "detail": f"Unknown type: {msg_type}"}}
 
-    coords = _command_to_coords(command)
+    coords_payload = payload.get("coords")
+    coords = None
+    if isinstance(coords_payload, list) and len(coords_payload) == 2:
+        try:
+            coords = (int(coords_payload[0]), int(coords_payload[1]))
+        except Exception:
+            coords = None
+    if coords is None:
+        coords = _command_to_coords(command)
     if coords is None:
         return {"type": "PI_RESPONSE", "payload": {"command": command, "status": "error", "detail": "Unknown command or no coordinates"}}
 

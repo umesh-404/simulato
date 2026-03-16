@@ -29,27 +29,28 @@ class HomeActivity : AppCompatActivity() {
         binding.editControllerPort.setText(config.controllerPort.toString())
 
         binding.btnCapture.setOnClickListener {
-            saveConfig()
+            if (!saveConfig()) return@setOnClickListener
             startActivity(Intent(this, CaptureActivity::class.java))
         }
 
         binding.btnRemote.setOnClickListener {
-            saveConfig()
+            if (!saveConfig()) return@setOnClickListener
             startActivity(Intent(this, RemoteControlActivity::class.java))
         }
     }
 
-    private fun saveConfig() {
+    private fun saveConfig(): Boolean {
         val config = SimulatoApp.instance.config
         val ip = binding.editControllerIp.text.toString().trim()
         val portStr = binding.editControllerPort.text.toString().trim()
 
         if (ip.isEmpty()) {
             Toast.makeText(this, "Controller IP is required", Toast.LENGTH_SHORT).show()
-            return
+            return false
         }
 
         config.controllerIp = ip
         config.controllerPort = portStr.toIntOrNull() ?: 8000
+        return true
     }
 }

@@ -5,6 +5,8 @@ REM
 REM Usage: start_controller.bat
 REM
 REM Optional env vars: PI_HOST, PI_PORT, CONTROLLER_PORT, GROK_API_KEY
+REM NOTE: This script starts controller only. Use repo-root start.bat for full
+REM Windows startup (Ollama + model check + controller).
 
 cd /d "%~dp0\.."
 

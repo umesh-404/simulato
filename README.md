@@ -59,6 +59,7 @@ Ensure the following 5 devices are connected to the **same WiFi network**:
    ```
    *(For Linux/Mac: `bash scripts/start_controller.sh`)*
 5. **Note the IP Address printed in the terminal** (e.g., `192.168.1.100`). Keep this terminal open.
+6. If remote START does not provide a test name, controller now uses `default_test` automatically.
 
 ## 4. Android Phones Setup
 *You need the single APK installed on both phones.*

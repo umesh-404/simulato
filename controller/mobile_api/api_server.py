@@ -250,7 +250,11 @@ async def _heartbeat_monitor_loop():
         await asyncio.sleep(5)
         now = datetime.now(timezone.utc)
         for device_id, info in list(registry._devices.items()):
-            last_hb = datetime.fromisoformat(info["last_heartbeat"])
+            try:
+                last_hb = datetime.fromisoformat(info["last_heartbeat"])
+            except Exception:
+                logger.warning("Invalid heartbeat timestamp for %s; marking as disconnected", device_id)
+                last_hb = datetime.fromtimestamp(0, tz=timezone.utc)
             elapsed = (now - last_hb).total_seconds()
             if elapsed > HEARTBEAT_TIMEOUT:
                 logger.warning(
@@ -287,14 +291,22 @@ async def heartbeat(req: HeartbeatRequest):
 async def upload_image(req: ImageUploadRequest):
     """Accept base64-encoded image from capture phone."""
     import base64
-    image_data = base64.b64decode(req.image)
+    try:
+        image_data = base64.b64decode(req.image)
+    except Exception as e:
+        logger.warning("Invalid base64 image from device %s: %s", req.device_id, e)
+        return JSONResponse(status_code=400, content={"error": "invalid image payload"})
     logger.info(
         "Image upload: device=%s, size=%d bytes, ts=%s",
         req.device_id, len(image_data), req.timestamp,
     )
 
     if _image_callback:
-        _image_callback(image_data, req.device_id)
+        try:
+            _image_callback(image_data, req.device_id)
+        except Exception as e:
+            logger.exception("Image callback failed for device %s", req.device_id)
+            return JSONResponse(status_code=500, content={"error": f"image processing failed: {e}"})
 
     return {"status": "received"}
 
@@ -318,6 +330,8 @@ async def remote_command(req: RemoteCommandRequest):
 
     if _command_callback:
         result = _command_callback(command, extra_payload or None)
+        if isinstance(result, dict) and result.get("error"):
+            return {"type": "COMMAND_ACK", "payload": {"status": "error", "error": result["error"], "result": result}}
         return {"type": "COMMAND_ACK", "payload": {"status": "accepted", "result": result}}
 
     return {"type": "COMMAND_ACK", "payload": {"status": "accepted"}}

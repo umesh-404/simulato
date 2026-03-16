@@ -140,6 +140,7 @@ class ApiClient(private val config: AppConfig) {
     }
 
     fun shutdown() {
+        client.dispatcher.cancelAll()
         client.dispatcher.executorService.shutdown()
         client.connectionPool.evictAll()
     }

@@ -8,6 +8,7 @@ import android.widget.AdapterView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import com.google.gson.JsonParser
 import com.simulato.app.databinding.ActivityRemoteControlBinding
 import com.simulato.app.networking.ApiClient
 import com.simulato.app.networking.SimulatoWebSocket
@@ -27,6 +28,7 @@ class RemoteControlActivity : AppCompatActivity() {
     private val statusHandler = Handler(Looper.getMainLooper())
     private val statusRunnable = object : Runnable {
         override fun run() {
+            if (isDestroyed) return
             fetchStatus()
             statusHandler.postDelayed(this, 3000L)
         }
@@ -92,6 +94,7 @@ class RemoteControlActivity : AppCompatActivity() {
             mapOf("provider" to provider)
         ) { success, response ->
             runOnUiThread {
+                if (isDestroyed) return@runOnUiThread
                 binding.txtAiProviderStatus.text = if (success) {
                     "Provider: $provider"
                 } else {
@@ -105,6 +108,7 @@ class RemoteControlActivity : AppCompatActivity() {
         binding.txtConnectionStatus.text = "Connecting..."
         apiClient.register(Constants.DeviceRoles.REMOTE_CONTROL) { success, response ->
             runOnUiThread {
+                if (isDestroyed) return@runOnUiThread
                 if (success) {
                     isRegistered = true
                     binding.txtConnectionStatus.text = "Registered"
@@ -128,16 +132,29 @@ class RemoteControlActivity : AppCompatActivity() {
         binding.txtLastAction.text = "Sending: $command..."
         apiClient.sendCommand(command) { success, response ->
             runOnUiThread {
-                binding.txtLastAction.text = if (success) {
+                if (isDestroyed) return@runOnUiThread
+                val responseError = extractCommandError(response)
+                binding.txtLastAction.text = if (success && responseError == null) {
                     if (command == Constants.Commands.CALIBRATE) {
                         "CALIBRATE: sent, waiting for result..."
                     } else {
                         "$command: OK"
                     }
                 } else {
-                    "$command: FAILED"
+                    if (responseError != null) "$command: FAILED ($responseError)" else "$command: FAILED"
                 }
             }
+        }
+    }
+
+    private fun extractCommandError(rawResponse: String): String? {
+        return try {
+            val json = JsonParser.parseString(rawResponse).asJsonObject
+            val payload = json.getAsJsonObject("payload")
+            val status = payload?.get("status")?.asString
+            if (status == "error") payload?.get("error")?.asString else null
+        } catch (_: Exception) {
+            null
         }
     }
 
@@ -145,6 +162,7 @@ class RemoteControlActivity : AppCompatActivity() {
         binding.txtLastAction.text = "Sending decision: $decision..."
         apiClient.sendDecision(decision) { success, _ ->
             runOnUiThread {
+                if (isDestroyed) return@runOnUiThread
                 binding.txtLastAction.text = if (success) "Decision sent: $decision" else "Decision failed"
                 hideDecisionPanel()
             }
@@ -154,6 +172,7 @@ class RemoteControlActivity : AppCompatActivity() {
     private fun fetchStatus() {
         apiClient.getStatus { success, body ->
             runOnUiThread {
+                if (isDestroyed) return@runOnUiThread
                 binding.txtSystemStatus.text = if (success) body else "Status unavailable"
             }
         }
@@ -162,6 +181,7 @@ class RemoteControlActivity : AppCompatActivity() {
     private fun onAlertReceived(alertType: String, message: String) {
         AppLogger.w("Remote", "Alert: $alertType — $message")
         runOnUiThread {
+            if (isDestroyed) return@runOnUiThread
             binding.txtAlertType.text = alertType
             binding.txtAlertMessage.text = message
             binding.layoutAlertPanel.visibility = View.VISIBLE
@@ -202,6 +222,7 @@ class RemoteControlActivity : AppCompatActivity() {
 
     private fun onCalibrationStatus(success: Boolean, message: String) {
         runOnUiThread {
+            if (isDestroyed) return@runOnUiThread
             binding.txtLastAction.text = message
             Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
         }
@@ -218,6 +239,7 @@ class RemoteControlActivity : AppCompatActivity() {
 
     private fun onWsConnectionChanged(connected: Boolean) {
         runOnUiThread {
+            if (isDestroyed) return@runOnUiThread
             binding.txtWsStatus.text = if (connected) "WebSocket: Connected" else "WebSocket: Disconnected"
         }
     }

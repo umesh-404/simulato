@@ -50,6 +50,7 @@ class CaptureActivity : AppCompatActivity() {
             config = config,
             onAlert = { alertType, message ->
                 runOnUiThread {
+                    if (isDestroyed) return@runOnUiThread
                     if (alertType == "TEST_COMPLETE") {
                         ToneGenerator(AudioManager.STREAM_ALARM, 100).startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 1500)
                         Toast.makeText(this, message, Toast.LENGTH_LONG).show()
@@ -58,6 +59,7 @@ class CaptureActivity : AppCompatActivity() {
             },
             onConnectionChange = { connected ->
                 runOnUiThread {
+                    if (isDestroyed) return@runOnUiThread
                     binding.txtStatus.text = if (connected) "WS Connected" else "WS Disconnected"
                 }
             },
@@ -68,6 +70,7 @@ class CaptureActivity : AppCompatActivity() {
             },
             onCalibrationResult = { success, message ->
                 runOnUiThread {
+                    if (isDestroyed) return@runOnUiThread
                     binding.txtStatus.text = message
                     Toast.makeText(this, message, Toast.LENGTH_LONG).show()
                 }
@@ -111,6 +114,7 @@ class CaptureActivity : AppCompatActivity() {
         binding.txtStatus.text = "Sending CALIBRATE command..."
         apiClient.sendCommand(Constants.Commands.CALIBRATE) { success, _ ->
             runOnUiThread {
+                if (isDestroyed) return@runOnUiThread
                 binding.txtStatus.text = if (success) "CALIBRATE command sent" else "Failed to send CALIBRATE"
             }
         }
@@ -119,6 +123,7 @@ class CaptureActivity : AppCompatActivity() {
     private fun registerDevice() {
         apiClient.register(Constants.DeviceRoles.CAPTURE) { success, response ->
             runOnUiThread {
+                if (isDestroyed) return@runOnUiThread
                 if (success) {
                     isRegistered = true
                     binding.txtStatus.text = "Registered as Capture Device"
@@ -161,7 +166,12 @@ class CaptureActivity : AppCompatActivity() {
     }
 
     private fun captureAndUpload() {
-        val capture = imageCapture ?: return
+        val capture = imageCapture
+        if (capture == null) {
+            binding.txtStatus.text = "Camera not ready"
+            Toast.makeText(this, "Camera is still initializing", Toast.LENGTH_SHORT).show()
+            return
+        }
         if (!isRegistered) {
             Toast.makeText(this, "Not registered with controller", Toast.LENGTH_SHORT).show()
             return
@@ -183,6 +193,7 @@ class CaptureActivity : AppCompatActivity() {
                 image.close()
 
                 runOnUiThread {
+                    if (isDestroyed) return@runOnUiThread
                     // Quick flash on the preview to indicate a capture occurred.
                     binding.viewFinder.animate().cancel()
                     binding.viewFinder.alpha = 1f
@@ -202,6 +213,7 @@ class CaptureActivity : AppCompatActivity() {
 
                 apiClient.uploadImage(jpegBytes) { success, response ->
                     runOnUiThread {
+                        if (isDestroyed) return@runOnUiThread
                         binding.txtStatus.text = if (success) "Upload complete" else "Upload failed: $response"
                     }
                 }
@@ -209,7 +221,10 @@ class CaptureActivity : AppCompatActivity() {
 
             override fun onError(exception: ImageCaptureException) {
                 AppLogger.e("Capture", "Capture failed", exception)
-                runOnUiThread { binding.txtStatus.text = "Capture failed" }
+                runOnUiThread {
+                    if (isDestroyed) return@runOnUiThread
+                    binding.txtStatus.text = "Capture failed"
+                }
             }
         })
     }

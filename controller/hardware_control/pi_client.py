@@ -72,7 +72,7 @@ class PiClient:
     def is_connected(self) -> bool:
         return self._socket is not None
 
-    def send_command(self, command: str) -> dict:
+    def send_command(self, command: str, coords: Optional[tuple[int, int]] = None) -> dict:
         """
         Send a command to the Pi and wait for ACK.
 
@@ -95,7 +95,7 @@ class PiClient:
         last_error: Optional[Exception] = None
         for attempt in range(1, COMMAND_MAX_RETRIES + 1):
             try:
-                return self._send_once(command, attempt)
+                return self._send_once(command, attempt, coords)
             except (socket.timeout, socket.error, json.JSONDecodeError) as e:
                 logger.warning(
                     "Pi command '%s' attempt %d/%d failed: %s",
@@ -107,15 +107,15 @@ class PiClient:
             f"Command '{command}' failed after {COMMAND_MAX_RETRIES} attempts: {last_error}"
         )
 
-    def _send_once(self, command: str, attempt: int) -> dict:
-        message = json.dumps({
-            "type": "PI_COMMAND",
-            "payload": {"command": command},
-        })
+    def _send_once(self, command: str, attempt: int, coords: Optional[tuple[int, int]]) -> dict:
+        payload: dict[str, object] = {"command": command}
+        if coords is not None:
+            payload["coords"] = [int(coords[0]), int(coords[1])]
+        message = json.dumps({"type": "PI_COMMAND", "payload": payload})
 
         with ExecutionTimer(f"pi_command_{command}_attempt_{attempt}"):
             self._socket.sendall((message + "\n").encode("utf-8"))
-            raw = self._socket.recv(4096).decode("utf-8").strip()
+            raw = self._recv_line()
 
         response = json.loads(raw)
         status = response.get("payload", {}).get("status", "unknown")
@@ -125,3 +125,19 @@ class PiClient:
             return response
         else:
             raise socket.error(f"Pi returned status '{status}' for command '{command}'")
+
+    def _recv_line(self) -> str:
+        """Receive a single newline-delimited JSON response frame."""
+        if not self._socket:
+            raise PiConnectionError("Not connected to Pi")
+        chunks: list[str] = []
+        while True:
+            piece = self._socket.recv(4096)
+            if not piece:
+                raise socket.error("Pi connection closed while waiting for response")
+            text = piece.decode("utf-8")
+            chunks.append(text)
+            combined = "".join(chunks)
+            if "\n" in combined:
+                line, _ = combined.split("\n", 1)
+                return line.strip()
