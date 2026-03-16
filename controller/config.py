@@ -54,6 +54,8 @@ DEFAULT_AI_PROVIDER = os.environ.get("DEFAULT_AI_PROVIDER", "gemini")
 LOCAL_AI_ASSIST_ENABLED = os.environ.get("LOCAL_AI_ASSIST_ENABLED", "True").lower() == "true"
 OLLAMA_API_URL = os.environ.get("OLLAMA_API_URL", "http://localhost:11434/api/chat")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5vl:7b-q4_K_M")
+OLLAMA_TIMEOUT_SECONDS = int(os.environ.get("OLLAMA_TIMEOUT_SECONDS", "8"))
+OLLAMA_COOLDOWN_SECONDS = int(os.environ.get("OLLAMA_COOLDOWN_SECONDS", "120"))
 
 # ---------------------------------------------------------------------------
 # Timeouts (seconds)

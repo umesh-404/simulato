@@ -8,12 +8,18 @@ and answer state checking.
 
 import base64
 import json
+import time
 from pathlib import Path
 from typing import Optional
 
 import requests
 
-from controller.config import OLLAMA_API_URL, OLLAMA_MODEL
+from controller.config import (
+    OLLAMA_API_URL,
+    OLLAMA_MODEL,
+    OLLAMA_TIMEOUT_SECONDS,
+    OLLAMA_COOLDOWN_SECONDS,
+)
 from controller.ai_pipeline.aux_prompts import (
     SCROLL_CHECK_PROMPT,
     ANSWER_VERIFICATION_PROMPT,
@@ -23,6 +29,7 @@ from controller.utils.logger import get_logger
 from controller.utils.timer import ExecutionTimer
 
 logger = get_logger("ollama_client")
+_OLLAMA_UNAVAILABLE_UNTIL = 0.0
 
 
 class OllamaAPIError(Exception):
@@ -60,14 +67,21 @@ def _call_ollama_task(image_path: Path, prompt: str) -> dict:
         "format": "json"
     }
 
+    global _OLLAMA_UNAVAILABLE_UNTIL
+    now = time.monotonic()
+    if now < _OLLAMA_UNAVAILABLE_UNTIL:
+        remaining = int(_OLLAMA_UNAVAILABLE_UNTIL - now)
+        raise OllamaAPIError(f"Ollama temporarily disabled for {remaining}s")
+
     with ExecutionTimer("ollama_aux_task"):
         try:
-            resp = requests.post(OLLAMA_API_URL, json=payload, timeout=60)
+            resp = requests.post(OLLAMA_API_URL, json=payload, timeout=OLLAMA_TIMEOUT_SECONDS)
             resp.raise_for_status()
             data = resp.json()
             return json.loads(data["message"]["content"])
         except Exception as e:
             logger.error("Ollama task failed: %s", e)
+            _OLLAMA_UNAVAILABLE_UNTIL = time.monotonic() + OLLAMA_COOLDOWN_SECONDS
             raise OllamaAPIError(f"Ollama task failed: {e}")
 
 

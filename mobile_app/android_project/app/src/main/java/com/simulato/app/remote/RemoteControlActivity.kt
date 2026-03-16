@@ -25,6 +25,7 @@ class RemoteControlActivity : AppCompatActivity() {
     private lateinit var heartbeatManager: HeartbeatManager
     private var isRegistered = false
     private var suppressSpinnerCallback = true  // Prevent initial trigger
+    private var pendingCommand: String? = null
     private val statusHandler = Handler(Looper.getMainLooper())
     private val statusRunnable = object : Runnable {
         override fun run() {
@@ -104,7 +105,7 @@ class RemoteControlActivity : AppCompatActivity() {
         }
     }
 
-    private fun registerDevice() {
+    private fun registerDevice(onRegistered: (() -> Unit)? = null) {
         binding.txtConnectionStatus.text = "Connecting..."
         apiClient.register(Constants.DeviceRoles.REMOTE_CONTROL) { success, response ->
             runOnUiThread {
@@ -116,7 +117,9 @@ class RemoteControlActivity : AppCompatActivity() {
                     webSocket.connect()
                     // Start live dashboard status updates
                     statusHandler.post(statusRunnable)
+                    onRegistered?.invoke()
                 } else {
+                    isRegistered = false
                     binding.txtConnectionStatus.text = "Registration failed"
                     Toast.makeText(this, "Failed: $response", Toast.LENGTH_LONG).show()
                 }
@@ -126,14 +129,32 @@ class RemoteControlActivity : AppCompatActivity() {
 
     private fun sendCommand(command: String) {
         if (!isRegistered) {
-            Toast.makeText(this, "Not registered", Toast.LENGTH_SHORT).show()
+            pendingCommand = command
+            binding.txtLastAction.text = "Re-registering..."
+            registerDevice {
+                pendingCommand?.let {
+                    pendingCommand = null
+                    sendCommandInternal(it, false)
+                }
+            }
             return
         }
+        sendCommandInternal(command, false)
+    }
+
+    private fun sendCommandInternal(command: String, retried: Boolean) {
         binding.txtLastAction.text = "Sending: $command..."
         apiClient.sendCommand(command) { success, response ->
             runOnUiThread {
                 if (isDestroyed) return@runOnUiThread
                 val responseError = extractCommandError(response)
+                if (responseError != null && !retried && responseError.contains("not registered", ignoreCase = true)) {
+                    isRegistered = false
+                    registerDevice {
+                        sendCommandInternal(command, true)
+                    }
+                    return@runOnUiThread
+                }
                 binding.txtLastAction.text = if (success && responseError == null) {
                     if (command == Constants.Commands.CALIBRATE) {
                         "CALIBRATE: sent, waiting for result..."
@@ -159,6 +180,11 @@ class RemoteControlActivity : AppCompatActivity() {
     }
 
     private fun sendDecision(decision: String) {
+        if (!isRegistered) {
+            Toast.makeText(this, "Re-registering...", Toast.LENGTH_SHORT).show()
+            registerDevice { sendDecision(decision) }
+            return
+        }
         binding.txtLastAction.text = "Sending decision: $decision..."
         apiClient.sendDecision(decision) { success, _ ->
             runOnUiThread {

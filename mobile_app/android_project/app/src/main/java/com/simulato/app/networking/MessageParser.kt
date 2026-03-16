@@ -31,13 +31,17 @@ object MessageParser {
     fun isSuccess(responseBody: String): Boolean {
         return try {
             val json = JsonParser.parseString(responseBody).asJsonObject
+            val type = json.get("type")?.asString ?: ""
 
             // Prefer top-level "status" if present
             val topStatus = json.get("status")?.asString
             val payloadStatus = json.getAsJsonObject("payload")?.get("status")?.asString
 
             val status = topStatus ?: payloadStatus
-            status == "accepted" || status == "received" || status == "ok"
+            status == "accepted" ||
+                status == "received" ||
+                status == "ok" ||
+                (status == null && type.endsWith("_ACK"))
         } catch (e: Exception) {
             false
         }
