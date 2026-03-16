@@ -45,6 +45,7 @@ from controller.config import (
     DEFAULT_AI_PROVIDER,
     GROK_API_KEY,
     GEMINI_API_KEY,
+    VERIFY_FRAME_TIMEOUT_SECONDS,
 )
 from controller.answer_engine.decision_engine import (
     decide_answer,
@@ -68,7 +69,7 @@ logger = get_logger("workflow_engine")
 
 MAX_SCROLL_FRAMES = 3
 SCROLL_FRAME_TIMEOUT = 10  # seconds
-VERIFY_FRAME_TIMEOUT = 6  # seconds
+VERIFY_FRAME_TIMEOUT = VERIFY_FRAME_TIMEOUT_SECONDS
 
 
 class WorkflowEngine:

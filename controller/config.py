@@ -66,6 +66,7 @@ HEARTBEAT_TIMEOUT = 15
 COMMAND_ACK_TIMEOUT = 3
 COMMAND_MAX_RETRIES = 3
 IMAGE_UPLOAD_TIMEOUT = 10
+VERIFY_FRAME_TIMEOUT_SECONDS = int(os.environ.get("VERIFY_FRAME_TIMEOUT_SECONDS", "18"))
 
 # ---------------------------------------------------------------------------
 # Question matching thresholds

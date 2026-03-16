@@ -1,0 +1,11 @@
+{
+  "question_id": 2,
+  "canonical_text": "what is the capital city of india|chennai|kolkata|mumbai|new delhi",
+  "option_a": "Mumbai",
+  "option_b": "New Delhi",
+  "option_c": "Kolkata",
+  "option_d": "Chennai",
+  "correct_answer": "New Delhi",
+  "answer_letter": "B",
+  "version": 1
+}
