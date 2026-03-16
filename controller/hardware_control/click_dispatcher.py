@@ -54,6 +54,17 @@ class ClickDispatcher:
             logger.warning("Could not resolve calibrated coords for %s: %s", key, e)
             return None
 
+    def _absolute_for_grid(self, grid_col: int, grid_row: int) -> tuple[int, int] | None:
+        """Convert a calibrated grid cell to absolute HID coordinates."""
+        try:
+            from calibration.grid_mapper import GridMap
+            gm = GridMap.load()
+            pixel = gm.grid_to_pixel(grid_col, grid_row)
+            return self._pixel_to_absolute(pixel[0], pixel[1], gm.resolution[0], gm.resolution[1])
+        except Exception as e:
+            logger.warning("Could not resolve absolute coords for grid (%d,%d): %s", grid_col, grid_row, e)
+            return None
+
     def click_option(self, letter: str) -> dict:
         """
         Click an answer option by letter.
@@ -78,6 +89,11 @@ class ClickDispatcher:
     def click_next(self) -> dict:
         logger.info("Dispatching CLICK_NEXT")
         coords = self._coords_for("NEXT")
+        return self._pi.send_command("CLICK_NEXT", coords=coords)
+
+    def click_next_at_grid(self, grid_col: int, grid_row: int) -> dict:
+        logger.info("Dispatching CLICK_NEXT at grid (%d,%d)", grid_col, grid_row)
+        coords = self._absolute_for_grid(grid_col, grid_row)
         return self._pi.send_command("CLICK_NEXT", coords=coords)
 
     def scroll_left(self) -> dict:

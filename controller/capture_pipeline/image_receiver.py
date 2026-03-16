@@ -34,7 +34,7 @@ class ImageReceiver:
 
     @property
     def latest_path(self) -> Optional[Path]:
-        return self._latest_path
+        return getattr(self, "_latest_path", None)
 
     def receive_image(self, image_data: bytes, device_id: str = "") -> Path:
         """

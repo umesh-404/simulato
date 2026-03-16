@@ -23,7 +23,8 @@ from controller.config import (
 from controller.ai_pipeline.aux_prompts import (
     SCROLL_CHECK_PROMPT,
     ANSWER_VERIFICATION_PROMPT,
-    SCREEN_STATE_PROMPT
+    SCREEN_STATE_PROMPT,
+    NEXT_BUTTON_PROMPT,
 )
 from controller.utils.logger import get_logger
 from controller.utils.timer import ExecutionTimer
@@ -124,3 +125,27 @@ def check_screen_state(image_path: Path) -> str:
         return state
     except Exception:
         return "OTHER"
+
+
+def locate_next_button_grid(image_path: Path) -> tuple[bool, Optional[tuple[int, int]]]:
+    """
+    Locate NEXT button in 20x20 grid coordinates.
+    Returns (next_visible, (grid_col, grid_row) or None).
+    """
+    try:
+        result = _call_ollama_task(image_path, NEXT_BUTTON_PROMPT)
+        visible = bool(result.get("next_visible", False))
+        col = result.get("grid_col")
+        row = result.get("grid_row")
+        if not visible or col is None or row is None:
+            logger.info("Local AI NEXT locator: not visible")
+            return (False, None)
+        col_i = int(col)
+        row_i = int(row)
+        if 0 <= col_i <= 19 and 0 <= row_i <= 19:
+            logger.info("Local AI NEXT locator: grid=(%d,%d)", col_i, row_i)
+            return (True, (col_i, row_i))
+        logger.warning("Local AI NEXT locator returned out-of-range coords: %s", result)
+        return (False, None)
+    except Exception:
+        return (False, None)

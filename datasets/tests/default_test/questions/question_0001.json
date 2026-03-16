@@ -1,0 +1,11 @@
+{
+  "question_id": 1,
+  "canonical_text": "i clicked the start from remote control device and then this started and it was stuck ther efor so much tine nnow and at i got this message 1 pull latest code on pc  android project 2 rebuildinstall updated android app apk remotecontrol phone must get this update 3 restart controller via  startbat 4 optional but recommended in env tune  ollamatimeoutseconds8  ollamacooldownseconds120 if you want zero dependency on local model while stabilizing   27 files i get this error in remote control now what does this mean|optional but recommended in env tune  ollamatimeoutseconds8  ollamacooldownseconds120|pull latest code on pc  android project|rebuildinstall updated android app apk remotecontrol phone must get this update|restart controller via  startbat",
+  "option_a": "Pull latest code on PC + Android project.",
+  "option_b": "Rebuild/install updated Android app APK (remote-control phone must get this update).",
+  "option_c": "Restart controller via: * start.bat",
+  "option_d": "(Optional but recommended) in .env tune: * OLLAMA_TIMEOUT_SECONDS=8 * OLLAMA_COOLDOWN_SECONDS=120",
+  "correct_answer": "Restart controller via: * start.bat",
+  "answer_letter": "C",
+  "version": 1
+}

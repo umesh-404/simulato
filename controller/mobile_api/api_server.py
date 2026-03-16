@@ -256,6 +256,10 @@ async def _heartbeat_monitor_loop():
                 logger.warning("Invalid heartbeat timestamp for %s; marking as disconnected", device_id)
                 last_hb = datetime.fromtimestamp(0, tz=timezone.utc)
             elapsed = (now - last_hb).total_seconds()
+            # If WebSocket is still alive, keep the device registered.
+            if device_id in registry._websockets:
+                registry._devices[device_id]["last_heartbeat"] = now.isoformat()
+                continue
             if elapsed > HEARTBEAT_TIMEOUT:
                 logger.warning(
                     "Device %s heartbeat timeout (%.1fs since last)",

@@ -33,6 +33,7 @@ from controller.ai_pipeline.ollama_client import (
     check_needs_scroll,
     check_is_answered,
     check_screen_state,
+    locate_next_button_grid,
     OllamaAPIError
 )
 from controller.ai_pipeline.response_parser import GrokResponse, ParseError
@@ -59,6 +60,7 @@ logger = get_logger("workflow_engine")
 
 MAX_SCROLL_FRAMES = 3
 SCROLL_FRAME_TIMEOUT = 10  # seconds
+VERIFY_FRAME_TIMEOUT = 6  # seconds
 
 
 class WorkflowEngine:
@@ -105,6 +107,10 @@ class WorkflowEngine:
         self._scroll_frame_event.set()  # Start set (not waiting)
         self._scroll_frame_data: Optional[bytes] = None
         self._is_waiting_flag: bool = False
+        self._verification_frame_event = threading.Event()
+        self._verification_frame_event.set()
+        self._verification_frame_data: Optional[bytes] = None
+        self._is_waiting_verification_flag: bool = False
         self._request_capture_callback: Optional[callable] = None
         self._ai_provider: str = DEFAULT_AI_PROVIDER  # "grok" or "gemini"
 
@@ -146,6 +152,11 @@ class WorkflowEngine:
         """True if the engine is currently blocking for a scroll capture."""
         return self._is_waiting_flag
 
+    @property
+    def is_waiting_for_verification(self) -> bool:
+        """True if the engine is currently waiting for a verification capture."""
+        return self._is_waiting_verification_flag
+
     def set_test_context(self, test_name: str) -> None:
         """Load or create the test context."""
         test = self._db.get_or_create_test(test_name)
@@ -164,6 +175,11 @@ class WorkflowEngine:
         """Called by system_controller when a scroll frame image is received."""
         self._scroll_frame_data = image_data
         self._scroll_frame_event.set()
+
+    def receive_verification_frame(self, image_data: bytes) -> None:
+        """Called by system_controller when a verification frame is received."""
+        self._verification_frame_data = image_data
+        self._verification_frame_event.set()
 
     def process_question(self, image_data: bytes) -> Optional[AnswerDecision]:
         """
@@ -403,7 +419,14 @@ class WorkflowEngine:
         if self._sm.state != SystemState.RUNNING:
             return
         logger.info("Advancing to next question")
-        self._click.click_next()
+        clicked_with_local_target = False
+        if LOCAL_AI_ASSIST_ENABLED and self._receiver.latest_path is not None:
+            visible, grid_pos = locate_next_button_grid(self._receiver.latest_path)
+            if visible and grid_pos is not None:
+                self._click.click_next_at_grid(grid_pos[0], grid_pos[1])
+                clicked_with_local_target = True
+        if not clicked_with_local_target:
+            self._click.click_next()
         self._log_event("click_next", {"after_question": self._question_number})
 
         result = self._verify.verify_click("NEXT")
@@ -472,11 +495,18 @@ class WorkflowEngine:
         to the CV-based verification engine.
         """
         if LOCAL_AI_ASSIST_ENABLED:
-            image_bytes = self._receiver.capture_immediate()
-            if image_bytes:
-                verify_path = self._receiver.receive_image(image_bytes)
+            self._verification_frame_event.clear()
+            self._verification_frame_data = None
+            self._is_waiting_verification_flag = True
+            if self._request_capture_callback:
+                self._request_capture_callback()
+            arrived = self._verification_frame_event.wait(timeout=VERIFY_FRAME_TIMEOUT)
+            self._is_waiting_verification_flag = False
+            if arrived and self._verification_frame_data is not None:
+                verify_path = self._receiver.receive_image(self._verification_frame_data)
                 verified, _ = check_is_answered(verify_path)
                 return verified
+            logger.warning("Verification capture timed out after %ds", VERIFY_FRAME_TIMEOUT)
             return False
         else:
             return self._verify.verify_click(letter).verified
@@ -524,9 +554,13 @@ class WorkflowEngine:
             additional_frames.append(frame_path)
             logger.info("Scroll frame %d captured: %s", i + 1, frame_path)
 
-            # Check if more scrolling is needed
-            scroll_result = self._scroll_detector.detect(frame_path)
-            if not scroll_result.needs_scroll:
+            # Check if more scrolling is needed (local AI first if enabled)
+            if LOCAL_AI_ASSIST_ENABLED:
+                still_needs_scroll = check_needs_scroll(frame_path)
+            else:
+                scroll_result = self._scroll_detector.detect(frame_path)
+                still_needs_scroll = scroll_result.needs_scroll
+            if not still_needs_scroll:
                 logger.info("No more scrolling needed after frame %d", i + 1)
                 break
 

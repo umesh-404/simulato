@@ -24,3 +24,16 @@ You are a screen analyzer for an exam system.
 Identify the current state of the screen.
 Return a JSON object: {"screen_type": "QUESTION" or "LOGIN" or "ERROR" or "OTHER"}
 """
+
+# Prompt for finding the NEXT button location in calibrated grid coordinates.
+NEXT_BUTTON_PROMPT = """
+You are a screen analyzer for an exam system.
+Look at this screenshot and locate the NEXT/Next button used to move to the next question.
+Return STRICT JSON in this format:
+{
+  "next_visible": true or false,
+  "grid_col": integer 0..19 or null,
+  "grid_row": integer 0..19 or null
+}
+If NEXT is not visible, return next_visible=false and null coordinates.
+"""
