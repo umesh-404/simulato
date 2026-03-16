@@ -187,7 +187,7 @@ All implementation follows:
 ## 3.11 Alert System (Phase 11)
 
 - [x] `controller/alerts/alert_manager.py`
-- [x] AlertType enum: AI_CONFLICT, INPUT_FAILURE, UNEXPECTED_SCREEN, DEVICE_DISCONNECTED, AI_PARSE_FAILURE, VERIFICATION_FAILURE
+- [x] AlertType enum: AI_CONFLICT, INPUT_FAILURE, UNEXPECTED_SCREEN, DEVICE_DISCONNECTED, AI_PARSE_FAILURE, VERIFICATION_FAILURE, CALIBRATION_REQUIRED, CALIBRATION_FAILED, CALIBRATION_COMPLETE, TEST_COMPLETE
 - [x] OperatorDecision enum: REQUERY_AI, SKIP_QUESTION, USE_DATABASE_ANSWER, USE_AI_ANSWER
 - [x] Sound callback wired to `play_alarm()`
 - [x] Notify callback wired to `queue_alert_for_broadcast()` (WebSocket relay)
@@ -201,7 +201,7 @@ All implementation follows:
 - [x] `POST /api/register` — device registration with role
 - [x] `POST /api/heartbeat` — heartbeat acknowledgement
 - [x] `POST /api/upload_image` — image upload from capture phone
-- [x] `POST /api/command` — remote commands (CALIBRATE, START, PAUSE, STOP, STATUS)
+- [x] `POST /api/command` — remote commands (CALIBRATE, START, CONTINUE, PAUSE, STOP, STATUS)
 - [x] `POST /api/operator_decision` — operator conflict resolution
 - [x] `GET /api/status` — system status query
 - [x] `WS /ws/{device_id}` — WebSocket for real-time alerts + heartbeats
@@ -210,6 +210,7 @@ All implementation follows:
 - [x] Background task: alert flush loop (0.5s interval)
 - [x] Background task: heartbeat monitor (5s interval, 15s timeout)
 - [x] Disconnection callback to SystemController
+- [x] Command guard: `START`/`CALIBRATE` rejected when no capture device is connected
 
 ## 3.13 Replay Engine (Phase 12)
 
@@ -227,7 +228,7 @@ All implementation follows:
 
 - [x] `controller/orchestrator/system_controller.py`
 - [x] Wires all subsystems: state machine, DB, alerts, Pi, click dispatcher, verification
-- [x] Command routing: CALIBRATE, START, PAUSE, STOP, STATUS, SET_AI_PROVIDER
+- [x] Command routing: CALIBRATE, START, CONTINUE, PAUSE, STOP, STATUS, SET_AI_PROVIDER
 - [x] Image routing to workflow engine
 - [x] Operator decision handling with conflict resolution
 - [x] USE_DATABASE_ANSWER / USE_AI_ANSWER execute the actual click
@@ -248,6 +249,7 @@ All implementation follows:
 - [x] Answer decision engine integration
 - [x] Click execution with `_verify_option_click()` (Local AI or CV) + retry + alert (Law 5)
 - [x] NEXT click with verification + retry + alert (Canonical Law 5)
+- [x] End-of-test detection (`TEST_COMPLETE`) when screen does not change after NEXT
 - [x] **Autonomous capture loop** — automatically trigger next capture after NEXT click
 - [x] Full snapshot storage per question (Canonical Law 10)
 - [x] Structured event logging for replay (Canonical Law 2)

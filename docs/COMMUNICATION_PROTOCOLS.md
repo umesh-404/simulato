@@ -183,6 +183,7 @@ Used by Remote Control Mode.
 Commands:
 
     START
+    CONTINUE
     PAUSE
     STOP
     STATUS
@@ -206,6 +207,18 @@ Controller response:
      "type": "COMMAND_ACK",
      "payload": {
        "status": "accepted"
+     }
+    }
+
+**Command guard:** `START` and `CALIBRATE` are accepted only when a capture
+device is currently registered. If no capture device is connected, the
+controller returns:
+
+    {
+     "type": "COMMAND_ACK",
+     "payload": {
+       "status": "error",
+       "error": "No capture device connected. Please connect the capture phone first."
      }
     }
 
@@ -248,6 +261,19 @@ Recalibrate request from Remote Control Mode:
      "timestamp": "ISO8601_TIMESTAMP",
      "payload": {
        "command": "CALIBRATE"
+     }
+    }
+
+`CONTINUE` request from Remote Control Mode (resume/start after successful calibration):
+
+    POST /api/command
+
+    {
+     "type": "REMOTE_COMMAND",
+     "device_id": "phone_remote_01",
+     "timestamp": "ISO8601_TIMESTAMP",
+     "payload": {
+       "command": "CONTINUE"
      }
     }
 

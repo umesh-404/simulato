@@ -1,7 +1,7 @@
 """
 Ollama Local Vision API client for Auxiliary Tasks.
 
-Sends screenshots to a local Ollama instance (e.g. qwen2.5-vl) 
+Sends screenshots to a local Ollama instance (e.g. qwen2.5vl:7b-q4_K_M) 
 to perform screen understanding tasks like scroll verification 
 and answer state checking.
 """

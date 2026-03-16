@@ -79,7 +79,7 @@ class ApiClient(private val config: AppConfig) {
                 addProperty("decision", decision)
             })
         }
-        post("/api/decision", payload, callback)
+        post("/api/operator_decision", payload, callback)
     }
 
     fun uploadImage(imageBytes: ByteArray, callback: (Boolean, String) -> Unit) {

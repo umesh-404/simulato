@@ -53,7 +53,7 @@ DEFAULT_AI_PROVIDER = os.environ.get("DEFAULT_AI_PROVIDER", "gemini")
 # Used for auxiliary tasks like scroll verification and state checking.
 LOCAL_AI_ASSIST_ENABLED = os.environ.get("LOCAL_AI_ASSIST_ENABLED", "True").lower() == "true"
 OLLAMA_API_URL = os.environ.get("OLLAMA_API_URL", "http://localhost:11434/api/chat")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5-vl")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5vl:7b-q4_K_M")
 
 # ---------------------------------------------------------------------------
 # Timeouts (seconds)

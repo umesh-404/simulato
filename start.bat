@@ -53,7 +53,7 @@ echo.
 echo [2/3] Checking local AI model...
 
 :: Read model name from .env if present, otherwise use default
-set "MODEL=qwen2.5-vl:7b"
+set "MODEL=qwen2.5vl:7b-q4_K_M"
 if exist ".env" (
     for /f "tokens=1,2 delims==" %%a in ('findstr /i "OLLAMA_MODEL" .env') do (
         set "MODEL=%%b"

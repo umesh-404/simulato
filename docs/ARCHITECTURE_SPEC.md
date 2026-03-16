@@ -267,14 +267,19 @@ and screen grid.
 
 The system must be **successfully calibrated before any run may enter
 RUNNING state**. A valid calibration is represented by a usable
-`grid_map.json` file; without it, START commands are rejected.
+`grid_map.json` file.
+
+If START is requested while no valid calibration exists, the controller
+automatically enters calibration first, then waits for explicit operator
+`CONTINUE` confirmation before starting the run.
 
 ### 5.1 Initial calibration
 
 Steps:
 
 1.  Operator positions capture phone
-2.  Operator presses CALIBRATE on the Capture Phone
+2.  Operator presses CALIBRATE on the Capture Phone, or START triggers
+    automatic calibration from the Remote Control flow
 3.  Capture phone sends screen image
 4.  PC detects exam layout
 5.  PC constructs grid map
@@ -282,6 +287,8 @@ Steps:
 7.  PC sends `CALIBRATION_RESULT` to both phones
 8.  Capture phone shows a short (2–3 second) “Calibration successful”
     confirmation
+9.  Remote phone shows blocking confirmation; operator presses CONTINUE
+    to start/resume pipeline
 
 Output file:
 

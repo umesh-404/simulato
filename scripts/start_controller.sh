@@ -58,7 +58,7 @@ echo ""
 echo "[2/3] Checking local AI model..."
 
 # Read model from .env or use default
-MODEL="qwen2.5-vl:7b"
+MODEL="qwen2.5vl:7b-q4_K_M"
 if [ -f ".env" ]; then
     ENV_MODEL=$(grep -i "^OLLAMA_MODEL=" .env 2>/dev/null | cut -d'=' -f2 | tr -d '[:space:]')
     if [ -n "$ENV_MODEL" ]; then

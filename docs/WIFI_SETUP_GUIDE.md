@@ -60,7 +60,7 @@ Create a `.env` file in the project root with the following configuration:
 PI_HOST=<pi_ip_address>
 PI_PORT=9000
 GROK_API_KEY=your_key_here
-OLLAMA_MODEL=qwen2.5-vl:7b
+OLLAMA_MODEL=qwen2.5vl:7b-q4_K_M
 ```
 
 **Note:** For convenience, you can just run `start.bat` (Windows) or `bash scripts/start_controller.sh` (Linux) which will automatically load the `.env` file.

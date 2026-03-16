@@ -50,12 +50,12 @@ Ensure the following 5 devices are connected to the **same WiFi network**:
      ```
    - **Ollama (Local Analyst):** Download from [ollama.com](https://ollama.com/).
      ```bash
-     ollama run qwen2.5-vl
+     ollama run qwen2.5vl:7b-q4_K_M
      ```
    - **Configuration:** Open `controller/config.py` and ensure `LOCAL_AI_ASSIST_ENABLED = True` to use the local Qwen model for screen analysis.
 4. Run the startup script (Windows):
    ```powershell
-   .\start_pc.ps1
+   .\start.bat
    ```
    *(For Linux/Mac: `bash scripts/start_controller.sh`)*
 5. **Note the IP Address printed in the terminal** (e.g., `192.168.1.100`). Keep this terminal open.
@@ -81,9 +81,12 @@ Ensure the following 5 devices are connected to the **same WiFi network**:
 ## 5. First Run & Calibration
 Now that everything is running and talking to the Mother PC:
 1. Make sure the Exam Laptop is displaying a testing screen with radio buttons (Option A, B, C, D) and a NEXT button.
-2. On your **Capture Phone**, tap **CALIBRATE**.
-   - The Capture Phone will snap a picture, the PC will process the OpenCV layout, and map the button coordinates automatically.
-   - **The system will not allow START until a valid calibration exists.**
-3. (Optional) From the **Remote Control** phone, you can also trigger a **Recalibrate** command during a run if clicks start failing verification; this will re-run the same calibration flow via the Capture Phone.
-4. After successful calibration, on your Remote Control phone, tap **START**.
-   - For each question it will capture, process the image, check the **local database first**, and if no match exists then call Grok/Gemini, find the answer, and tell the Pi to click it and press NEXT.
+2. On the **Remote Control** phone, tap **START**.
+   - If no valid `grid_map.json` exists yet, the controller automatically enters calibration and requests a capture from the Capture Phone.
+   - If calibration fails, the Remote phone shows a blocking alert with **Retry Calibration**.
+3. After calibration succeeds, press **CONTINUE** on the Remote phone.
+   - This starts (or resumes) the run from the controller.
+4. During the run:
+   - For each question it captures, preprocesses, checks DB/image-hash first, and calls Grok/Gemini only for new questions.
+   - It uses Pi HID to click answer + NEXT with visual verification.
+   - On failures, it pauses and alerts the Remote phone for explicit operator action.

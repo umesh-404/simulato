@@ -48,7 +48,7 @@ DEFAULT_AI_PROVIDER=gemini
 PI_HOST=192.168.1.xxx
 
 # Local AI model (auto-pulled by start.bat):
-OLLAMA_MODEL=qwen2.5-vl:7b
+OLLAMA_MODEL=qwen2.5vl:7b-q4_K_M
 LOCAL_AI_ASSIST_ENABLED=True
 ```
 
@@ -69,7 +69,7 @@ You should see:
 [1/3] Starting local AI server (Ollama)...
     -> Ollama server started successfully!
 [2/3] Checking local AI model...
-    -> Model "qwen2.5-vl:7b" already available.
+    -> Model "qwen2.5vl:7b-q4_K_M" already available.
 [3/3] Starting Python backend...
 =========================================
   Simulato Controller is starting...
@@ -121,7 +121,7 @@ sudo ./start_pi.sh
 3. Enter port: `8000`
 4. Select role: **Capture**
 5. Point the camera at the exam laptop screen
-6. Tap **CALIBRATE SCREEN MAP** (one-time; maps where A/B/C/D/NEXT buttons are)
+6. Keep the phone fixed on the stand; calibration can be triggered automatically from START.
 
 ### 3.2 Remote Control Phone
 1. Open the Simulato app
@@ -139,12 +139,23 @@ sudo ./start_pi.sh
 2. **PC:** Double-click `start.bat` → wait for "Controller is starting..."
 3. **Capture Phone:** Open app → enter PC IP → select Capture → aim at screen
 4. **Remote Phone:** Open app → enter PC IP → select Remote Control
-5. **Capture Phone:** Tap **CALIBRATE SCREEN MAP** (only needed once per exam layout)
-6. **Remote Phone:** Tap **START**
+5. **Remote Phone:** Tap **START**
+6. If calibration is required, system auto-enters calibration:
+   - On failure: remote shows blocking **Retry Calibration**
+   - On success: remote shows **CONTINUE** to start/resume
 
 ### What Happens Automatically
 ```
-Capture Phone captures screenshot
+START command arrives on controller
+        ↓
+If no valid grid_map.json: auto calibration requested
+        ↓
+Capture phone captures calibration screenshot
+        ↓
+If calibration fails → remote blocks on Retry Calibration
+If calibration succeeds → remote confirms CONTINUE
+        ↓
+Capture Phone captures question screenshot
         ↓
 Mother PC receives image via HTTP
         ↓

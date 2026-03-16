@@ -154,6 +154,10 @@ class WorkflowEngine:
         self._question_number = 0
         self._api_calls = 0
         self._cache_hits = 0
+        self._image_hash_hits = 0
+        self._expecting_next_change = False
+        self._no_change_after_next_count = 0
+        self._last_raw_phash = None
         logger.info("Test context set: %s (id=%d)", test_name, self._test_id)
 
     def receive_scroll_frame(self, image_data: bytes) -> None:
@@ -323,7 +327,6 @@ class WorkflowEngine:
                     source="database_image_hash",
                     question_id=cached_question.get("question_id"),
                 )
-                self._cache_hits += 1
             else:
                 decision = decide_answer(self._db, self._test_id, ai_response)  # type: ignore[arg-type]
 

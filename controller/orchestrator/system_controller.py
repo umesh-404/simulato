@@ -375,7 +375,13 @@ class SystemController:
                 result.message,
             )
             # Do not overwrite the existing grid map with defaults; require operator to fix framing.
-            self._sm.transition_to(SystemState.IDLE, reason="calibration_failed")
+            # If calibration failed during an active/paused run, stay PAUSED and wait for retry.
+            previous = self._state_before_calibration
+            self._state_before_calibration = None
+            if previous in (SystemState.RUNNING, SystemState.PAUSED) and self._workflow:
+                self._sm.transition_to(SystemState.PAUSED, reason="calibration_failed_wait_retry")
+            else:
+                self._sm.transition_to(SystemState.IDLE, reason="calibration_failed")
             self._broadcast_calibration_result(False, {}, result.message)
             self._alert_mgr.raise_alert(
                 AlertType.CALIBRATION_FAILED,
