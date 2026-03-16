@@ -51,6 +51,7 @@ PI_HOST=192.168.1.xxx
 OLLAMA_MODEL=qwen2.5vl:7b-q4_K_M
 LOCAL_AI_ASSIST_ENABLED=True
 OLLAMA_TIMEOUT_SECONDS=8
+OLLAMA_TARGET_TIMEOUT_SECONDS=12
 OLLAMA_COOLDOWN_SECONDS=120
 OLLAMA_KEEP_ALIVE=30m
 VERIFY_FRAME_TIMEOUT_SECONDS=18
@@ -178,9 +179,15 @@ If new → send to Grok/Gemini AI → get answer
         ↓
 Match answer text to option letter (A/B/C/D)
         ↓
+Local Qwen localizes exact click target (normalized coords) for that option
+        ↓
+Controller maps normalized target to calibrated HID absolute coordinates
+        ↓
 Pi clicks the correct option on exam laptop
         ↓
 Local AI verifies click was registered
+        ↓
+Local Qwen localizes NEXT target (fallback to calibrated grid if needed)
         ↓
 Pi clicks NEXT → auto-advance to next question
         ↓
@@ -204,7 +211,7 @@ When the AI gives a different answer than what's in the database:
 | Phone can't connect to PC | Ensure same WiFi network. Check firewall: allow port 8000 |
 | Pi `BrokenPipeError` | USB cable isn't connected to exam laptop, or cable is charge-only |
 | "HID devices not found" on Pi | Run `sudo python3 HIDPi/HIDPi_Setup.py` then `sudo reboot` |
-| Click lands on wrong option | Re-run calibration (CALIBRATE button on Capture phone) |
+| Click lands on wrong option | Keep full exam window in frame, rerun calibration, and ensure local AI assist is enabled for precise target localization (`LOCAL_AI_ASSIST_ENABLED=True`) |
 | Local AI responses are slow | Normal for first query (~5s). Subsequent queries are faster |
 | Cloud AI fails | Check API keys in `.env` for both Gemini and Grok. Controller now auto-falls back to alternate cloud provider once before alerting |
 

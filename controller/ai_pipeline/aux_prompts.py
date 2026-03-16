@@ -37,3 +37,34 @@ Return STRICT JSON in this format:
 }
 If NEXT is not visible, return next_visible=false and null coordinates.
 """
+
+# Prompt for precise option localization with normalized coordinates.
+OPTION_TARGET_PROMPT = """
+You are a screen analyzer for an exam system.
+Given the screenshot, locate the exact clickable center of option {LETTER}.
+Return STRICT JSON in this format:
+{
+  "found": true or false,
+  "center_x": number between 0.0 and 1.0 or null,
+  "center_y": number between 0.0 and 1.0 or null
+}
+Rules:
+- center_x and center_y are normalized to full image width/height.
+- If option {LETTER} is not visible or uncertain, return found=false and null coordinates.
+- Prefer the center of the option's radio circle or main clickable row.
+"""
+
+# Prompt for precise NEXT button localization with normalized coordinates.
+NEXT_BUTTON_TARGET_PROMPT = """
+You are a screen analyzer for an exam system.
+Locate the clickable center of the NEXT/Next button.
+Return STRICT JSON in this format:
+{
+  "found": true or false,
+  "center_x": number between 0.0 and 1.0 or null,
+  "center_y": number between 0.0 and 1.0 or null
+}
+Rules:
+- center_x and center_y are normalized to full image width/height.
+- If NEXT is not visible or uncertain, return found=false and null coordinates.
+"""

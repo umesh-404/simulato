@@ -350,8 +350,10 @@ screen understanding and **never used to answer questions**:
         new screen and each scroll frame**.
     -   Answer Verification (detecting post-click highlights using
         dedicated verification captures).
-    -   NEXT Button Localization (suggesting NEXT position in the
-        calibrated grid for more robust NEXT clicks).
+    -   Option Target Localization (returning precise normalized click
+        coordinates for A/B/C/D).
+    -   NEXT Button Localization (returning precise normalized click
+        coordinates, with calibrated-grid fallback).
     -   Screen Type Identification (login vs. question vs. error).
 
 The local analyst utilizes Ollama (e.g. `qwen2.5vl:7b-q4_K_M`) for
@@ -403,9 +405,11 @@ All input actions must follow a verification workflow.
 
 Sequence:
 
-1.  send click command to Raspberry Pi
-2.  capture screenshot
-3.  detect visual highlight
+1.  derive click point (Local Qwen normalized target first, calibrated fallback)
+2.  map to HID absolute coordinates
+3.  send click command to Raspberry Pi
+4.  capture screenshot
+5.  detect visual highlight
 
 If highlight detected:
 

@@ -30,8 +30,15 @@ class GridMap:
 
     def __init__(self) -> None:
         self.resolution: tuple[int, int] = (1920, 1080)
+        self.capture_resolution: tuple[int, int] = (1920, 1080)
         self.grid_size: tuple[int, int] = (20, 20)
         self.positions: dict[str, tuple[int, int]] = {}
+        self.transform: dict[str, float] = {
+            "scale_x": 1.0,
+            "scale_y": 1.0,
+            "offset_x": 0.0,
+            "offset_y": 0.0,
+        }
 
     @property
     def cell_width(self) -> float:
@@ -54,13 +61,30 @@ class GridMap:
             return None
         return self.grid_to_pixel(grid_pos[0], grid_pos[1])
 
+    def capture_to_screen_pixel(self, capture_x: int, capture_y: int) -> tuple[int, int]:
+        """
+        Map capture-image pixel coordinates into exam-screen pixel coordinates
+        using calibration transform.
+        """
+        scale_x = float(self.transform.get("scale_x", 1.0))
+        scale_y = float(self.transform.get("scale_y", 1.0))
+        offset_x = float(self.transform.get("offset_x", 0.0))
+        offset_y = float(self.transform.get("offset_y", 0.0))
+        sx = int(round(capture_x * scale_x + offset_x))
+        sy = int(round(capture_y * scale_y + offset_y))
+        sx = max(0, min(max(1, self.resolution[0]) - 1, sx))
+        sy = max(0, min(max(1, self.resolution[1]) - 1, sy))
+        return (sx, sy)
+
     def save(self, path: Optional[Path] = None) -> None:
         path = path or GRID_MAP_PATH
         path.parent.mkdir(parents=True, exist_ok=True)
         data = {
             "resolution": list(self.resolution),
+            "capture_resolution": list(self.capture_resolution),
             "grid_size": list(self.grid_size),
             "positions": {k: list(v) for k, v in self.positions.items()},
+            "transform": self.transform,
         }
         path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         logger.info("Grid map saved to %s", path)
@@ -74,8 +98,17 @@ class GridMap:
         data = json.loads(path.read_text(encoding="utf-8"))
         gm = cls()
         gm.resolution = tuple(data["resolution"])
+        capture_resolution = data.get("capture_resolution", data["resolution"])
+        gm.capture_resolution = tuple(capture_resolution)
         gm.grid_size = tuple(data["grid_size"])
         gm.positions = {k: tuple(v) for k, v in data["positions"].items()}
+        transform = data.get("transform", {})
+        gm.transform = {
+            "scale_x": float(transform.get("scale_x", 1.0)),
+            "scale_y": float(transform.get("scale_y", 1.0)),
+            "offset_x": float(transform.get("offset_x", 0.0)),
+            "offset_y": float(transform.get("offset_y", 0.0)),
+        }
         logger.info(
             "Grid map loaded: %dx%d, %d positions",
             gm.resolution[0], gm.resolution[1], len(gm.positions),
@@ -87,6 +120,7 @@ class GridMap:
         """Create a default grid map with standard exam layout positions."""
         gm = cls()
         gm.resolution = (1920, 1080)
+        gm.capture_resolution = (1920, 1080)
         gm.grid_size = (20, 20)
         gm.positions = {
             "A": (15, 8),

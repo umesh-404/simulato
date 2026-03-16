@@ -34,6 +34,8 @@ from controller.ai_pipeline.ollama_client import (
     check_is_answered,
     check_screen_state,
     locate_next_button_grid,
+    locate_option_target,
+    locate_next_button_target,
     OllamaAPIError
 )
 from controller.ai_pipeline.response_parser import GrokResponse, ParseError
@@ -422,10 +424,15 @@ class WorkflowEngine:
         logger.info("Advancing to next question")
         clicked_with_local_target = False
         if LOCAL_AI_ASSIST_ENABLED and self._receiver.latest_path is not None:
-            visible, grid_pos = locate_next_button_grid(self._receiver.latest_path)
-            if visible and grid_pos is not None:
-                self._click.click_next_at_grid(grid_pos[0], grid_pos[1])
+            norm_target = locate_next_button_target(self._receiver.latest_path)
+            if norm_target is not None:
+                self._click.click_at_normalized(norm_target[0], norm_target[1], command="CLICK_NEXT")
                 clicked_with_local_target = True
+            else:
+                visible, grid_pos = locate_next_button_grid(self._receiver.latest_path)
+                if visible and grid_pos is not None:
+                    self._click.click_next_at_grid(grid_pos[0], grid_pos[1])
+                    clicked_with_local_target = True
         if not clicked_with_local_target:
             self._click.click_next()
         self._log_event("click_next", {"after_question": self._question_number})
@@ -460,7 +467,7 @@ class WorkflowEngine:
 
         Retry once on failure, then alert.
         """
-        self._click.click_option(letter)
+        self._click_option_best_target(letter)
         
         # Give UI time to update
         time.sleep(1.0)
@@ -473,7 +480,7 @@ class WorkflowEngine:
             return
 
         logger.warning("Click verification failed for %s — retrying", letter)
-        self._click.click_option(letter)
+        self._click_option_best_target(letter)
         time.sleep(1.0)
         verified = self._verify_option_click(letter)
 
@@ -487,6 +494,18 @@ class WorkflowEngine:
             AlertType.VERIFICATION_FAILURE,
             f"Click verification failed for option {letter} after retry",
         )
+
+    def _click_option_best_target(self, letter: str) -> None:
+        """
+        Click an option using precise local-AI target when available,
+        otherwise fallback to calibrated static option mapping.
+        """
+        if LOCAL_AI_ASSIST_ENABLED and self._receiver.latest_path is not None:
+            target = locate_option_target(self._receiver.latest_path, letter)
+            if target is not None:
+                self._click.click_at_normalized(target[0], target[1], command=f"CLICK_{letter.strip().upper()}")
+                return
+        self._click.click_option(letter)
 
     def _verify_option_click(self, letter: str) -> bool:
         """

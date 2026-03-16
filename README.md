@@ -89,5 +89,7 @@ Now that everything is running and talking to the Mother PC:
    - This starts (or resumes) the run from the controller.
 4. During the run:
    - For each question it captures, preprocesses, checks DB/image-hash first, and calls Grok/Gemini only for new questions.
-   - It uses Pi HID to click answer + NEXT with visual verification.
+   - It uses local Qwen first to localize precise normalized click targets (option and NEXT), then sends calibrated HID absolute clicks to Pi.
+   - If local targeting is unavailable/slow, it falls back to calibrated CV/grid coordinates.
+   - It verifies answer selection after click using a dedicated capture before advancing.
    - On failures, it pauses and alerts the Remote phone for explicit operator action.

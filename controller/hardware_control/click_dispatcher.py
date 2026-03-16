@@ -65,6 +65,23 @@ class ClickDispatcher:
             logger.warning("Could not resolve absolute coords for grid (%d,%d): %s", grid_col, grid_row, e)
             return None
 
+    def _absolute_for_normalized(self, norm_x: float, norm_y: float) -> tuple[int, int] | None:
+        """Convert normalized [0,1] capture-space coordinates to HID absolute coordinates."""
+        try:
+            from calibration.grid_mapper import GridMap
+            gm = GridMap.load()
+            capture_w, capture_h = gm.capture_resolution
+            px = int(round(max(0.0, min(1.0, norm_x)) * max(1, capture_w - 1)))
+            py = int(round(max(0.0, min(1.0, norm_y)) * max(1, capture_h - 1)))
+            screen_x, screen_y = gm.capture_to_screen_pixel(px, py)
+            return self._pixel_to_absolute(screen_x, screen_y, gm.resolution[0], gm.resolution[1])
+        except Exception as e:
+            logger.warning(
+                "Could not resolve absolute coords for normalized target (%.4f, %.4f): %s",
+                norm_x, norm_y, e,
+            )
+            return None
+
     def click_option(self, letter: str) -> dict:
         """
         Click an answer option by letter.
@@ -95,6 +112,19 @@ class ClickDispatcher:
         logger.info("Dispatching CLICK_NEXT at grid (%d,%d)", grid_col, grid_row)
         coords = self._absolute_for_grid(grid_col, grid_row)
         return self._pi.send_command("CLICK_NEXT", coords=coords)
+
+    def click_at_normalized(self, norm_x: float, norm_y: float, command: str = "CLICK_NEXT") -> dict:
+        """
+        Click at a normalized target coordinate.
+
+        Args:
+            norm_x: X coordinate in [0, 1].
+            norm_y: Y coordinate in [0, 1].
+            command: Pi command label for logging/protocol consistency.
+        """
+        logger.info("Dispatching %s at normalized (%.4f, %.4f)", command, norm_x, norm_y)
+        coords = self._absolute_for_normalized(norm_x, norm_y)
+        return self._pi.send_command(command, coords=coords)
 
     def scroll_left(self) -> dict:
         logger.info("Dispatching SCROLL_LEFT")

@@ -126,6 +126,13 @@ def calibrate_from_screenshot(image_path: Path, resolution: tuple[int, int] = (1
 
     gm = GridMap()
     gm.resolution = resolution
+    gm.capture_resolution = (w, h)
+    gm.transform = {
+        "scale_x": float(resolution[0]) / float(max(1, w)),
+        "scale_y": float(resolution[1]) / float(max(1, h)),
+        "offset_x": 0.0,
+        "offset_y": 0.0,
+    }
     gm.grid_size = (20, 20)
 
     if len(option_candidates) < 4:
