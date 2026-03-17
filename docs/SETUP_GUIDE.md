@@ -65,6 +65,8 @@ OLLAMA_TARGET_TIMEOUT_SECONDS=12
 OLLAMA_COOLDOWN_SECONDS=120
 OLLAMA_KEEP_ALIVE=30m
 VERIFY_FRAME_TIMEOUT_SECONDS=18
+AI_API_MAX_RETRIES=2
+AI_API_BACKOFF_BASE_SECONDS=1.0
 OCR_LAYOUT_PRIMARY_ENABLED=True
 OCR_MIN_WORD_CONFIDENCE=45
 OCR_TIMEOUT_SECONDS=6
@@ -238,6 +240,8 @@ When the AI gives a different answer than what's in the database:
 | START shows Pi not connected | Start Pi listener (`sudo ./start_pi.sh`) and verify `.env` has correct `PI_HOST`/`PI_PORT` |
 | OCR targeting not working | Install Tesseract OCR and set `TESSERACT_CMD` if not on PATH |
 | Remote shows WebSocket 403 / heartbeat 404 | Device registration was lost (usually after controller restart). App now auto re-registers; if needed reopen app once |
+| `ConnectionResetError 10054` during cloud AI call | Transient internet/provider reset. Controller now wraps it as AI provider failure and auto-falls back to alternate provider once |
+| Cloud AI intermittently fails | Retries use exponential backoff (`AI_API_BACKOFF_BASE_SECONDS`: 1s, 2s, ...) before final failure |
 | Click lands on wrong option | Keep full exam window in frame, rerun calibration, and ensure local AI assist is enabled for precise target localization (`LOCAL_AI_ASSIST_ENABLED=True`) |
 | Local AI responses are slow | Normal for first query (~5s). Subsequent queries are faster |
 | Cloud AI fails | Check API keys in `.env` for both Gemini and Grok. Controller now auto-falls back to alternate cloud provider once before alerting |

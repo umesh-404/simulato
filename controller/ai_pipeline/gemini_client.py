@@ -10,12 +10,19 @@ Network usage: Internet (Canonical Law 15 — only AI API calls use internet).
 
 import base64
 import json
+import time
 from pathlib import Path
 from typing import Optional
 
 import requests
 
-from controller.config import GEMINI_API_URL, GEMINI_API_KEY, GEMINI_MODEL
+from controller.config import (
+    GEMINI_API_URL,
+    GEMINI_API_KEY,
+    GEMINI_MODEL,
+    AI_API_MAX_RETRIES,
+    AI_API_BACKOFF_BASE_SECONDS,
+)
 from controller.ai_pipeline.prompt_builder import build_grok_messages
 from controller.ai_pipeline.response_parser import parse_grok_response, GrokResponse, ParseError
 from controller.utils.logger import get_logger
@@ -23,7 +30,7 @@ from controller.utils.timer import ExecutionTimer
 
 logger = get_logger("gemini_client")
 
-MAX_RETRIES = 2
+MAX_RETRIES = AI_API_MAX_RETRIES
 
 
 class GeminiAPIError(Exception):
@@ -57,19 +64,27 @@ def _call_api(messages: list[dict]) -> str:
         "temperature": 0,
     }
 
-    with ExecutionTimer("gemini_api_request"):
-        resp = requests.post(
-            GEMINI_API_URL,
-            headers=headers,
-            json=payload,
-            timeout=30,
-        )
+    try:
+        with ExecutionTimer("gemini_api_request"):
+            resp = requests.post(
+                GEMINI_API_URL,
+                headers=headers,
+                json=payload,
+                timeout=30,
+            )
+    except requests.RequestException as e:
+        logger.error("Gemini API request failed: %s", e)
+        raise GeminiAPIError(f"Gemini API request failed: {e}") from e
 
     if resp.status_code != 200:
         logger.error("Gemini API HTTP %d: %s", resp.status_code, resp.text[:300])
         raise GeminiAPIError(f"Gemini API returned HTTP {resp.status_code}: {resp.text[:200]}")
 
-    data = resp.json()
+    try:
+        data = resp.json()
+    except ValueError as e:
+        logger.error("Gemini API returned invalid JSON: %s", resp.text[:300])
+        raise GeminiAPIError(f"Gemini API returned invalid JSON: {e}") from e
     try:
         raw_text = data["choices"][0]["message"]["content"]
     except (KeyError, IndexError) as e:
@@ -116,5 +131,10 @@ def query_gemini(image_path: Path) -> GrokResponse:
         except GeminiAPIError as e:
             logger.error("API error on attempt %d: %s", attempt, e)
             last_error = e
+
+        if attempt < MAX_RETRIES:
+            backoff = max(0.0, AI_API_BACKOFF_BASE_SECONDS * (2 ** (attempt - 1)))
+            logger.info("Gemini retry backoff: %.2fs", backoff)
+            time.sleep(backoff)
 
     raise last_error

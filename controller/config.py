@@ -45,6 +45,8 @@ GROK_MODEL = os.environ.get("GROK_MODEL", "grok-2-vision-latest")
 GEMINI_API_URL = os.environ.get("GEMINI_API_URL", "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+AI_API_MAX_RETRIES = int(os.environ.get("AI_API_MAX_RETRIES", "2"))
+AI_API_BACKOFF_BASE_SECONDS = float(os.environ.get("AI_API_BACKOFF_BASE_SECONDS", "1.0"))
 
 # Active AI provider for primary question solving ("grok" or "gemini")
 DEFAULT_AI_PROVIDER = os.environ.get("DEFAULT_AI_PROVIDER", "gemini")
