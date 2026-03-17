@@ -6,7 +6,10 @@ import com.simulato.app.shared.Constants
 import java.util.Timer
 import java.util.TimerTask
 
-class HeartbeatManager(private val apiClient: ApiClient) {
+class HeartbeatManager(
+    private val apiClient: ApiClient,
+    private val onNotRegistered: (() -> Unit)? = null,
+) {
 
     private var timer: Timer? = null
 
@@ -17,6 +20,7 @@ class HeartbeatManager(private val apiClient: ApiClient) {
     @Volatile
     var lastAckSuccess = false
         private set
+    private var consecutiveFailures = 0
 
     @Synchronized
     fun start() {
@@ -26,10 +30,18 @@ class HeartbeatManager(private val apiClient: ApiClient) {
         timer = Timer("heartbeat", true).also {
             it.scheduleAtFixedRate(object : TimerTask() {
                 override fun run() {
-                    apiClient.sendHeartbeat { success, _ ->
+                    apiClient.sendHeartbeat { success, response ->
                         lastAckSuccess = success
                         if (!success) {
+                            consecutiveFailures += 1
                             AppLogger.w("Heartbeat", "Heartbeat ACK failed")
+                            if (response.contains("not registered", ignoreCase = true) ||
+                                consecutiveFailures >= Constants.MAX_RETRIES
+                            ) {
+                                onNotRegistered?.invoke()
+                            }
+                        } else {
+                            consecutiveFailures = 0
                         }
                     }
                 }

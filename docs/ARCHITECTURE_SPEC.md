@@ -344,8 +344,10 @@ Simulato uses a **Tiered AI Strategy**:
     The active provider is selected by the operator from the Remote
     Control phone dropdown and can be switched at any time via the
     `SET_AI_PROVIDER` command.
-2.  **Auxiliary Analyst (Local Qwen):** Responsible for high-frequency
+2.  **Auxiliary Analyst Layer (OCR + Local Qwen):** Responsible for
 screen understanding and **never used to answer questions**:
+    -   OCR Full-Screen Layout Pass on each processed question frame
+        (primary source for option/NEXT target localization).
     -   Scroll Verification (detecting clipped text), called for **every
         new screen and each scroll frame**.
     -   Answer Verification (detecting post-click highlights using
@@ -405,7 +407,7 @@ All input actions must follow a verification workflow.
 
 Sequence:
 
-1.  derive click point (Local Qwen normalized target first, calibrated fallback)
+1.  derive click point (OCR first, then Local Qwen, then calibrated fallback)
 2.  map to HID absolute coordinates
 3.  send click command to Raspberry Pi
 4.  capture screenshot

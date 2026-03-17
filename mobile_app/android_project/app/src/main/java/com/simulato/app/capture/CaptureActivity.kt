@@ -33,6 +33,7 @@ class CaptureActivity : AppCompatActivity() {
     private lateinit var cameraExecutor: ExecutorService
     private var imageCapture: ImageCapture? = null
     private var isRegistered = false
+    @Volatile private var isRegistering = false
     private var zoomLevel = 1.0f
     private var camera: Camera? = null
 
@@ -43,7 +44,13 @@ class CaptureActivity : AppCompatActivity() {
 
         val config = SimulatoApp.instance.config
         apiClient = ApiClient(config)
-        heartbeatManager = HeartbeatManager(apiClient)
+        heartbeatManager = HeartbeatManager(apiClient) {
+            runOnUiThread {
+                if (isDestroyed || isRegistering) return@runOnUiThread
+                isRegistered = false
+                registerDevice()
+            }
+        }
         cameraExecutor = Executors.newSingleThreadExecutor()
 
         webSocket = SimulatoWebSocket(
@@ -129,9 +136,12 @@ class CaptureActivity : AppCompatActivity() {
     }
 
     private fun registerDevice() {
+        if (isRegistering) return
+        isRegistering = true
         apiClient.register(Constants.DeviceRoles.CAPTURE) { success, response ->
             runOnUiThread {
                 if (isDestroyed) return@runOnUiThread
+                isRegistering = false
                 if (success) {
                     isRegistered = true
                     binding.txtStatus.text = "Registered as Capture Device"

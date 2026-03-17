@@ -17,6 +17,7 @@ from raspberry_pi.device_config import LISTEN_HOST, LISTEN_PORT
 from raspberry_pi.hid_controller import HIDController
 
 GRID_MAP: dict[str, tuple[int, int]] = {}
+MAX_BUFFER_BYTES = 65536
 
 
 def load_grid_map(grid_data: dict) -> None:
@@ -107,6 +108,14 @@ def _handle_connection(conn: socket.socket, hid: HIDController) -> None:
         if not data:
             break
         buffer += data.decode("utf-8")
+        if len(buffer.encode("utf-8")) > MAX_BUFFER_BYTES:
+            error_resp = {
+                "type": "PI_RESPONSE",
+                "payload": {"status": "error", "detail": f"Input frame exceeded {MAX_BUFFER_BYTES} bytes"},
+            }
+            conn.sendall((json.dumps(error_resp) + "\n").encode("utf-8"))
+            buffer = ""
+            continue
 
         while "\n" in buffer:
             line, buffer = buffer.split("\n", 1)

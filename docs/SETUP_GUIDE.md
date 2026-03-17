@@ -34,6 +34,16 @@ pip install -r requirements.txt
 
 > **What does Ollama do?** It runs a small vision AI model (Qwen 2.5 VL) locally on your PC for auxiliary tasks: detecting if scrolling is needed, verifying clicks landed correctly, and checking if the screen shows a question or an error page. This is NOT the AI that answers questions — that's Grok/Gemini in the cloud.
 
+### 1.2.1 Install OCR Engine (Tesseract)
+OCR is used as the primary layout detector for click targeting.
+
+1. Install Tesseract OCR for Windows.
+2. Verify it works:
+```powershell
+tesseract --version
+```
+3. If `tesseract` is not in PATH, set `TESSERACT_CMD` in `.env` to the full executable path.
+
 ### 1.3 Configure API Keys
 Edit the `.env` file in the project root:
 ```env
@@ -55,6 +65,12 @@ OLLAMA_TARGET_TIMEOUT_SECONDS=12
 OLLAMA_COOLDOWN_SECONDS=120
 OLLAMA_KEEP_ALIVE=30m
 VERIFY_FRAME_TIMEOUT_SECONDS=18
+OCR_LAYOUT_PRIMARY_ENABLED=True
+OCR_MIN_WORD_CONFIDENCE=45
+OCR_TIMEOUT_SECONDS=6
+OCR_PSM=6
+# Optional if tesseract is not in PATH:
+# TESSERACT_CMD=C:\Program Files\Tesseract-OCR\tesseract.exe
 ```
 
 ### 1.4 Start the Controller
@@ -137,6 +153,10 @@ if present, so you do not need to manually activate venv before running it.
 4. Use the buttons: **START**, **PAUSE**, **STOP**, **STATUS**
 5. Alerts appear here with vibration when conflicts arise
 
+Background reliability note:
+- The Android heartbeat layer now auto re-registers the device when the
+  controller restarts or temporarily loses registration state.
+
 ---
 
 ## Part 4: Running a Session
@@ -179,7 +199,9 @@ If new → send to Grok/Gemini AI → get answer
         ↓
 Match answer text to option letter (A/B/C/D)
         ↓
-Local Qwen localizes exact click target (normalized coords) for that option
+OCR scans whole screen and localizes option row target (primary)
+        ↓
+If OCR cannot localize confidently → Local Qwen targeting fallback
         ↓
 Controller maps normalized target to calibrated HID absolute coordinates
         ↓
@@ -187,7 +209,9 @@ Pi clicks the correct option on exam laptop
         ↓
 Local AI verifies click was registered
         ↓
-Local Qwen localizes NEXT target (fallback to calibrated grid if needed)
+OCR localizes NEXT target (primary)
+        ↓
+If OCR misses NEXT → Local Qwen, then calibrated grid fallback
         ↓
 Pi clicks NEXT → auto-advance to next question
         ↓
@@ -212,6 +236,8 @@ When the AI gives a different answer than what's in the database:
 | Pi `BrokenPipeError` | USB cable isn't connected to exam laptop, or cable is charge-only |
 | "HID devices not found" on Pi | Run `sudo python3 HIDPi/HIDPi_Setup.py` then `sudo reboot` |
 | START shows Pi not connected | Start Pi listener (`sudo ./start_pi.sh`) and verify `.env` has correct `PI_HOST`/`PI_PORT` |
+| OCR targeting not working | Install Tesseract OCR and set `TESSERACT_CMD` if not on PATH |
+| Remote shows WebSocket 403 / heartbeat 404 | Device registration was lost (usually after controller restart). App now auto re-registers; if needed reopen app once |
 | Click lands on wrong option | Keep full exam window in frame, rerun calibration, and ensure local AI assist is enabled for precise target localization (`LOCAL_AI_ASSIST_ENABLED=True`) |
 | Local AI responses are slow | Normal for first query (~5s). Subsequent queries are faster |
 | Cloud AI fails | Check API keys in `.env` for both Gemini and Grok. Controller now auto-falls back to alternate cloud provider once before alerting |

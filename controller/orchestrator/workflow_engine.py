@@ -41,6 +41,7 @@ from controller.ai_pipeline.ollama_client import (
 from controller.ai_pipeline.response_parser import GrokResponse, ParseError
 from controller.config import (
     LOCAL_AI_ASSIST_ENABLED,
+    OCR_LAYOUT_PRIMARY_ENABLED,
     OLLAMA_MODEL,
     GROK_MODEL,
     GEMINI_MODEL,
@@ -60,6 +61,7 @@ from controller.capture_pipeline.image_stitcher import ImageStitcher
 from controller.capture_pipeline.scroll_detector import ScrollDetector
 from controller.capture_pipeline.screen_validator import ScreenValidator
 from controller.capture_pipeline.image_preprocessor import ImagePreprocessor
+from controller.capture_pipeline.ocr_layout_analyzer import OCRLayoutAnalyzer, OCRLayoutResult
 from controller.hardware_control.click_dispatcher import ClickDispatcher
 from controller.hardware_control.verification_engine import VerificationEngine
 from controller.orchestrator.state_machine import StateMachine, SystemState
@@ -102,6 +104,8 @@ class WorkflowEngine:
         self._scroll_detector = ScrollDetector()
         self._screen_validator = ScreenValidator()
         self._preprocessor = ImagePreprocessor()
+        self._ocr = OCRLayoutAnalyzer()
+        self._latest_ocr_layout: Optional[OCRLayoutResult] = None
 
         self._test_id: Optional[int] = None
         self._test_name: Optional[str] = None
@@ -287,6 +291,12 @@ class WorkflowEngine:
             # Step 5: Preprocess
             self._preprocessor.preprocess(stitched_path)
 
+            # Step 5.25: OCR layout pass (whole screen, deterministic)
+            if OCR_LAYOUT_PRIMARY_ENABLED:
+                self._latest_ocr_layout = self._ocr.analyze(stitched_path)
+            else:
+                self._latest_ocr_layout = None
+
             # Step 5.5: Image-hash DB-first lookup (no AI call on hit)
             image_phash = self._compute_image_phash(stitched_path)
             cached_question = None
@@ -422,19 +432,7 @@ class WorkflowEngine:
         if self._sm.state != SystemState.RUNNING:
             return
         logger.info("Advancing to next question")
-        clicked_with_local_target = False
-        if LOCAL_AI_ASSIST_ENABLED and self._receiver.latest_path is not None:
-            norm_target = locate_next_button_target(self._receiver.latest_path)
-            if norm_target is not None:
-                self._click.click_at_normalized(norm_target[0], norm_target[1], command="CLICK_NEXT")
-                clicked_with_local_target = True
-            else:
-                visible, grid_pos = locate_next_button_grid(self._receiver.latest_path)
-                if visible and grid_pos is not None:
-                    self._click.click_next_at_grid(grid_pos[0], grid_pos[1])
-                    clicked_with_local_target = True
-        if not clicked_with_local_target:
-            self._click.click_next()
+        self._click_next_best_target()
         self._log_event("click_next", {"after_question": self._question_number})
 
         result = self._verify.verify_click("NEXT")
@@ -445,7 +443,7 @@ class WorkflowEngine:
             return
 
         logger.warning("NEXT click verification failed — retrying")
-        self._click.click_next()
+        self._click_next_best_target()
         result = self._verify.verify_click("NEXT")
 
         if result.verified:
@@ -460,6 +458,25 @@ class WorkflowEngine:
             AlertType.VERIFICATION_FAILURE,
             "NEXT button click verification failed after retry",
         )
+
+    def _click_next_best_target(self) -> None:
+        """Click NEXT using OCR/Qwen-assisted targeting with calibrated fallback."""
+        if OCR_LAYOUT_PRIMARY_ENABLED and self._latest_ocr_layout is not None:
+            ocr_next = self._latest_ocr_layout.locate_next_target()
+            if ocr_next is not None:
+                logger.info("Using OCR-derived NEXT target")
+                self._click.click_at_normalized(ocr_next[0], ocr_next[1], command="CLICK_NEXT")
+                return
+        if LOCAL_AI_ASSIST_ENABLED and self._receiver.latest_path is not None:
+            norm_target = locate_next_button_target(self._receiver.latest_path)
+            if norm_target is not None:
+                self._click.click_at_normalized(norm_target[0], norm_target[1], command="CLICK_NEXT")
+                return
+            visible, grid_pos = locate_next_button_grid(self._receiver.latest_path)
+            if visible and grid_pos is not None:
+                self._click.click_next_at_grid(grid_pos[0], grid_pos[1])
+                return
+        self._click.click_next()
 
     def _execute_click_with_verification(self, letter: str) -> None:
         """
@@ -500,6 +517,16 @@ class WorkflowEngine:
         Click an option using precise local-AI target when available,
         otherwise fallback to calibrated static option mapping.
         """
+        if OCR_LAYOUT_PRIMARY_ENABLED and self._latest_ocr_layout is not None:
+            ocr_target = self._latest_ocr_layout.locate_option_target(letter)
+            if ocr_target is not None:
+                logger.info("Using OCR-derived target for option %s", letter)
+                self._click.click_at_normalized(
+                    ocr_target[0],
+                    ocr_target[1],
+                    command=f"CLICK_{letter.strip().upper()}",
+                )
+                return
         if LOCAL_AI_ASSIST_ENABLED and self._receiver.latest_path is not None:
             target = locate_option_target(self._receiver.latest_path, letter)
             if target is not None:

@@ -59,6 +59,13 @@ OLLAMA_TARGET_TIMEOUT_SECONDS = int(os.environ.get("OLLAMA_TARGET_TIMEOUT_SECOND
 OLLAMA_COOLDOWN_SECONDS = int(os.environ.get("OLLAMA_COOLDOWN_SECONDS", "120"))
 OLLAMA_KEEP_ALIVE = os.environ.get("OLLAMA_KEEP_ALIVE", "30m")
 
+# OCR-first layout targeting (option/NEXT localization)
+OCR_LAYOUT_PRIMARY_ENABLED = os.environ.get("OCR_LAYOUT_PRIMARY_ENABLED", "True").lower() == "true"
+OCR_MIN_WORD_CONFIDENCE = float(os.environ.get("OCR_MIN_WORD_CONFIDENCE", "45"))
+OCR_TIMEOUT_SECONDS = int(os.environ.get("OCR_TIMEOUT_SECONDS", "6"))
+OCR_PSM = int(os.environ.get("OCR_PSM", "6"))
+TESSERACT_CMD = os.environ.get("TESSERACT_CMD", "")
+
 # ---------------------------------------------------------------------------
 # Timeouts (seconds)
 # ---------------------------------------------------------------------------

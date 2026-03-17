@@ -92,6 +92,9 @@ def list_runs(runs_dir: Optional[Path] = None) -> list[RunMetadata]:
             continue
         if entry.name.startswith(".") or entry.name == "replay_sessions":
             continue
+        # A valid run folder must have at least one artifact directory marker.
+        if not (entry / "screenshots").exists() and not (entry / "events.jsonl").exists():
+            continue
 
         meta = _inspect_run(entry)
         if meta is not None:

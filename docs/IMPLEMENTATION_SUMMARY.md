@@ -345,6 +345,9 @@ All implementation follows:
 - [x] Command ACK timeout: 3 seconds
 - [x] Command max retries: 3
 - [x] Image upload timeout: 10 seconds
+- [x] Upload-image processing failures return HTTP 200 with `processing=error` while controller pauses/alerts (no capture-loop 500 storm)
+- [x] START guard enforces Pi connectivity; rejects with INPUT_FAILURE when Pi listener unavailable
+- [x] Bounded TCP frame buffers on both Controller Pi client and Pi listener
 
 ---
 
@@ -391,6 +394,8 @@ All implementation follows:
 - [x] Autonomous capture — PC sends CAPTURE_IMAGE via WS → phone captures and uploads
 - [x] Single-role enforcement on server — one device per role at a time
 - [x] Heartbeat manager (`HeartbeatManager`) + foreground service (`HeartbeatService`)
+- [x] Mobile auto re-registration flow on repeated heartbeat failures / `device not registered` responses
+- [x] `HeartbeatService` hardened: single-start guard, role-aware register, and automatic re-register callback
 - [x] `android:usesCleartextTraffic="true"` in AndroidManifest.xml
 - [x] Release APK signing and build (requires Android Studio + keystore)
 

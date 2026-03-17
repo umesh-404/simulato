@@ -147,6 +147,10 @@ Controller response:
 
 If heartbeat fails for **15 seconds**, device is considered disconnected.
 
+Mobile client behavior:
+- On repeated heartbeat failures or `device not registered` responses (404),
+  the app re-registers automatically and re-establishes WebSocket.
+
 ---
 
 # 7. IMAGE CAPTURE PROTOCOL
@@ -364,6 +368,10 @@ Controller must acknowledge.
 # 11. PI COMMAND PROTOCOL
 
 Controller sends commands to Raspberry Pi.
+
+Safety limits:
+- Controller and Pi both enforce bounded TCP frame buffers to prevent
+  unbounded memory growth on malformed frames.
 
 Commands:
 

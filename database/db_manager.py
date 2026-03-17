@@ -11,6 +11,7 @@ All public methods log their actions (Canonical Law 11).
 
 import json
 import sqlite3
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -32,21 +33,23 @@ class DatabaseManager:
         self._db_path = db_path or DATABASE_PATH
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn: Optional[sqlite3.Connection] = None
+        self._lock = threading.RLock()
         self._initialize()
 
     def _initialize(self) -> None:
-        self._conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA foreign_keys=ON")
+        with self._lock:
+            self._conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
+            self._conn.row_factory = sqlite3.Row
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA foreign_keys=ON")
 
-        schema_sql = _SCHEMA_PATH.read_text(encoding="utf-8")
-        self._conn.executescript(schema_sql)
-        self._conn.commit()
-        logger.info("Database initialized at %s", self._db_path)
+            schema_sql = _SCHEMA_PATH.read_text(encoding="utf-8")
+            self._conn.executescript(schema_sql)
+            self._conn.commit()
+            logger.info("Database initialized at %s", self._db_path)
 
-        # Apply any required schema migrations for existing databases.
-        self._migrate_schema()
+            # Apply any required schema migrations for existing databases.
+            self._migrate_schema()
 
     def _migrate_schema(self) -> None:
         """
@@ -56,23 +59,25 @@ class DatabaseManager:
         the database without destructive changes.
         """
         # 1) Ensure question_snapshots.image_phash column exists
-        cursor = self._conn.execute("PRAGMA table_info(question_snapshots)")
-        columns = [row["name"] for row in cursor.fetchall()]
-        if "image_phash" not in columns:
-            logger.info("Migrating DB: adding image_phash column to question_snapshots")
-            self._conn.execute(
-                "ALTER TABLE question_snapshots ADD COLUMN image_phash TEXT"
-            )
-            self._conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_snapshots_phash ON question_snapshots(image_phash)"
-            )
-            self._conn.commit()
+        with self._lock:
+            cursor = self._conn.execute("PRAGMA table_info(question_snapshots)")
+            columns = [row["name"] for row in cursor.fetchall()]
+            if "image_phash" not in columns:
+                logger.info("Migrating DB: adding image_phash column to question_snapshots")
+                self._conn.execute(
+                    "ALTER TABLE question_snapshots ADD COLUMN image_phash TEXT"
+                )
+                self._conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_snapshots_phash ON question_snapshots(image_phash)"
+                )
+                self._conn.commit()
 
     def close(self) -> None:
-        if self._conn:
-            self._conn.close()
-            self._conn = None
-            logger.info("Database connection closed")
+        with self._lock:
+            if self._conn:
+                self._conn.close()
+                self._conn = None
+                logger.info("Database connection closed")
 
     # ------------------------------------------------------------------
     # Test operations
@@ -80,19 +85,21 @@ class DatabaseManager:
 
     def create_test(self, test_name: str) -> int:
         now = datetime.now(timezone.utc).isoformat()
-        cursor = self._conn.execute(
-            "INSERT INTO tests (test_name, created_at, question_count) VALUES (?, ?, 0)",
-            (test_name, now),
-        )
-        self._conn.commit()
-        test_id = cursor.lastrowid
+        with self._lock:
+            cursor = self._conn.execute(
+                "INSERT INTO tests (test_name, created_at, question_count) VALUES (?, ?, 0)",
+                (test_name, now),
+            )
+            self._conn.commit()
+            test_id = cursor.lastrowid
         logger.info("Created test: name=%s, id=%d", test_name, test_id)
         return test_id
 
     def get_test_by_name(self, test_name: str) -> Optional[dict]:
-        row = self._conn.execute(
-            "SELECT * FROM tests WHERE test_name = ?", (test_name,)
-        ).fetchone()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM tests WHERE test_name = ?", (test_name,)
+            ).fetchone()
         if row is None:
             return None
         return dict(row)
@@ -134,25 +141,25 @@ class DatabaseManager:
                 version, sha256_hash[:16],
             )
 
-        cursor = self._conn.execute(
-            """INSERT INTO questions
-               (test_id, canonical_text, sha256_hash, simhash, embedding_vector,
-                option_a, option_b, option_c, option_d,
-                correct_answer, answer_letter, version, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                test_id, canonical_text, sha256_hash, simhash, embedding_vector,
-                option_a, option_b, option_c, option_d,
-                correct_answer, answer_letter, version, now,
-            ),
-        )
-        self._conn.execute(
-            "UPDATE tests SET question_count = question_count + 1 WHERE test_id = ?",
-            (test_id,),
-        )
-        self._conn.commit()
-
-        question_id = cursor.lastrowid
+        with self._lock:
+            cursor = self._conn.execute(
+                """INSERT INTO questions
+                   (test_id, canonical_text, sha256_hash, simhash, embedding_vector,
+                    option_a, option_b, option_c, option_d,
+                    correct_answer, answer_letter, version, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    test_id, canonical_text, sha256_hash, simhash, embedding_vector,
+                    option_a, option_b, option_c, option_d,
+                    correct_answer, answer_letter, version, now,
+                ),
+            )
+            self._conn.execute(
+                "UPDATE tests SET question_count = question_count + 1 WHERE test_id = ?",
+                (test_id,),
+            )
+            self._conn.commit()
+            question_id = cursor.lastrowid
         logger.info(
             "Stored question: id=%d, test_id=%d, hash=%s, version=%d",
             question_id, test_id, sha256_hash[:16], version,
@@ -173,9 +180,10 @@ class DatabaseManager:
         return question_id
 
     def _write_question_json(self, test_id: int, question_id: int, data: dict) -> None:
-        test = self._conn.execute(
-            "SELECT test_name FROM tests WHERE test_id = ?", (test_id,)
-        ).fetchone()
+        with self._lock:
+            test = self._conn.execute(
+                "SELECT test_name FROM tests WHERE test_id = ?", (test_id,)
+            ).fetchone()
         if not test:
             return
         test_dir = DATASETS_DIR / "tests" / test["test_name"] / "questions"
@@ -189,22 +197,24 @@ class DatabaseManager:
     # ------------------------------------------------------------------
 
     def lookup_by_hash(self, test_id: int, sha256_hash: str) -> Optional[dict]:
-        row = self._conn.execute(
-            """SELECT * FROM questions
-               WHERE test_id = ? AND sha256_hash = ?
-               ORDER BY version DESC LIMIT 1""",
-            (test_id, sha256_hash),
-        ).fetchone()
+        with self._lock:
+            row = self._conn.execute(
+                """SELECT * FROM questions
+                   WHERE test_id = ? AND sha256_hash = ?
+                   ORDER BY version DESC LIMIT 1""",
+                (test_id, sha256_hash),
+            ).fetchone()
         if row:
             logger.debug("Hash match found: question_id=%d", row["question_id"])
             return dict(row)
         return None
 
     def lookup_by_simhash(self, test_id: int, simhash: str, max_distance: int) -> list[dict]:
-        rows = self._conn.execute(
-            "SELECT * FROM questions WHERE test_id = ? AND simhash IS NOT NULL",
-            (test_id,),
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM questions WHERE test_id = ? AND simhash IS NOT NULL",
+                (test_id,),
+            ).fetchall()
         from controller.question_engine.hash_engine import simhash_distance
         matches = []
         for row in rows:
@@ -219,10 +229,11 @@ class DatabaseManager:
         return matches
 
     def get_all_questions_for_test(self, test_id: int) -> list[dict]:
-        rows = self._conn.execute(
-            "SELECT * FROM questions WHERE test_id = ? ORDER BY question_id",
-            (test_id,),
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM questions WHERE test_id = ? ORDER BY question_id",
+                (test_id,),
+            ).fetchall()
         return [dict(r) for r in rows]
 
     # ------------------------------------------------------------------
@@ -240,15 +251,16 @@ class DatabaseManager:
         image_phash: str | None = None,
     ) -> int:
         now = datetime.now(timezone.utc).isoformat()
-        cursor = self._conn.execute(
-            """INSERT INTO question_snapshots
-               (question_id, run_id, screenshot_path, ai_response,
-                selected_answer, decision_source, image_phash, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (question_id, run_id, screenshot_path, ai_response, selected_answer, decision_source, image_phash, now),
-        )
-        self._conn.commit()
-        snapshot_id = cursor.lastrowid
+        with self._lock:
+            cursor = self._conn.execute(
+                """INSERT INTO question_snapshots
+                   (question_id, run_id, screenshot_path, ai_response,
+                    selected_answer, decision_source, image_phash, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (question_id, run_id, screenshot_path, ai_response, selected_answer, decision_source, image_phash, now),
+            )
+            self._conn.commit()
+            snapshot_id = cursor.lastrowid
         logger.info(
             "Stored snapshot: id=%d, question_id=%d, source=%s",
             snapshot_id, question_id, decision_source,
@@ -267,17 +279,18 @@ class DatabaseManager:
         This enables DB-first answering without calling Grok/Gemini when
         the exact same stitched question image has been seen before.
         """
-        row = self._conn.execute(
-            """
-            SELECT q.*
-            FROM questions q
-            JOIN question_snapshots s ON s.question_id = q.question_id
-            WHERE q.test_id = ? AND s.image_phash = ?
-            ORDER BY s.created_at DESC
-            LIMIT 1
-            """,
-            (test_id, image_phash),
-        ).fetchone()
+        with self._lock:
+            row = self._conn.execute(
+                """
+                SELECT q.*
+                FROM questions q
+                JOIN question_snapshots s ON s.question_id = q.question_id
+                WHERE q.test_id = ? AND s.image_phash = ?
+                ORDER BY s.created_at DESC
+                LIMIT 1
+                """,
+                (test_id, image_phash),
+            ).fetchone()
         if row:
             logger.debug(
                 "Image hash match found: question_id=%d, phash=%s",

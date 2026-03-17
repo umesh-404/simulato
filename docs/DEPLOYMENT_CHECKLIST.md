@@ -21,6 +21,15 @@ Use this checklist before every exam session to verify all components are ready.
 - [ ] PC can reach Pi on port 9000 (or configured PI_PORT)
 - [ ] Test HID click works (exam laptop moves cursor)
 
+Optional quick smoke-test (recommended after changing cables/USB ports):
+
+```powershell
+# From the Mother PC (Windows):
+python scripts/pi_smoke_test.py --host <PI_IP> --pattern center
+python scripts/pi_smoke_test.py --host <PI_IP> --pattern corners
+python scripts/pi_smoke_test.py --host <PI_IP> --pattern grid --steps 5
+```
+
 ```bash
 # First-time setup (run once, then reboot):
 sudo python3 HIDPi/HIDPi_Setup.py

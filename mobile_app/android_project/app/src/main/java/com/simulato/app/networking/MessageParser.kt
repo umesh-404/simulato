@@ -20,7 +20,7 @@ object MessageParser {
                 type = json.get("type")?.asString ?: return null,
                 deviceId = json.get("device_id")?.asString,
                 timestamp = json.get("timestamp")?.asString,
-                payload = json.getAsJsonObject("payload")
+                payload = json.get("payload")?.takeIf { it.isJsonObject }?.asJsonObject
             )
         } catch (e: Exception) {
             AppLogger.e("MessageParser", "Failed to parse: ${e.message}")
@@ -35,7 +35,8 @@ object MessageParser {
 
             // Prefer top-level "status" if present
             val topStatus = json.get("status")?.asString
-            val payloadStatus = json.getAsJsonObject("payload")?.get("status")?.asString
+            val payload = json.get("payload")?.takeIf { it.isJsonObject }?.asJsonObject
+            val payloadStatus = payload?.get("status")?.asString
 
             val status = topStatus ?: payloadStatus
             status == "accepted" ||

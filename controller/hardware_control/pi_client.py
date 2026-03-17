@@ -19,6 +19,7 @@ from controller.utils.logger import get_logger
 from controller.utils.timer import ExecutionTimer
 
 logger = get_logger("pi_client")
+MAX_RESPONSE_BYTES = 65536
 
 VALID_COMMANDS = {
     "CLICK_A", "CLICK_B", "CLICK_C", "CLICK_D",
@@ -131,10 +132,14 @@ class PiClient:
         if not self._socket:
             raise PiConnectionError("Not connected to Pi")
         chunks: list[str] = []
+        total = 0
         while True:
             piece = self._socket.recv(4096)
             if not piece:
                 raise socket.error("Pi connection closed while waiting for response")
+            total += len(piece)
+            if total > MAX_RESPONSE_BYTES:
+                raise socket.error(f"Pi response exceeded {MAX_RESPONSE_BYTES} bytes")
             text = piece.decode("utf-8")
             chunks.append(text)
             combined = "".join(chunks)

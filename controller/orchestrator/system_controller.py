@@ -16,6 +16,7 @@ The Main Control PC is the central orchestrator (Canonical Law 13).
 
 from pathlib import Path
 from typing import Optional
+import threading
 
 from controller.alerts.alert_manager import AlertManager, AlertType, OperatorDecision
 from controller.alerts.sound_player import play_alarm
@@ -59,6 +60,8 @@ class SystemController:
         self._active_ai_provider: str = DEFAULT_AI_PROVIDER
         self._pending_start_payload: Optional[dict] = None
         self._pending_resume_after_calibration: bool = False
+        self._timers: list[threading.Timer] = []
+        self._timers_lock = threading.Lock()
 
     @property
     def state(self) -> SystemState:
@@ -220,8 +223,7 @@ class SystemController:
         logger.info("Test started: %s (run: %s)", test_name, self._run_ctx.run_id)
 
         # Trigger the first capture to start the autonomous loop
-        import threading
-        threading.Timer(1.0, self._request_capture).start()
+        self._schedule_timer(1.0, self._request_capture)
 
         return {"status": "started", "run_id": self._run_ctx.run_id}
 
@@ -345,8 +347,7 @@ class SystemController:
         if decision and decision.outcome.value == "click":
             self._workflow.advance_to_next()
             # Trigger the next capture after a brief delay for the screen to settle
-            import threading
-            threading.Timer(1.5, self._request_capture).start()
+            self._schedule_timer(1.5, self._request_capture)
 
     def _request_capture(self) -> None:
         """Send CAPTURE_IMAGE command to the capture phone via WebSocket."""
@@ -574,8 +575,27 @@ class SystemController:
         self._sm.force_error(f"conflict_resolution_failed:{source}")
 
     def _schedule_next_capture(self, delay_seconds: float) -> None:
-        import threading
-        threading.Timer(delay_seconds, self._request_capture).start()
+        self._schedule_timer(delay_seconds, self._request_capture)
+
+    def _schedule_timer(self, delay_seconds: float, callback) -> None:
+        """Track timers so they can be cancelled on STOP/shutdown."""
+        timer_ref: dict[str, threading.Timer] = {}
+
+        def _wrapped() -> None:
+            try:
+                callback()
+            finally:
+                t = timer_ref.get("timer")
+                if t is not None:
+                    with self._timers_lock:
+                        if t in self._timers:
+                            self._timers.remove(t)
+
+        t = threading.Timer(delay_seconds, _wrapped)
+        timer_ref["timer"] = t
+        with self._timers_lock:
+            self._timers.append(t)
+        t.start()
 
     # ------------------------------------------------------------------
     # Pi connection management
@@ -608,9 +628,17 @@ class SystemController:
     # ------------------------------------------------------------------
 
     def _cleanup(self) -> None:
+        with self._timers_lock:
+            for t in self._timers:
+                try:
+                    t.cancel()
+                except Exception:
+                    pass
+            self._timers.clear()
         self._workflow = None
         self._run_ctx = None
         self._test_name = None
+        self._last_conflict_decision = None
 
     def shutdown(self) -> None:
         logger.info("System shutting down")

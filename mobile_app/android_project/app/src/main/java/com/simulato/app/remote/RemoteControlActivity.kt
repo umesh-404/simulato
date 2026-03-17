@@ -24,6 +24,7 @@ class RemoteControlActivity : AppCompatActivity() {
     private lateinit var webSocket: SimulatoWebSocket
     private lateinit var heartbeatManager: HeartbeatManager
     private var isRegistered = false
+    @Volatile private var isRegistering = false
     private var suppressSpinnerCallback = true  // Prevent initial trigger
     private var pendingCommand: String? = null
     private val statusHandler = Handler(Looper.getMainLooper())
@@ -42,7 +43,13 @@ class RemoteControlActivity : AppCompatActivity() {
 
         val config = SimulatoApp.instance.config
         apiClient = ApiClient(config)
-        heartbeatManager = HeartbeatManager(apiClient)
+        heartbeatManager = HeartbeatManager(apiClient) {
+            runOnUiThread {
+                if (isDestroyed || isRegistering) return@runOnUiThread
+                isRegistered = false
+                registerDevice()
+            }
+        }
 
         webSocket = SimulatoWebSocket(
             config = config,
@@ -106,10 +113,13 @@ class RemoteControlActivity : AppCompatActivity() {
     }
 
     private fun registerDevice(onRegistered: (() -> Unit)? = null) {
+        if (isRegistering) return
+        isRegistering = true
         binding.txtConnectionStatus.text = "Connecting..."
         apiClient.register(Constants.DeviceRoles.REMOTE_CONTROL) { success, response ->
             runOnUiThread {
                 if (isDestroyed) return@runOnUiThread
+                isRegistering = false
                 if (success) {
                     isRegistered = true
                     binding.txtConnectionStatus.text = "Registered"
