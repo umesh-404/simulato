@@ -211,6 +211,7 @@ When the AI gives a different answer than what's in the database:
 | Phone can't connect to PC | Ensure same WiFi network. Check firewall: allow port 8000 |
 | Pi `BrokenPipeError` | USB cable isn't connected to exam laptop, or cable is charge-only |
 | "HID devices not found" on Pi | Run `sudo python3 HIDPi/HIDPi_Setup.py` then `sudo reboot` |
+| START shows Pi not connected | Start Pi listener (`sudo ./start_pi.sh`) and verify `.env` has correct `PI_HOST`/`PI_PORT` |
 | Click lands on wrong option | Keep full exam window in frame, rerun calibration, and ensure local AI assist is enabled for precise target localization (`LOCAL_AI_ASSIST_ENABLED=True`) |
 | Local AI responses are slow | Normal for first query (~5s). Subsequent queries are faster |
 | Cloud AI fails | Check API keys in `.env` for both Gemini and Grok. Controller now auto-falls back to alternate cloud provider once before alerting |

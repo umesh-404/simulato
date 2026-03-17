@@ -171,6 +171,19 @@ Controller response:
      "status": "received"
     }
 
+If the controller accepts the image but fails during processing (for example,
+Pi not connected at click time), it still returns HTTP 200 to avoid causing
+endless retries on the Capture Phone. In that case it returns:
+
+    {
+     "status": "received",
+     "processing": "error",
+     "error": "..."
+    }
+
+The controller will raise a `SYSTEM_ALERT` to the Remote Control phone and
+pause execution for operator intervention.
+
 The controller decodes the base64 image and processes it through the
 capture pipeline. During **CALIBRATION** state, the image is routed to
 the calibration workflow instead of the question processing pipeline.
@@ -223,6 +236,18 @@ controller returns:
      "payload": {
        "status": "error",
        "error": "No capture device connected. Please connect the capture phone first."
+     }
+    }
+
+**Additional START guard (Pi required):** `START` is rejected if the controller
+cannot connect to the Raspberry Pi HID listener (`PI_HOST`/`PI_PORT`). The
+controller raises a `SYSTEM_ALERT` of type `INPUT_FAILURE` and returns:
+
+    {
+     "type": "COMMAND_ACK",
+     "payload": {
+       "status": "error",
+       "error": "Pi not connected: ..."
      }
     }
 

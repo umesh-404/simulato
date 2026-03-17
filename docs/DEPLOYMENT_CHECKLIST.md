@@ -91,6 +91,7 @@ curl http://localhost:8000/api/status
 
 - [ ] Controller status shows all devices registered
 - [ ] System state is IDLE
+- [ ] Pi listener reachable from PC (if not, START will be rejected with INPUT_FAILURE)
 - [ ] Send CALIBRATE command → state transitions to CALIBRATION
 - [ ] Perform calibration → state transitions to IDLE
 - [ ] Send START command → state transitions to RUNNING

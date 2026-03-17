@@ -154,6 +154,18 @@ class SystemController:
         return {"status": "calibration_started", "waiting_for": "capture"}
 
     def _handle_start(self, payload: dict) -> dict:
+        # Require Pi connectivity for any run that will click answers.
+        # If not connected, try reconnect once and block START with an alert.
+        if not self._pi_client.is_connected():
+            try:
+                self._pi_client.connect()
+            except PiConnectionError as e:
+                self._alert_mgr.raise_alert(
+                    AlertType.INPUT_FAILURE,
+                    f"Pi not connected ({e}). Start the Pi listener and verify PI_HOST/PI_PORT.",
+                )
+                return {"error": f"Pi not connected: {e}"}
+
         test_name = (payload.get("test_name", "") or "").strip()
         if not test_name:
             # Provide a deterministic default context for mobile clients
@@ -303,7 +315,25 @@ class SystemController:
             self._workflow.receive_verification_frame(image_data)
             return
 
-        decision = self._workflow.process_question(image_data)
+        try:
+            decision = self._workflow.process_question(image_data)
+        except PiConnectionError as e:
+            # Never crash the upload path; pause+alert for operator intervention.
+            logger.error("Pi connection error during processing: %s", e)
+            self._sm.force_error(f"pi_not_connected:{e}")
+            self._alert_mgr.raise_alert(
+                AlertType.INPUT_FAILURE,
+                f"Pi not connected during click: {e}. Start Pi listener and press CONTINUE.",
+            )
+            return
+        except PiCommandError as e:
+            logger.error("Pi command failed during processing: %s", e)
+            self._sm.force_error(f"pi_command_failed:{e}")
+            self._alert_mgr.raise_alert(
+                AlertType.INPUT_FAILURE,
+                f"Pi command failed: {e}. Check USB cable and Pi HID, then press CONTINUE.",
+            )
+            return
 
         if decision and decision.outcome.value == "conflict":
             self._last_conflict_decision = {

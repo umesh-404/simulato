@@ -310,7 +310,13 @@ async def upload_image(req: ImageUploadRequest):
             _image_callback(image_data, req.device_id)
         except Exception as e:
             logger.exception("Image callback failed for device %s", req.device_id)
-            return JSONResponse(status_code=500, content={"error": f"image processing failed: {e}"})
+            # Don't 500 the capture phone — it should not retry uploads endlessly.
+            # The controller will raise alerts / pause as needed.
+            return {
+                "status": "received",
+                "processing": "error",
+                "error": f"{e}",
+            }
 
     return {"status": "received"}
 
