@@ -20,6 +20,7 @@ from controller.config import (
     OLLAMA_TIMEOUT_SECONDS,
     OLLAMA_TARGET_TIMEOUT_SECONDS,
     OLLAMA_COOLDOWN_SECONDS,
+    OLLAMA_TIMEOUT_COOLDOWN_SECONDS,
     OLLAMA_KEEP_ALIVE,
 )
 from controller.ai_pipeline.aux_prompts import (
@@ -90,6 +91,11 @@ def _call_ollama_task(
             resp.raise_for_status()
             data = resp.json()
             return json.loads(data["message"]["content"])
+        except requests.exceptions.ReadTimeout as e:
+            logger.error("Ollama task timed out: %s", e)
+            # Short cooldown for timeout-only cases; avoids disabling local AI for too long.
+            _OLLAMA_UNAVAILABLE_UNTIL = time.monotonic() + OLLAMA_TIMEOUT_COOLDOWN_SECONDS
+            raise OllamaAPIError(f"Ollama task timed out: {e}")
         except Exception as e:
             logger.error("Ollama task failed: %s", e)
             _OLLAMA_UNAVAILABLE_UNTIL = time.monotonic() + OLLAMA_COOLDOWN_SECONDS
