@@ -462,14 +462,26 @@ class WorkflowEngine:
             if image_phash is not None:
                 cached_question = self._db.lookup_by_image_phash(self._test_id, image_phash)
                 if cached_question is None:
-                    cached_question = self._db.lookup_by_image_phash_near(self._test_id, image_phash, max_distance=6)
+                    cached_question = self._db.lookup_by_image_phash_near(self._test_id, image_phash, max_distance=3)
                 if cached_question:
-                    logger.info(
-                        "Image-hash DB HIT: question_id=%d (test_id=%d)",
-                        cached_question["question_id"],
-                        self._test_id,
-                    )
-                    self._image_hash_hits += 1
+                    # Validate cache hit against live on-screen content
+                    # to prevent false identity reuse across different questions
+                    # that happen to hash similarly.
+                    if not self._validate_cache_hit(cached_question):
+                        logger.warning(
+                            "Image-hash cache hit REJECTED by content validation "
+                            "(question_id=%d, test_id=%d)",
+                            cached_question["question_id"],
+                            self._test_id,
+                        )
+                        cached_question = None
+                    else:
+                        logger.info(
+                            "Image-hash DB HIT (validated): question_id=%d (test_id=%d)",
+                            cached_question["question_id"],
+                            self._test_id,
+                        )
+                        self._image_hash_hits += 1
 
             # Step 5.6: OCR-text DB pre-check (no cloud call if cached by text/options)
             ocr_cached_decision = None
@@ -671,11 +683,13 @@ class WorkflowEngine:
             self._no_change_after_next_count = 0
             return
 
-        # Do one passive re-check (no second click) before retrying.
-        # This prevents accidental double-NEXT when the first click worked
-        # but the first verification sample was too early/noisy.
-        logger.warning("NEXT click verification failed — re-checking before retry")
-        time.sleep(1.0)
+        # Passive re-check only (NO retry click).
+        # A second NEXT click is far more dangerous (skips a question)
+        # than a false "didn't navigate" verdict. If the first click
+        # actually worked but verification was noisy, the next cycle's
+        # pHash same-screen guard (L289-310) will catch the true state.
+        logger.warning("NEXT click verification borderline — passive re-check")
+        time.sleep(1.5)
         recheck = self._verify_next_click_by_change(pre_next_path)
         if recheck.verified:
             logger.info("NEXT re-check verified (screen changed)")
@@ -683,27 +697,16 @@ class WorkflowEngine:
             self._no_change_after_next_count = 0
             return
 
-        # Capture a fresh reference right before the retry so the
-        # comparison reflects the current screen state, not the stale
-        # pre-first-click frame.
-        logger.warning("NEXT still not verified — retrying click")
-        pre_retry_path = self._capture_single_frame_for_ref()
-        self._click_next_best_target()
-        time.sleep(2.5)
-        result = self._verify_next_click_by_change(pre_retry_path)
-
-        if result.verified:
-            logger.info("NEXT retry click verified (screen changed)")
-            self._expecting_next_change = True
-            self._no_change_after_next_count = 0
-            return
-
-        logger.error("NEXT click verification FAILED after retry")
-        self._sm.force_error("Input verification failed for NEXT button")
-        self._alerts.raise_alert(
-            AlertType.VERIFICATION_FAILURE,
-            "NEXT button click verification failed after retry",
+        # Optimistic pass: assume NEXT worked.
+        # The next process_question() call will compare pHash of the
+        # incoming frame against _last_raw_phash. If the screen truly
+        # didn't change, _no_change_after_next_count increments and
+        # triggers the end-of-test/stuck alert after 2 consecutive hits.
+        logger.warning(
+            "NEXT verification inconclusive after re-check — proceeding "
+            "optimistically. Next cycle pHash guard will catch true failures."
         )
+        self._expecting_next_change = True
 
     def _capture_single_frame_for_ref(self) -> Optional[Path]:
         """Capture a single frame for before/after comparison. Returns path or None."""
@@ -1218,6 +1221,100 @@ class WorkflowEngine:
         }
         path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
         logger.debug("AI response saved: %s", path)
+
+    def _validate_cache_hit(self, cached: dict) -> bool:
+        """Validate an image-hash cache hit against live on-screen content.
+
+        Prevents false identity reuse when two different questions hash
+        similarly (adjacent questions with matching layouts).
+
+        Checks:
+            1. Same-question-id guard: if we just answered this exact
+               question_id, it's likely a genuine same-screen (NEXT failed).
+            2. Option text overlap: at least one stored option must
+               fuzzy-match a detected on-screen option.
+
+        Returns True if the match is sufficiently confirmed, False if
+        the cache hit should be rejected.
+        """
+        cached_qid = cached.get("question_id")
+
+        # Guard 1: If this is the exact question we just answered,
+        # the screen genuinely hasn't changed — trust the hit.
+        if (
+            cached_qid is not None
+            and cached_qid == self._last_answered_question_id
+        ):
+            logger.info(
+                "Cache hit validated: same question_id=%d as last answered",
+                cached_qid,
+            )
+            return True
+
+        # Guard 2: Option text overlap.
+        # Compare stored option texts against live OCR-detected options.
+        # This catches the case where two different questions hash similarly
+        # but have completely different option content.
+        if self._latest_ocr_layout is not None:
+            option_map = self._latest_ocr_layout.get_option_map()
+            if option_map is not None and hasattr(option_map, "options") and option_map.options:
+                from controller.utils.text_normalizer import normalize_for_matching
+
+                stored_opts = [
+                    cached.get("option_a", ""),
+                    cached.get("option_b", ""),
+                    cached.get("option_c", ""),
+                    cached.get("option_d", ""),
+                    cached.get("option_e", ""),
+                ]
+                stored_norm = {
+                    normalize_for_matching(o) for o in stored_opts if o.strip()
+                }
+
+                detected_norm = set()
+                for opt in option_map.options:
+                    txt = getattr(opt, "text", "") or ""
+                    if txt.strip():
+                        detected_norm.add(normalize_for_matching(txt))
+
+                if stored_norm and detected_norm:
+                    # Check if any stored option is a substring of (or equals)
+                    # any detected option, or vice versa. This handles partial
+                    # OCR reads (e.g., OCR reads "23.5" from "Rs. 23.5 crore").
+                    overlap = False
+                    for s in stored_norm:
+                        if not s:
+                            continue
+                        for d in detected_norm:
+                            if not d:
+                                continue
+                            # Exact match or significant substring overlap
+                            if s == d or (len(s) >= 4 and s in d) or (len(d) >= 4 and d in s):
+                                overlap = True
+                                break
+                        if overlap:
+                            break
+
+                    if not overlap:
+                        logger.warning(
+                            "Cache hit validation FAILED: zero option text overlap "
+                            "(stored=%r, detected=%r)",
+                            stored_norm,
+                            detected_norm,
+                        )
+                        return False
+                    logger.info("Cache hit validated: option text overlap confirmed")
+                else:
+                    # Not enough data to validate — trust the hash
+                    logger.debug("Cache hit validation: insufficient option data, trusting hash")
+            else:
+                # No option map available — trust the hash
+                logger.debug("Cache hit validation: no option map available, trusting hash")
+        else:
+            # No OCR layout — trust the hash
+            logger.debug("Cache hit validation: no OCR layout available, trusting hash")
+
+        return True
 
     def _compute_image_phash(self, image_path: Path, hash_size: int = 8) -> str | None:
         """
