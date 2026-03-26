@@ -1,0 +1,12 @@
+{
+  "question_id": 12,
+  "canonical_text": "if log2  0.3010 and log7  0.8451 then the value of log2.8 is||0.346|0.4471|0.547|0.62",
+  "option_a": "0.62",
+  "option_b": "0.547",
+  "option_c": "0.4471",
+  "option_d": "0.346",
+  "option_e": "",
+  "correct_answer": "0.4471",
+  "answer_letter": "C",
+  "version": 1
+}

@@ -90,6 +90,22 @@ def match_option_by_content(
                 confidence="exact_raw_ci",
             )
 
+    # Pass 1.7: Digit-focused match for numeric options where OCR may
+    # confuse similar characters (l/1, O/0, I/1).  Extract only digits and
+    # decimal/math symbols, then compare.
+    _DIGIT_KEEP = re.compile(r"[^0-9./\-+^]")
+    digit_answer = _DIGIT_KEEP.sub("", correct_answer_text.strip())
+    if len(digit_answer) >= 2:
+        for letter, text in current_options.items():
+            digit_option = _DIGIT_KEEP.sub("", text.strip())
+            if digit_option and digit_answer == digit_option:
+                logger.info("Digit-focused match: %s = '%s'", letter, text[:60])
+                return OptionMatchResult(
+                    matched_letter=letter,
+                    matched_text=text,
+                    confidence="digit_exact",
+                )
+
     # Pass 2: Substring containment — only safe for longer strings where a
     # partial overlap is meaningful.  For short numeric options like "3", "2",
     # "3/2" the substring check produces false positives (e.g. "2" in "32").
@@ -140,7 +156,11 @@ def match_option_by_content(
                 confidence="fuzzy",
             )
 
-    logger.warning("No option content match found for: '%s'", correct_answer_text[:60])
+    logger.warning(
+        "No option content match found for: '%s' among options: %s",
+        correct_answer_text[:60],
+        {k: v[:40] for k, v in current_options.items()},
+    )
     return OptionMatchResult(
         matched_letter=None,
         matched_text=None,

@@ -41,9 +41,9 @@ class VerificationEngine:
     a post-click screenshot for visual highlight changes.
     """
 
-    HIGHLIGHT_SATURATION_THRESHOLD = 18
-    HIGHLIGHT_VALUE_DIFF_THRESHOLD = 20
-    HIGHLIGHT_BLUE_RATIO_THRESHOLD = 0.012
+    HIGHLIGHT_SATURATION_THRESHOLD = 14
+    HIGHLIGHT_VALUE_DIFF_THRESHOLD = 15
+    HIGHLIGHT_BLUE_RATIO_THRESHOLD = 0.005
     OPTION_CROP_PADDING = 40
 
     def __init__(
@@ -187,12 +187,15 @@ class VerificationEngine:
         cx, cy = pixel_coords
         pad = self.OPTION_CROP_PADDING
 
-        # Tight crop: captures just the radio button circle area.
-        tight_r = 30
-        tx1 = max(0, cx - tight_r)
-        ty1 = max(0, cy - tight_r)
-        tx2 = min(w, cx + tight_r)
-        ty2 = min(h, cy + tight_r)
+        # Tight crop around the radio button. Use a wider horizontal
+        # band to tolerate slight click offset and capture the full
+        # highlight row (selected options often get a full-width blue bar).
+        tight_rx = 60
+        tight_ry = 35
+        tx1 = max(0, cx - tight_rx)
+        ty1 = max(0, cy - tight_ry)
+        tx2 = min(w, cx + tight_rx)
+        ty2 = min(h, cy + tight_ry)
 
         # Wide crop for before/after diff.
         x1 = max(0, cx - pad * 3)
@@ -217,21 +220,21 @@ class VerificationEngine:
         green_ratio = float(np.count_nonzero(green_mask)) / max(green_mask.size, 1)
 
         # Any saturated colour at all (covers blue, green, orange highlights).
-        sat_mask = tight_hsv[:, :, 1] > 25
+        sat_mask = tight_hsv[:, :, 1] > 20
         sat_ratio = float(np.count_nonzero(sat_mask)) / max(sat_mask.size, 1)
 
         highlight_detected = (
             mean_s > self.HIGHLIGHT_SATURATION_THRESHOLD
             or blue_ratio > self.HIGHLIGHT_BLUE_RATIO_THRESHOLD
             or green_ratio > self.HIGHLIGHT_BLUE_RATIO_THRESHOLD
-            or sat_ratio > 0.05
+            or sat_ratio > 0.02
         )
 
         confidence = max(
             mean_s / 100.0,
             blue_ratio / max(self.HIGHLIGHT_BLUE_RATIO_THRESHOLD, 1e-9),
             green_ratio / max(self.HIGHLIGHT_BLUE_RATIO_THRESHOLD, 1e-9),
-            sat_ratio / 0.10,
+            sat_ratio / 0.05,
         )
         confidence = min(confidence, 1.0)
 
@@ -252,6 +255,18 @@ class VerificationEngine:
 
         self._pre_click_screenshot = None
 
+        # Save debug crop for post-mortem analysis.
+        try:
+            import tempfile
+            debug_dir = Path(tempfile.gettempdir()) / "simulato_verify_debug"
+            debug_dir.mkdir(parents=True, exist_ok=True)
+            cv2.imwrite(
+                str(debug_dir / f"verify_{letter}_tight.jpg"),
+                tight_region,
+            )
+        except Exception:
+            pass
+
         if highlight_detected:
             logger.info(
                 "Verification PASSED for %s (confidence=%.2f, saturation=%.1f, blue=%.3f, sat_ratio=%.3f)",
@@ -260,8 +275,9 @@ class VerificationEngine:
             return VerificationResult(verified=True, details="highlight_detected", confidence=confidence)
 
         logger.warning(
-            "Verification FAILED for %s (saturation=%.1f, blue=%.3f, green=%.3f, sat_ratio=%.3f)",
+            "Verification FAILED for %s (saturation=%.1f, blue=%.3f, green=%.3f, sat_ratio=%.3f, crop=%dx%d@(%d,%d))",
             letter, mean_s, blue_ratio, green_ratio, sat_ratio,
+            tx2 - tx1, ty2 - ty1, cx, cy,
         )
         return VerificationResult(verified=False, details="no_highlight", confidence=confidence)
 

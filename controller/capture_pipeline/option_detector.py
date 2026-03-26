@@ -272,11 +272,18 @@ class OptionDetector:
         # Radio buttons lie on a stable left column; derive a shared anchor X
         # to avoid drifting into option-text circles (e.g., "o"/"e" glyph loops).
         stable_radio_x = self._stable_radio_anchor_x(clusters, ap)
+
+        # Use calibration anchors to assign correct A-E labels even when
+        # fewer than 5 clusters are found (avoids label shifting).
+        label_assignment = self._assign_labels_from_calibration(
+            clusters, layout.image_w, layout.image_h,
+        )
+
         for i, cluster in enumerate(clusters):
             if i >= len(OPTION_LABELS):
                 break
 
-            label = OPTION_LABELS[i]
+            label = label_assignment.get(i, OPTION_LABELS[i])
             cx = cluster["center_x"]
             cy = cluster["center_y"]
             cr = cluster["median_r"]
@@ -318,9 +325,10 @@ class OptionDetector:
                 text_confidence=text_conf,
             ))
 
-            logger.debug(
-                "Option %s: (%d,%d) r=%d text='%s' conf=%.1f",
-                label, cx, cy, cr, text[:60] if text else "", text_conf,
+            logger.info(
+                "Option %s: circle=(%d,%d) r=%d click=(%d,%d) text='%s' conf=%.1f",
+                label, cx, cy, cr, stable_radio_x, cy,
+                text[:60] if text else "", text_conf,
             )
 
         method = "adaptive_y_cluster" if options else "none"
@@ -367,6 +375,92 @@ class OptionDetector:
         min_x = ap.x + int(ap.w * 0.03)
         max_x = ap.x + int(ap.w * 0.28)
         return max(min_x, min(max_x, x))
+
+    def _assign_labels_from_calibration(
+        self,
+        clusters: list[dict],
+        image_w: int,
+        image_h: int,
+    ) -> dict[int, str]:
+        """Match detected cluster rows to calibrated A-E positions.
+
+        Loads the saved grid map, converts calibrated screen-space Y for
+        each option back to approximate capture-space Y, then greedily
+        assigns the nearest calibrated label to each cluster.
+
+        Returns a dict mapping cluster index → label string.  If
+        calibration data is unavailable or inconsistent, falls back to
+        simple sequential labeling.
+        """
+        try:
+            from calibration.grid_mapper import GridMap
+            gm = GridMap.load()
+        except Exception:
+            return {}
+
+        if gm.resolution[1] <= 0 or image_h <= 0:
+            return {}
+
+        cap_h = gm.capture_resolution[1] if gm.capture_resolution[1] > 0 else image_h
+        scale_y = gm.transform.get("scale_y", 1.0)
+        offset_y = gm.transform.get("offset_y", 0.0)
+
+        if abs(scale_y) < 1e-9:
+            return {}
+
+        calib_ys: dict[str, float] = {}
+        for letter in OPTION_LABELS:
+            pos = gm.positions.get(letter)
+            if pos is None:
+                continue
+            grid_col, grid_row = pos
+            cell_h = float(gm.resolution[1]) / float(max(1, gm.grid_size[1]))
+            screen_y = (grid_row + 0.5) * cell_h
+            capture_y = (screen_y - offset_y) / scale_y
+            capture_y_for_image = capture_y * image_h / max(1, cap_h)
+            calib_ys[letter] = capture_y_for_image
+
+        if len(calib_ys) < self.MIN_EXPECTED_OPTIONS:
+            return {}
+
+        if not clusters:
+            return {}
+
+        # Greedy assignment: for each cluster (sorted by Y), find the
+        # nearest unassigned calibrated label.
+        available = dict(calib_ys)
+        assignment: dict[int, str] = {}
+        for i, cluster in enumerate(clusters):
+            cy = float(cluster.get("center_y", 0))
+            best_label = None
+            best_dist = float("inf")
+            for label, cal_y in available.items():
+                dist = abs(cy - cal_y)
+                if dist < best_dist:
+                    best_dist = dist
+                    best_label = label
+            if best_label is not None and best_dist < 300:
+                assignment[i] = best_label
+                del available[best_label]
+            else:
+                break
+
+        if len(assignment) != len(clusters):
+            return {}
+
+        labels_in_order = [assignment[i] for i in range(len(clusters))]
+        if labels_in_order != sorted(labels_in_order):
+            logger.warning(
+                "Calibration anchor labels not monotonic (%s); falling back to sequential",
+                labels_in_order,
+            )
+            return {}
+
+        logger.info(
+            "Calibration-anchored labels: %s (from %d calibrated positions)",
+            labels_in_order, len(calib_ys),
+        )
+        return assignment
 
     def _candidate_strips(self, ap: Rect) -> list[tuple[int, int]]:
         """Generate deterministic candidate strip ranges inside answer panel."""
