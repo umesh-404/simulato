@@ -1,0 +1,12 @@
+{
+  "question_id": 14,
+  "canonical_text": "a hotel in haridwar pays a servant rs 90 plus one turban. the servant leaves the job after 9 months and receives rs 65 and a turban. then find the price of the turban.||cannot be determined|rs 10|rs 15|rs 7.50",
+  "option_a": "Rs 15",
+  "option_b": "Rs 10",
+  "option_c": "Cannot be determined",
+  "option_d": "Rs 7.50",
+  "option_e": "",
+  "correct_answer": "Rs 10",
+  "answer_letter": "B",
+  "version": 1
+}

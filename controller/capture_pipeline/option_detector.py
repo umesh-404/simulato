@@ -456,6 +456,21 @@ class OptionDetector:
             )
             return {}
 
+        # Important safety rule:
+        # Virtual option labeling must begin at A for the top-most detected row.
+        # If calibration anchoring yields B..E (or any non-contiguous sequence),
+        # it means the anchor match is ambiguous in this frame.  Fall back to
+        # deterministic sequential labels A.. so downstream logic never shifts.
+        expected_prefix = OPTION_LABELS[: len(labels_in_order)]
+        if labels_in_order != expected_prefix:
+            logger.warning(
+                "Calibration labels are non-contiguous (%s, expected prefix %s); "
+                "falling back to sequential A..",
+                labels_in_order,
+                expected_prefix,
+            )
+            return {}
+
         logger.info(
             "Calibration-anchored labels: %s (from %d calibrated positions)",
             labels_in_order, len(calib_ys),
