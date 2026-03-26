@@ -167,3 +167,12 @@ class ClickDispatcher:
         logger.info("Dispatching SCROLL_RIGHT")
         coords = self._coords_for("SCROLL_RIGHT")
         return self._pi.send_command("SCROLL_RIGHT", coords=coords)
+
+    def scroll_down_at_normalized(self, norm_x: float, norm_y: float) -> dict:
+        """
+        Scroll down at a normalized target coordinate.
+        Uses wheel scroll on Pi after moving cursor to the target.
+        """
+        logger.info("Dispatching SCROLL_DOWN at normalized (%.4f, %.4f)", norm_x, norm_y)
+        coords = self._absolute_for_normalized(norm_x, norm_y)
+        return self._pi.send_command("SCROLL_DOWN", coords=coords)

@@ -120,14 +120,21 @@ class OCRLayoutAnalyzer:
     def analyze(self, image_path: Path) -> Optional[OCRLayoutResult]:
         try:
             import cv2
-            import pytesseract
-            from pytesseract import Output
         except Exception as e:
             logger.debug("OCR analyzer unavailable: %s", e)
             return None
 
-        if TESSERACT_CMD.strip():
-            pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD.strip()
+        pytesseract = None
+        Output = None
+        try:
+            import pytesseract as _pytesseract
+            from pytesseract import Output as _Output
+            pytesseract = _pytesseract
+            Output = _Output
+            if TESSERACT_CMD.strip():
+                pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD.strip()
+        except Exception as e:
+            logger.warning("pytesseract unavailable; continuing with layout-only option targeting: %s", e)
 
         img = cv2.imread(str(image_path))
         if img is None:
@@ -144,39 +151,38 @@ class OCRLayoutAnalyzer:
             logger.debug("ExamLayoutDetector failed inside OCR analyzer: %s", e)
             answer_panel = None
 
-        try:
-            data = pytesseract.image_to_data(
-                gray,
-                output_type=Output.DICT,
-                config=f"--oem 3 --psm {OCR_PSM}",
-                timeout=OCR_TIMEOUT_SECONDS,
-            )
-        except Exception as e:
-            logger.warning("OCR analyze failed: %s", e)
-            return None
-
         words: list[OCRWord] = []
-        n = len(data.get("text", []))
-        for i in range(n):
-            txt = str(data["text"][i]).strip()
-            if not txt:
-                continue
+        if pytesseract is not None and Output is not None:
             try:
-                conf = float(data["conf"][i])
-            except Exception:
-                conf = -1.0
-            if conf < OCR_MIN_WORD_CONFIDENCE:
-                continue
-            words.append(
-                OCRWord(
-                    text=txt,
-                    conf=conf,
-                    x=int(data["left"][i]),
-                    y=int(data["top"][i]),
-                    w=max(1, int(data["width"][i])),
-                    h=max(1, int(data["height"][i])),
+                data = pytesseract.image_to_data(
+                    gray,
+                    output_type=Output.DICT,
+                    config=f"--oem 3 --psm {OCR_PSM}",
+                    timeout=OCR_TIMEOUT_SECONDS,
                 )
-            )
+                n = len(data.get("text", []))
+                for i in range(n):
+                    txt = str(data["text"][i]).strip()
+                    if not txt:
+                        continue
+                    try:
+                        conf = float(data["conf"][i])
+                    except Exception:
+                        conf = -1.0
+                    if conf < OCR_MIN_WORD_CONFIDENCE:
+                        continue
+                    words.append(
+                        OCRWord(
+                            text=txt,
+                            conf=conf,
+                            x=int(data["left"][i]),
+                            y=int(data["top"][i]),
+                            w=max(1, int(data["width"][i])),
+                            h=max(1, int(data["height"][i])),
+                        )
+                    )
+            except Exception as e:
+                logger.warning("OCR text extraction failed; continuing with layout-only option targeting: %s", e)
 
         logger.info("OCR words extracted: %d", len(words))
         return OCRLayoutResult(

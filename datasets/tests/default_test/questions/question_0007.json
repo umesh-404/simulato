@@ -1,0 +1,12 @@
+{
+  "question_id": 7,
+  "canonical_text": "the question below consists of a question and two statements numbered i and ii given below it you have to decide whether the data provided in the statements isare sufficient to answer the question read both statements and give an answer how many restaurants are there in delhi statements i you take 3 meals a day and you take every meal in a restaurant you have not visited before ii it takes you 3 years to cover all the restaurants in delhi||if either statement i or ii above is sufficient to answer the question|if you can get the answer from statement ii alone but not from statement i alone|if you can get the answer from statements i and ii together although neither statement by itself suffices|if you cannot get the answer from statements i and ii together but need even more data",
+  "option_a": "If you cannot get the answer from statements I and II together, but need even more data.",
+  "option_b": "If either statement I or II above is sufficient to answer the question.",
+  "option_c": "If you can get the answer from statements I and II together, although neither statement by itself suffices.",
+  "option_d": "If you can get the answer from statement II alone but not from statement I alone.",
+  "option_e": "",
+  "correct_answer": "If you can get the answer from statements I and II together, although neither statement by itself suffices.",
+  "answer_letter": "C",
+  "version": 1
+}

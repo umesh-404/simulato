@@ -10,6 +10,7 @@ Protocol: JSON over TCP (Communication Protocols Spec Section 11-12).
 import json
 import socket
 import sys
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -18,6 +19,7 @@ from raspberry_pi.hid_controller import HIDController
 
 GRID_MAP: dict[str, tuple[int, int]] = {}
 MAX_BUFFER_BYTES = 65536
+USE_LOCAL_GRID_FALLBACK = os.environ.get("PI_USE_LOCAL_GRID_FALLBACK", "false").strip().lower() == "true"
 
 
 def load_grid_map(grid_data: dict) -> None:
@@ -80,7 +82,10 @@ def _command_to_coords(command: str) -> Optional[tuple[int, int]]:
 def run_listener() -> None:
     """Main listener loop — accepts connections and processes commands."""
     hid = HIDController()
-    _load_grid_map_from_file()
+    if USE_LOCAL_GRID_FALLBACK:
+        _load_grid_map_from_file()
+    else:
+        print("[Pi] Local grid-map fallback disabled (PI_USE_LOCAL_GRID_FALLBACK=false); expecting coords from controller.")
 
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -163,7 +168,14 @@ def _process_message(message: dict, hid: HIDController) -> dict:
         return {"type": "PI_RESPONSE", "payload": {"command": command, "status": "error", "detail": detail}}
 
     try:
-        hid.click_at(coords[0], coords[1])
+        if command == "SCROLL_DOWN":
+            hid.move_to_absolute(coords[0], coords[1])
+            hid.scroll(-24)
+        elif command == "SCROLL_UP":
+            hid.move_to_absolute(coords[0], coords[1])
+            hid.scroll(24)
+        else:
+            hid.click_at(coords[0], coords[1])
         print(f"[Pi] Executed: {command} at {coords}")
         return {"type": "PI_RESPONSE", "payload": {"command": command, "status": "executed"}}
     except Exception as e:

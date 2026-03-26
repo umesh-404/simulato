@@ -81,6 +81,15 @@ class VerificationEngine:
 
         post_screenshot = self._capture_callback()
         logger.info("Verifying click for option %s using: %s", expected_letter, post_screenshot)
+        return self.verify_click_on_image(expected_letter, post_screenshot)
+
+    def verify_click_on_image(self, expected_letter: str, post_screenshot: Path) -> VerificationResult:
+        """
+        Verify click using a specific post-click screenshot path.
+
+        This is used by workflow paths that explicitly request a fresh
+        verification capture frame and then pass that exact file here.
+        """
 
         try:
             import cv2

@@ -642,28 +642,30 @@ class WorkflowEngine:
         Uses Local AI (Qwen) if enabled, otherwise falls back
         to the CV-based verification engine.
         """
-        if LOCAL_AI_ASSIST_ENABLED:
-            self._verification_frame_event.clear()
-            self._verification_frame_data = None
-            self._is_waiting_verification_flag = True
-            if self._request_capture_callback:
-                self._request_capture_callback()
-            arrived = self._verification_frame_event.wait(timeout=VERIFY_FRAME_TIMEOUT)
-            self._is_waiting_verification_flag = False
-            if arrived and self._verification_frame_data is not None:
-                verify_path = self._receiver.receive_image(self._verification_frame_data)
-                verify_preprocessed_path = self._preprocessor.preprocess(verify_path)
-                verified, selected = check_is_answered(verify_preprocessed_path)
-                if not verified:
-                    return False
-                # Strict verification: clicked option must match selected option.
-                if selected is None:
-                    return False
-                return selected.strip().upper() == letter.strip().upper()
+        self._verification_frame_event.clear()
+        self._verification_frame_data = None
+        self._is_waiting_verification_flag = True
+        if self._request_capture_callback:
+            self._request_capture_callback()
+        arrived = self._verification_frame_event.wait(timeout=VERIFY_FRAME_TIMEOUT)
+        self._is_waiting_verification_flag = False
+        if not arrived or self._verification_frame_data is None:
             logger.warning("Verification capture timed out after %ds", VERIFY_FRAME_TIMEOUT)
             return False
-        else:
-            return self._verify.verify_click(letter).verified
+
+        verify_path = self._receiver.receive_image(self._verification_frame_data)
+        if LOCAL_AI_ASSIST_ENABLED:
+            verify_preprocessed_path = self._preprocessor.preprocess(verify_path)
+            verified, selected = check_is_answered(verify_preprocessed_path)
+            if not verified:
+                return False
+            if selected is None:
+                return False
+            return selected.strip().upper() == letter.strip().upper()
+
+        # Local AI assist disabled: still verify against a dedicated fresh frame,
+        # never reuse the pre-click screenshot path.
+        return self._verify.verify_click_on_image(letter, verify_path).verified
 
     def _capture_scroll_frames(self, direction: str) -> list[Path]:
         """
@@ -680,11 +682,32 @@ class WorkflowEngine:
         for i in range(MAX_SCROLL_FRAMES):
             logger.info("Scroll frame %d/%d — scrolling %s", i + 1, MAX_SCROLL_FRAMES, direction)
 
-            # Send scroll command
-            if direction == "right":
+            # Send scroll command.
+            # Critical: "down" must NOT degrade to SCROLL_LEFT (sidebar click).
+            dir_norm = (direction or "").strip().lower()
+            if dir_norm == "right":
                 self._click.scroll_right()
-            else:
+            elif dir_norm == "left":
                 self._click.scroll_left()
+            else:
+                # Default vertical-scroll target: question panel center-left.
+                # Use OCR/exam layout target when available for stable behavior.
+                sx, sy = (0.33, 0.60)
+                if OCR_LAYOUT_PRIMARY_ENABLED and self._latest_ocr_layout is not None and self._latest_ocr_layout.layout is not None:
+                    qp = self._latest_ocr_layout.layout.question_panel
+                    if qp is not None:
+                        sx = max(0.0, min(1.0, float(qp.x + int(qp.w * 0.6)) / float(max(1, self._latest_ocr_layout.image_w - 1))))
+                        sy = max(0.0, min(1.0, float(qp.y + int(qp.h * 0.6)) / float(max(1, self._latest_ocr_layout.image_h - 1))))
+                #region agent log
+                from controller.utils.debug_ndjson import dbg as _dbg
+                _dbg(
+                    location="controller/orchestrator/workflow_engine.py:_capture_scroll_frames",
+                    message="vertical scroll dispatch",
+                    data={"direction": dir_norm or "down", "norm_x": float(sx), "norm_y": float(sy)},
+                    hypothesisId="H5",
+                )
+                #endregion agent log
+                self._click.scroll_down_at_normalized(sx, sy)
 
             # Request a new capture from the phone
             self._scroll_frame_event.clear()
