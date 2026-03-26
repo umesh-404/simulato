@@ -665,28 +665,33 @@ class WorkflowEngine:
         """
         Execute a click and verify it (Hardware Input Transaction — Canonical Law 5).
 
-        Retry once on failure, then alert.
+        Retry with deterministic nearby radio-row fallbacks, then alert.
         """
-        self._click_option_best_target(letter)
-        
-        # Give UI time to update
-        time.sleep(1.0)
-        
-        # Verify click
-        verified = self._verify_option_click(letter)
-
-        if verified:
-            logger.info("Click verified for option %s", letter)
-            return
-
-        logger.warning("Click verification failed for %s — retrying", letter)
-        self._click_option_best_target(letter)
-        time.sleep(1.0)
-        verified = self._verify_option_click(letter)
-
-        if verified:
-            logger.info("Retry click verified for option %s", letter)
-            return
+        candidates = self._candidate_option_click_sequence(letter)
+        for idx, candidate in enumerate(candidates):
+            if idx == 0:
+                logger.info("Click attempt %d for intended option %s", idx + 1, letter)
+            else:
+                logger.warning(
+                    "Click verification-guided fallback %d: intended=%s trying_neighbor=%s",
+                    idx + 1,
+                    letter,
+                    candidate,
+                )
+            self._click_option_best_target(candidate)
+            # Give UI time to update
+            time.sleep(1.0)
+            verified = self._verify_option_click(letter)
+            if verified:
+                if candidate == letter:
+                    logger.info("Click verified for option %s", letter)
+                else:
+                    logger.info(
+                        "Click verified for intended option %s via neighbor target %s",
+                        letter,
+                        candidate,
+                    )
+                return
 
         logger.error("Click verification FAILED after retry for option %s", letter)
         self._sm.force_error(f"Input verification failed for option {letter}")
@@ -694,6 +699,44 @@ class WorkflowEngine:
             AlertType.VERIFICATION_FAILURE,
             f"Click verification failed for option {letter} after retry",
         )
+
+    def _candidate_option_click_sequence(self, intended_letter: str) -> list[str]:
+        """
+        Build deterministic fallback click targets around intended option.
+
+        If option-row labeling drifts by +/-1 in a specific frame, this lets
+        us correct it using verification feedback without blindly proceeding.
+        """
+        target = intended_letter.strip().upper()
+        if target not in {"A", "B", "C", "D", "E"}:
+            return [target]
+
+        labels: list[str] = []
+        try:
+            if self._latest_interaction_ocr_layout is not None:
+                option_map = self._latest_interaction_ocr_layout.get_option_map()
+                if option_map is not None and option_map.options:
+                    labels = [opt.label for opt in sorted(option_map.options, key=lambda o: o.circle_y)]
+        except Exception:
+            labels = []
+
+        if not labels:
+            labels = ["A", "B", "C", "D", "E"]
+        labels = [l for l in labels if l in {"A", "B", "C", "D", "E"}]
+        if target not in labels:
+            labels.append(target)
+
+        idx = labels.index(target)
+        sequence: list[str] = [target]
+        # Prefer nearest neighbors first.
+        for d in (1, -1, 2, -2, 3, -3, 4, -4):
+            j = idx + d
+            if 0 <= j < len(labels):
+                cand = labels[j]
+                if cand not in sequence:
+                    sequence.append(cand)
+        # Keep attempts bounded for runtime predictability.
+        return sequence[:4]
 
     def _click_option_best_target(self, letter: str) -> None:
         """
