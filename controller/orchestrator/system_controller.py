@@ -113,6 +113,12 @@ class SystemController:
         command = command.upper()
         logger.info("Handling command: %s", command)
 
+        # Allow operator recovery after STOP without requiring app restart.
+        # STOPPED is terminal for active run state, but START/CALIBRATE should
+        # deterministically revive the controller back to IDLE first.
+        if self._sm.state == SystemState.STOPPED and command in {"START", "CALIBRATE"}:
+            self._sm.transition_to(SystemState.IDLE, reason=f"recover_from_stopped:{command.lower()}")
+
         handlers = {
             "CALIBRATE": self._handle_calibrate,
             "START": self._handle_start,

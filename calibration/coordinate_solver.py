@@ -31,6 +31,30 @@ class CalibrationResult:
         self.message = message
 
 
+def _pixel_to_grid(
+    gm: GridMap,
+    capture_x: int,
+    capture_y: int,
+    capture_w: int,
+    capture_h: int,
+    screen_w: int,
+    screen_h: int,
+) -> tuple[int, int, int, int]:
+    """Convert capture-space pixel to screen-space pixel and grid cell."""
+    scaled_x = int(capture_x * screen_w / max(1, capture_w))
+    scaled_y = int(capture_y * screen_h / max(1, capture_h))
+    scaled_x = max(0, min(max(1, screen_w) - 1, scaled_x))
+    scaled_y = max(0, min(max(1, screen_h) - 1, scaled_y))
+
+    cell_w = float(screen_w) / float(max(1, gm.grid_size[0]))
+    cell_h = float(screen_h) / float(max(1, gm.grid_size[1]))
+    grid_col = int(scaled_x / max(1e-6, cell_w))
+    grid_row = int(scaled_y / max(1e-6, cell_h))
+    grid_col = max(0, min(gm.grid_size[0] - 1, grid_col))
+    grid_row = max(0, min(gm.grid_size[1] - 1, grid_row))
+    return scaled_x, scaled_y, grid_col, grid_row
+
+
 def calibrate_from_screenshot(image_path: Path, resolution: tuple[int, int] = (1920, 1080)) -> CalibrationResult:
     """
     Analyze an exam screenshot and produce a calibrated GridMap.
@@ -134,6 +158,75 @@ def calibrate_from_screenshot(image_path: Path, resolution: tuple[int, int] = (1
         "offset_y": 0.0,
     }
     gm.grid_size = (20, 20)
+
+    # Primary calibration path (robust): exam layout + radio-row option detector.
+    # This matches runtime click mapping behavior and is more stable than global contours.
+    try:
+        from controller.capture_pipeline.exam_layout import ExamLayoutDetector
+        from controller.capture_pipeline.option_detector import OptionDetector
+
+        layout = ExamLayoutDetector().detect(image_path)
+        option_map = None
+        if layout is not None and layout.answer_panel is not None:
+            option_map = OptionDetector().detect(image_path, layout)
+
+        if option_map is not None and option_map.count >= 4:
+            for letter in ("A", "B", "C", "D"):
+                opt = option_map.get(letter)
+                if opt is None:
+                    raise ValueError(f"missing option {letter} in option_map")
+                sx, sy, gc, gr = _pixel_to_grid(
+                    gm,
+                    capture_x=int(opt.click_x),
+                    capture_y=int(opt.click_y),
+                    capture_w=w,
+                    capture_h=h,
+                    screen_w=resolution[0],
+                    screen_h=resolution[1],
+                )
+                gm.positions[letter] = (gc, gr)
+                logger.info("Detected %s: pixel=(%d,%d) → grid=(%d,%d)", letter, sx, sy, gc, gr)
+
+            opt_e = option_map.get("E")
+            if opt_e is not None:
+                _sx, _sy, egc, egr = _pixel_to_grid(
+                    gm,
+                    capture_x=int(opt_e.click_x),
+                    capture_y=int(opt_e.click_y),
+                    capture_w=w,
+                    capture_h=h,
+                    screen_w=resolution[0],
+                    screen_h=resolution[1],
+                )
+                gm.positions["E"] = (egc, egr)
+
+            if layout.next_button is not None:
+                nx, ny = layout.next_button.cx, layout.next_button.cy
+            elif layout.answer_panel is not None:
+                nx = int(layout.answer_panel.x + layout.answer_panel.w * 0.90)
+                ny = int(layout.answer_panel.y + layout.answer_panel.h * 0.96)
+            else:
+                nx = int(w * 0.90)
+                ny = int(h * 0.95)
+
+            sx, sy, gc, gr = _pixel_to_grid(
+                gm,
+                capture_x=nx,
+                capture_y=ny,
+                capture_w=w,
+                capture_h=h,
+                screen_w=resolution[0],
+                screen_h=resolution[1],
+            )
+            gm.positions["NEXT"] = (gc, gr)
+            logger.info("Detected NEXT: pixel=(%d,%d) → grid=(%d,%d)", sx, sy, gc, gr)
+
+            gm.positions.setdefault("SCROLL_LEFT", (0, 10))
+            gm.positions.setdefault("SCROLL_RIGHT", (19, 10))
+            logger.info("Calibration complete: %d positions mapped", len(gm.positions))
+            return CalibrationResult(success=True, grid_map=gm, message="Calibration successful")
+    except Exception as e:
+        logger.warning("Primary calibration path failed, falling back to legacy contour method: %s", e)
 
     if len(option_candidates) < 4:
         logger.warning(
