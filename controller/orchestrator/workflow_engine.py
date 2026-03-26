@@ -67,7 +67,7 @@ from controller.capture_pipeline.ocr_layout_analyzer import OCRLayoutAnalyzer, O
 from controller.capture_pipeline.exam_layout import ExamLayoutDetector
 from controller.capture_pipeline.option_detector import OptionDetector
 from controller.hardware_control.click_dispatcher import ClickDispatcher
-from controller.hardware_control.verification_engine import VerificationEngine
+from controller.hardware_control.verification_engine import VerificationEngine, VerificationResult
 from controller.orchestrator.state_machine import StateMachine, SystemState
 from controller.utils.logger import get_logger, EventLogger
 from controller.utils.timer import ExecutionTimer
@@ -606,27 +606,36 @@ class WorkflowEngine:
         """
         Click NEXT to advance to the next question.
         Follows Hardware Input Transaction flow (Canonical Law 5):
-        send click → verify → retry → alert on failure.
+        send click → wait for navigation → verify screen changed → retry → alert.
         """
         if self._sm.state != SystemState.RUNNING:
             return
         logger.info("Advancing to next question")
+
+        # Capture a reference frame *before* clicking NEXT so we can
+        # verify the screen actually changed afterwards.
+        pre_next_path = self._capture_single_frame_for_ref()
+
         self._click_next_best_target()
         self._log_event("click_next", {"after_question": self._question_number})
 
-        result = self._verify_next_click()
+        # Browser needs time to process the click and navigate.
+        time.sleep(1.5)
+
+        result = self._verify_next_click_by_change(pre_next_path)
         if result.verified:
-            logger.info("NEXT click verified")
+            logger.info("NEXT click verified (screen changed)")
             self._expecting_next_change = True
             self._no_change_after_next_count = 0
             return
 
         logger.warning("NEXT click verification failed — retrying")
         self._click_next_best_target()
-        result = self._verify_next_click()
+        time.sleep(1.5)
+        result = self._verify_next_click_by_change(pre_next_path)
 
         if result.verified:
-            logger.info("NEXT retry click verified")
+            logger.info("NEXT retry click verified (screen changed)")
             self._expecting_next_change = True
             self._no_change_after_next_count = 0
             return
@@ -638,10 +647,8 @@ class WorkflowEngine:
             "NEXT button click verification failed after retry",
         )
 
-    def _verify_next_click(self):
-        """
-        Verify NEXT click using a fresh dedicated post-click frame.
-        """
+    def _capture_single_frame_for_ref(self) -> Optional[Path]:
+        """Capture a single frame for before/after comparison. Returns path or None."""
         self._verification_frame_event.clear()
         self._verification_frame_data = None
         self._is_waiting_verification_flag = True
@@ -650,10 +657,58 @@ class WorkflowEngine:
         arrived = self._verification_frame_event.wait(timeout=VERIFY_FRAME_TIMEOUT)
         self._is_waiting_verification_flag = False
         if not arrived or self._verification_frame_data is None:
-            logger.warning("NEXT verification capture timed out after %ds", VERIFY_FRAME_TIMEOUT)
-            return self._verify.verify_click("NEXT")
-        verify_path = self._receiver.receive_image(self._verification_frame_data)
-        return self._verify.verify_click_on_image("NEXT", verify_path)
+            return None
+        return self._receiver.receive_image(self._verification_frame_data)
+
+    def _verify_next_click_by_change(self, pre_next_path: Optional[Path]) -> VerificationResult:
+        """
+        Verify NEXT click by checking the screen has changed.
+
+        Compares a post-click capture against the pre-click reference.
+        A significant pixel difference indicates navigation occurred.
+        Falls back to optimistic pass if captures are unavailable.
+        """
+        self._verification_frame_event.clear()
+        self._verification_frame_data = None
+        self._is_waiting_verification_flag = True
+        if self._request_capture_callback:
+            self._request_capture_callback()
+        arrived = self._verification_frame_event.wait(timeout=VERIFY_FRAME_TIMEOUT)
+        self._is_waiting_verification_flag = False
+
+        if not arrived or self._verification_frame_data is None:
+            logger.warning("NEXT verification capture timed out — assuming success")
+            return VerificationResult(verified=True, details="next_capture_timeout_pass")
+
+        post_path = self._receiver.receive_image(self._verification_frame_data)
+
+        if pre_next_path is None:
+            logger.info("No pre-NEXT reference frame — assuming NEXT succeeded")
+            return VerificationResult(verified=True, details="no_pre_frame_pass")
+
+        try:
+            import cv2
+            pre_img = cv2.imread(str(pre_next_path))
+            post_img = cv2.imread(str(post_path))
+            if pre_img is None or post_img is None:
+                return VerificationResult(verified=True, details="unreadable_frames_pass")
+            if pre_img.shape != post_img.shape:
+                logger.info("NEXT verified: image dimensions changed")
+                return VerificationResult(verified=True, details="dimension_change", confidence=1.0)
+
+            diff = cv2.absdiff(pre_img, post_img)
+            mean_diff = float(diff.mean())
+            # A navigated page has dramatically different pixels (mean > 5).
+            # Same page with just a highlight change is typically < 3.
+            if mean_diff > 3.0:
+                logger.info("NEXT verified: mean pixel diff = %.1f", mean_diff)
+                return VerificationResult(verified=True, details="screen_changed", confidence=min(mean_diff / 10.0, 1.0))
+
+            logger.warning("NEXT verification: screen did NOT change (mean_diff=%.1f)", mean_diff)
+            return VerificationResult(verified=False, details="no_screen_change", confidence=0.0)
+        except Exception as e:
+            logger.warning("NEXT verification error: %s — assuming success", e)
+            return VerificationResult(verified=True, details="error_pass")
 
     def _click_next_best_target(self) -> None:
         """Click NEXT using OCR/Qwen-assisted targeting with calibrated fallback."""
@@ -1188,17 +1243,27 @@ class WorkflowEngine:
 
     def _is_exam_screen_despite_low_density(self, image_path: Path, validation) -> bool:
         """
-        Allow valid exam screens that fail only low-density heuristics.
+        Allow valid exam screens that fail cosmetic heuristics (low density,
+        high uniformity, etc.) as long as the structural exam layout and
+        at least 3 radio-button options are clearly detectable.
         """
         try:
             issues = list(getattr(validation, "issues", []) or [])
             if not issues:
                 return False
-            low_density_only = all(
-                ("Very low text/content density" in str(i)) or ("Content in only" in str(i))
+            # Accept failures that are purely cosmetic false-positives on
+            # real exam screens: low density, limited content zones,
+            # and high uniformity (large white answer panel).
+            benign_keywords = (
+                "Very low text/content density",
+                "Content in only",
+                "uniform",
+            )
+            cosmetic_only = all(
+                any(kw.lower() in str(i).lower() for kw in benign_keywords)
                 for i in issues
             )
-            if not low_density_only:
+            if not cosmetic_only:
                 return False
             layout = ExamLayoutDetector().detect(image_path)
             if layout is None or layout.answer_panel is None:

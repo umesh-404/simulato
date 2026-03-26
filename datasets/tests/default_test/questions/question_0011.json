@@ -1,0 +1,12 @@
+{
+  "question_id": 11,
+  "canonical_text": "what is the value of log (10) / log (10)||1|1/2|2|log 13",
+  "option_a": "log₁₀ 13",
+  "option_b": "2",
+  "option_c": "1/2",
+  "option_d": "1",
+  "option_e": "",
+  "correct_answer": "2",
+  "answer_letter": "B",
+  "version": 1
+}
