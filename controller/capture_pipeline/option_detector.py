@@ -367,8 +367,10 @@ class OptionDetector:
             return ap.x + int(ap.w * 0.10)
 
         xs = sorted(int(c.get("center_x", ap.x + int(ap.w * 0.10))) for c in clusters)
-        # Use lower quartile as the stable radio column anchor.
-        q_idx = max(0, min(len(xs) - 1, int(round((len(xs) - 1) * 0.25))))
+        # Use median as the stable radio column anchor.
+        # (Previously lower-quartile, but that biased clicks LEFT of the
+        # true column center when HoughCircle centres have natural jitter.)
+        q_idx = max(0, min(len(xs) - 1, int(round((len(xs) - 1) * 0.50))))
         x = xs[q_idx]
 
         # Keep inside a conservative left band of answer panel.

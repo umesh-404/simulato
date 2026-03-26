@@ -913,7 +913,29 @@ class WorkflowEngine:
             )
             return
 
-        logger.warning("Click verification failed for %s — retrying same option", letter)
+        logger.warning("Click verification failed for %s — checking if already selected before retry", letter)
+
+        # CRITICAL: Before re-clicking, take a fresh screenshot and re-verify.
+        # If the option IS already selected (first click worked, verification
+        # was a false negative due to timing/crop), re-clicking would TOGGLE
+        # the selection OFF — a destructive outcome worse than a missed click.
+        time.sleep(0.5)
+        pre_retry_verified = self._verify_option_click(dispatched_letter)
+        if pre_retry_verified:
+            logger.info(
+                "Pre-retry check: option %s IS already selected — skipping re-click (first click worked, "
+                "initial verification was a false negative)",
+                letter,
+            )
+            return
+        if self._last_verification_timed_out:
+            logger.warning(
+                "Pre-retry verification capture timed out for option %s; assuming first click worked",
+                letter,
+            )
+            return
+
+        logger.info("Pre-retry check: option %s NOT yet selected — proceeding with retry click", letter)
         dispatched_letter = self._click_option_best_target(letter)
         self._last_dispatched_click_letter = dispatched_letter
         time.sleep(1.0)
