@@ -66,6 +66,7 @@ class OCRLayoutResult:
         self.image_path = image_path
         self.layout = layout
         self._option_map_cache: Optional[Any] = None
+        self._max_options: int | None = None  # Set by workflow after AI response
 
     def detect_question_number(self) -> Optional[tuple[int, int]]:
         """Extract the current question number and total from OCR words.
@@ -100,11 +101,19 @@ class OCRLayoutResult:
 
         return None
 
+    def set_max_options(self, max_options: int | None) -> None:
+        """Set expected option count (from AI response) to constrain detection."""
+        if max_options != self._max_options:
+            self._option_map_cache = None  # Invalidate cache on change
+            self._max_options = max_options
+
     def get_option_map(self):
         if self.image_path is None or self.layout is None:
             return None
         if self._option_map_cache is None:
-            self._option_map_cache = OptionDetector().detect(self.image_path, self.layout)
+            self._option_map_cache = OptionDetector().detect(
+                self.image_path, self.layout, max_options=self._max_options,
+            )
         return self._option_map_cache
 
     def _norm(self, x: int, y: int) -> tuple[float, float]:
@@ -138,7 +147,9 @@ class OCRLayoutResult:
         if self.image_path is None or self.layout is None:
             return None
         if self._option_map_cache is None:
-            self._option_map_cache = OptionDetector().detect(self.image_path, self.layout)
+            self._option_map_cache = OptionDetector().detect(
+                self.image_path, self.layout, max_options=self._max_options,
+            )
         opt = self._option_map_cache.get(letter)
         if opt is None:
             # Geometric fallback: if an exact label is missing due partial detection,

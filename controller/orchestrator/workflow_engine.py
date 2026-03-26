@@ -590,6 +590,14 @@ class WorkflowEngine:
             if decision.click_letter:
                 self._refresh_interaction_targets_post_ai()
 
+                # Set expected option count on the interaction layout so the
+                # option detector trims phantom circles beyond the real count.
+                expected_options = self._compute_expected_option_count(ai_response, cached_question)
+                if expected_options is not None:
+                    for layout_obj in (self._latest_interaction_ocr_layout, self._latest_ocr_layout):
+                        if layout_obj is not None and hasattr(layout_obj, 'set_max_options'):
+                            layout_obj.set_max_options(expected_options)
+
             # Step 9: Execute click
             # Guard: if this is the same question we just answered (NEXT
             # failed to navigate), the option is already selected on screen.
@@ -1244,6 +1252,37 @@ class WorkflowEngine:
         path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
         logger.debug("AI response saved: %s", path)
 
+    def _compute_expected_option_count(
+        self,
+        ai_response: Optional[GrokResponse],
+        cached_question: Optional[dict],
+    ) -> Optional[int]:
+        """Determine expected option count from AI response or cached question.
+
+        Returns 4 if option E is empty/absent, 5 if present, or None if
+        the count cannot be determined.
+        """
+        # Priority 1: AI response options
+        if ai_response is not None:
+            try:
+                opt_e = (ai_response.options.E or "").strip()
+                if not opt_e:
+                    logger.info("AI response has empty option E — expecting 4 options")
+                    return 4
+                return 5
+            except Exception:
+                pass
+
+        # Priority 2: Cached question record
+        if cached_question is not None:
+            opt_e = (cached_question.get("option_e", "") or "").strip()
+            if not opt_e:
+                logger.info("Cached question has empty option_e — expecting 4 options")
+                return 4
+            return 5
+
+        return None
+
     def _validate_cache_hit(self, cached: dict) -> bool:
         """Validate an image-hash cache hit against live on-screen content.
 
@@ -1263,9 +1302,14 @@ class WorkflowEngine:
 
         # Guard 1: If this is the exact question we just answered,
         # the screen genuinely hasn't changed — trust the hit.
+        # BUT: if we just successfully navigated (_expecting_next_change),
+        # we're guaranteed on a different question. A pHash collision
+        # to the same question_id must NOT be auto-trusted; fall through
+        # to Guard 2 (option text overlap) for real validation.
         if (
             cached_qid is not None
             and cached_qid == self._last_answered_question_id
+            and not self._expecting_next_change
         ):
             logger.info(
                 "Cache hit validated: same question_id=%d as last answered",

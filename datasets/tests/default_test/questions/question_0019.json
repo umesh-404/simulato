@@ -1,0 +1,12 @@
+{
+  "question_id": 19,
+  "canonical_text": "multi choice type question find the common factor of (127^97 + 97^97) and||224|432|786|967",
+  "option_a": "967",
+  "option_b": "432",
+  "option_c": "786",
+  "option_d": "224",
+  "option_e": "",
+  "correct_answer": "224",
+  "answer_letter": "D",
+  "version": 1
+}

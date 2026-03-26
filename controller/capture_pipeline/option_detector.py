@@ -133,6 +133,7 @@ class OptionDetector:
         self,
         image_path: Path,
         layout: ExamLayout,
+        max_options: int | None = None,
     ) -> OptionMap:
         """
         Detect option radio buttons and their text in the answer panel.
@@ -258,9 +259,12 @@ class OptionDetector:
         # Sort clusters by Y (top to bottom)
         clusters.sort(key=lambda c: c["center_y"])
 
-        # Trim to max expected options
-        if len(clusters) > self.MAX_EXPECTED_OPTIONS:
-            clusters = clusters[:self.MAX_EXPECTED_OPTIONS]
+        # Trim to max expected options.
+        # If caller specified max_options (from AI response), use that;
+        # otherwise fall back to the class-level MAX_EXPECTED_OPTIONS.
+        effective_max = max_options if max_options is not None else self.MAX_EXPECTED_OPTIONS
+        if len(clusters) > effective_max:
+            clusters = self._trim_to_expected_count(clusters, effective_max)
 
         # Spacing regularity filter: real radio buttons are roughly evenly
         # spaced.  If the gap between the first and second row is more than
@@ -719,6 +723,42 @@ class OptionDetector:
         if len(result) >= self.MIN_EXPECTED_OPTIONS:
             return result
         return clusters
+
+    def _trim_to_expected_count(self, clusters: list[dict], target: int) -> list[dict]:
+        """Select the best `target`-sized subset of clusters by spacing regularity.
+
+        When the AI response indicates fewer options than the detector found
+        (e.g., 4 real options but 5 circles detected due to a phantom header
+        circle), this picks the contiguous subsequence whose inter-row gaps
+        have the lowest standard deviation — the most regularly spaced rows
+        are the real radio buttons.
+        """
+        if target <= 0 or len(clusters) <= target:
+            return clusters
+
+        ordered = sorted(clusters, key=lambda c: c["center_y"])
+        best_subset = ordered[:target]
+        best_std = float("inf")
+
+        for start in range(len(ordered) - target + 1):
+            subset = ordered[start : start + target]
+            ys = [c["center_y"] for c in subset]
+            if len(ys) < 2:
+                return subset
+            gaps = [ys[i + 1] - ys[i] for i in range(len(ys) - 1)]
+            std = float(np.std(gaps))
+            if std < best_std:
+                best_std = std
+                best_subset = subset
+
+        dropped_ys = [
+            c["center_y"] for c in ordered if c not in best_subset
+        ]
+        logger.info(
+            "Trimmed options from %d to %d (dropped Y=%s, best_spacing_std=%.1f)",
+            len(clusters), target, dropped_ys, best_std,
+        )
+        return best_subset
 
     def _compute_option_row(
         self,
