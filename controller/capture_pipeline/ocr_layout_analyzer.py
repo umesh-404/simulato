@@ -25,6 +25,7 @@ from controller.utils.logger import get_logger
 from controller.capture_pipeline.exam_layout import ExamLayoutDetector, Rect
 from controller.capture_pipeline.exam_layout import ExamLayout
 from controller.capture_pipeline.option_detector import OptionDetector
+from controller.answer_engine.option_matcher import match_option_by_content
 
 logger = get_logger("ocr_layout")
 
@@ -137,6 +138,46 @@ class OCRLayoutResult:
                 y = max(self.answer_panel.y, min(self.answer_panel.y2 - 1, y))
             return self._norm(int(x), int(y))
         return self._norm(int(opt.click_x), int(opt.click_y))
+
+    def locate_option_target_by_content(
+        self,
+        answer_text: str,
+        fallback_letter: str,
+    ) -> Optional[tuple[str, tuple[float, float]]]:
+        """
+        Resolve option target by current on-screen option text first, then fallback letter.
+
+        Returns:
+            (resolved_letter, (norm_x, norm_y)) when available, otherwise None.
+        """
+        option_map = self.get_option_map()
+        if option_map is None or not option_map.options:
+            target = self.locate_option_target(fallback_letter)
+            if target is None:
+                return None
+            return (fallback_letter.strip().upper(), target)
+
+        current_options = {opt.label: (opt.text or "") for opt in option_map.options}
+        ans = (answer_text or "").strip()
+        if ans:
+            match = match_option_by_content(ans, current_options)
+            if match.found and match.matched_letter:
+                opt = option_map.get(match.matched_letter)
+                if opt is not None:
+                    return (
+                        match.matched_letter,
+                        self._norm(int(opt.click_x), int(opt.click_y)),
+                    )
+
+        # Deterministic fallback to caller-provided letter if content match fails.
+        fallback = fallback_letter.strip().upper()
+        opt = option_map.get(fallback)
+        if opt is not None:
+            return (fallback, self._norm(int(opt.click_x), int(opt.click_y)))
+        target = self.locate_option_target(fallback)
+        if target is None:
+            return None
+        return (fallback, target)
 
     def locate_next_target(self) -> Optional[tuple[float, float]]:
         next_words: list[OCRWord] = []

@@ -41,9 +41,9 @@ class VerificationEngine:
     a post-click screenshot for visual highlight changes.
     """
 
-    HIGHLIGHT_SATURATION_THRESHOLD = 30
+    HIGHLIGHT_SATURATION_THRESHOLD = 18
     HIGHLIGHT_VALUE_DIFF_THRESHOLD = 20
-    HIGHLIGHT_BLUE_RATIO_THRESHOLD = 0.15
+    HIGHLIGHT_BLUE_RATIO_THRESHOLD = 0.012
     OPTION_CROP_PADDING = 40
 
     def __init__(

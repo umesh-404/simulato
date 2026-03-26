@@ -2,6 +2,8 @@
 
 Use this checklist before every exam session to verify all components are ready.
 
+> Current checkmarks reflect latest validated project/session behavior as of 2026-03-26. Re-verify before each live exam.
+
 ---
 
 ## 1. Hardware
@@ -15,11 +17,11 @@ Use this checklist before every exam session to verify all components are ready.
 
 ## 2. Raspberry Pi (HIDPi)
 
-- [ ] `/dev/hidg0` exists (HIDPi keyboard gadget)
-- [ ] `/dev/hidg1` exists (HIDPi mouse gadget)
-- [ ] Command listener running (`sudo ./start_pi.sh` using project venv)
-- [ ] PC can reach Pi on port 9000 (or configured PI_PORT)
-- [ ] Test HID click works (exam laptop moves cursor)
+- [x] `/dev/hidg0` exists (HIDPi keyboard gadget)
+- [x] `/dev/hidg1` exists (HIDPi mouse gadget)
+- [x] Command listener running (`sudo ./start_pi.sh` using project venv)
+- [x] PC can reach Pi on port 9000 (or configured PI_PORT)
+- [x] Test HID click works (exam laptop moves cursor)
 
 Optional quick smoke-test (recommended after changing cables/USB ports):
 
@@ -41,13 +43,13 @@ sudo ./start_pi.sh
 
 ## 3. Main Control PC
 
-- [ ] Ollama installed (https://ollama.com/download)
-- [ ] Tesseract OCR installed and on PATH (or `TESSERACT_CMD` set in `.env`)
-- [ ] `.env` file configured with `GROK_API_KEY` or `GEMINI_API_KEY`, and `PI_HOST`
-- [ ] Python virtual environment activated
-- [ ] Dependencies installed (`pip install -r requirements.txt`)
-- [ ] Controller running via `start.bat` (auto-starts Ollama + auto-pulls model + starts server)
-- [ ] API responds on port 8000
+- [x] Ollama installed (https://ollama.com/download)
+- [x] Tesseract OCR installed and on PATH (or `TESSERACT_CMD` set in `.env`)
+- [x] `.env` file configured with `GROK_API_KEY` or `GEMINI_API_KEY`, and `PI_HOST`
+- [x] Python virtual environment activated
+- [x] Dependencies installed (`pip install -r requirements.txt`)
+- [x] Controller running via `start.bat` (auto-starts Ollama + auto-pulls model + starts server)
+- [x] API responds on port 8000
 
 ```bash
 # Verify Tesseract:
@@ -62,36 +64,36 @@ curl http://localhost:8000/api/status
 
 ## 4. Database
 
-- [ ] SQLite database initialized (`database/questions.db` exists)
-- [ ] Schema applied (tables: tests, questions, question_snapshots)
+- [x] SQLite database initialized (`database/questions.db` exists)
+- [x] Schema applied (tables: tests, questions, question_snapshots)
 - [ ] Test data loaded (if pre-populated question bank available)
 
 ## 5. Capture Phone
 
-- [ ] Simulato app installed
-- [ ] App configured with Controller IP address
-- [ ] Camera permissions granted
-- [ ] Device registered with controller (check `/api/status`)
-- [ ] Test image upload successful
+- [x] Simulato app installed
+- [x] App configured with Controller IP address
+- [x] Camera permissions granted
+- [x] Device registered with controller (check `/api/status`)
+- [x] Test image upload successful
 
 ## 6. Remote Control Phone
 
-- [ ] Simulato app installed
-- [ ] App configured with Controller IP address
-- [ ] Device registered as remote controller
-- [ ] WebSocket alert connection active
-- [ ] Test alert received
+- [x] Simulato app installed
+- [x] App configured with Controller IP address
+- [x] Device registered as remote controller
+- [x] WebSocket alert connection active
+- [x] Test alert received
 
 ## 7. Calibration
 
-- [ ] Capture Phone app open and in Capture Mode
-- [ ] Tap **CALIBRATE SCREEN MAP** button on Capture Phone
-- [ ] Controller log shows: `Calibration successful: N positions mapped`
-- [ ] `config/grid_map.json` saved and loaded
-- [ ] Capture Phone shows "Calibration successful" toast
+- [x] Capture Phone app open and in Capture Mode
+- [x] Tap **CALIBRATE SCREEN MAP** button on Capture Phone
+- [x] Controller log shows: `Calibration successful: N positions mapped`
+- [x] `config/grid_map.json` saved and loaded
+- [x] Capture Phone shows "Calibration successful" toast
 - [ ] Test click on each visible option row verified (3-5 rows, virtual letters A..E)
 - [ ] NEXT button click verified
-- [ ] Scroll action verified (if applicable)
+- [x] Scroll action verified (if applicable)
 
 Optional CV pipeline calibration (validates scroll/option detection across 30-image dataset):
 
@@ -109,22 +111,22 @@ python scripts/calibrate_scroll.py
 
 ## 9. Pre-Run Verification
 
-- [ ] Controller status shows all devices registered
-- [ ] System state is IDLE
-- [ ] Pi listener reachable from PC (if not, START will be rejected with INPUT_FAILURE)
-- [ ] Send CALIBRATE command → state transitions to CALIBRATION
-- [ ] Perform calibration → state transitions to IDLE
-- [ ] Send START command → state transitions to RUNNING
-- [ ] First question captured and processed successfully
+- [x] Controller status shows all devices registered
+- [x] System state is IDLE
+- [x] Pi listener reachable from PC (if not, START will be rejected with INPUT_FAILURE)
+- [x] Send CALIBRATE command → state transitions to CALIBRATION
+- [x] Perform calibration → state transitions to IDLE
+- [x] Send START command → state transitions to RUNNING
+- [x] First question captured and processed successfully
 - [ ] Send PAUSE command → state transitions to PAUSED
-- [ ] Send STOP command → state transitions to STOPPED
+- [x] Send STOP command → state transitions to STOPPED
 
 ## 10. Logging
 
-- [ ] Logs directory created (`logs/`)
-- [ ] Event log writing confirmed
-- [ ] Run artifacts directory created (`runs/`)
-- [ ] Screenshot storage working
+- [x] Logs directory created (`logs/`)
+- [x] Event log writing confirmed
+- [x] Run artifacts directory created (`runs/`)
+- [x] Screenshot storage working
 
 ---
 

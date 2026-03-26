@@ -99,5 +99,6 @@ Now that everything is running and talking to the Mother PC:
 4. During the run:
    - For each question it captures, preprocesses, checks DB/image-hash first, and calls Grok/Gemini only for new questions.
   - It uses OCR + adaptive radio-circle detection as primary option/NEXT targeting, then falls back to local Qwen and calibrated grid/CV if needed.
-   - It verifies answer selection after click using a dedicated capture before advancing.
+  - After AI returns an answer for a stitched question image, the controller requests a dedicated fresh post-AI mapping frame for live radio-row mapping before click dispatch.
+  - It verifies answer selection after click using a dedicated capture around the exact click target; on failure it retries the same intended option once (no cross-option jumbling fallback).
    - On failures, it pauses and alerts the Remote phone for explicit operator action.

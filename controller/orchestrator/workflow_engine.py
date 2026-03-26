@@ -138,6 +138,8 @@ class WorkflowEngine:
         self._ai_provider: str = DEFAULT_AI_PROVIDER  # "grok" or "gemini"
         self._last_verification_timed_out: bool = False
         self._last_option_click_target_norm: tuple[float, float] | None = None
+        self._current_answer_text_for_click: str = ""
+        self._last_dispatched_click_letter: str | None = None
 
     def set_capture_callback(self, callback) -> None:
         """Set callback to request capture from the phone."""
@@ -202,6 +204,8 @@ class WorkflowEngine:
         self._latest_ocr_layout = None
         self._latest_interaction_ocr_layout = None
         self._latest_preprocessed_image_path = None
+        self._current_answer_text_for_click = ""
+        self._last_dispatched_click_letter = None
         self._mapping_frame_data = None
         self._is_waiting_mapping_flag = False
         self._mapping_frame_event.set()
@@ -449,6 +453,7 @@ class WorkflowEngine:
 
             ai_response = None
             ai_model_used = ""
+            answer_text_for_click = ""
 
             # Step 6: Query AI (dispatch to active provider) — only if no image-hash hit
             try:
@@ -477,6 +482,7 @@ class WorkflowEngine:
             if cached_question is not None:
                 db_answer = cached_question.get("correct_answer", "")
                 answer_letter = cached_question.get("answer_letter", "")
+                answer_text_for_click = db_answer or ""
                 if not answer_letter:
                     logger.error(
                         "Cached question %d has empty answer_letter; cannot use image-hash fast path",
@@ -500,8 +506,11 @@ class WorkflowEngine:
                 )
             elif ocr_cached_decision is not None:
                 decision = ocr_cached_decision
+                if decision.match_result is not None:
+                    answer_text_for_click = (decision.match_result.correct_answer or "").strip()
             else:
                 decision = decide_answer(self._db, self._test_id, ai_response)  # type: ignore[arg-type]
+                answer_text_for_click = (ai_response.answer_content if ai_response is not None else "") or ""
                 # Always remap by live on-screen option content to handle shuffled options.
                 if decision.click_letter and ai_response is not None:
                     decision.click_letter = self._remap_letter_by_option_content(
@@ -534,10 +543,12 @@ class WorkflowEngine:
 
             # Step 9: Execute click
             if decision.click_letter:
+                self._current_answer_text_for_click = answer_text_for_click.strip()
                 self._execute_click_with_verification(decision.click_letter)
                 self._log_event("answer_decision", {
                     "question_number": self._question_number,
                     "click_letter": decision.click_letter,
+                    "dispatched_letter": self._last_dispatched_click_letter,
                     "source": decision.source,
                     "question_id": decision.question_id,
                 })
@@ -673,11 +684,12 @@ class WorkflowEngine:
             logger.info("Skipping click execution for %s — state is %s", letter, self._sm.state.value)
             return
         logger.info("Click attempt 1 for intended option %s", letter)
-        self._click_option_best_target(letter)
+        dispatched_letter = self._click_option_best_target(letter)
+        self._last_dispatched_click_letter = dispatched_letter
         time.sleep(1.0)
-        verified = self._verify_option_click(letter)
+        verified = self._verify_option_click(dispatched_letter)
         if verified:
-            logger.info("Click verified for option %s", letter)
+            logger.info("Click verified for option %s (dispatched=%s)", letter, dispatched_letter)
             return
         if self._last_verification_timed_out:
             logger.warning(
@@ -687,11 +699,12 @@ class WorkflowEngine:
             return
 
         logger.warning("Click verification failed for %s — retrying same option", letter)
-        self._click_option_best_target(letter)
+        dispatched_letter = self._click_option_best_target(letter)
+        self._last_dispatched_click_letter = dispatched_letter
         time.sleep(1.0)
-        verified = self._verify_option_click(letter)
+        verified = self._verify_option_click(dispatched_letter)
         if verified:
-            logger.info("Retry click verified for option %s", letter)
+            logger.info("Retry click verified for option %s (dispatched=%s)", letter, dispatched_letter)
             return
 
         logger.error("Click verification FAILED after retry for option %s", letter)
@@ -739,33 +752,55 @@ class WorkflowEngine:
         # Keep attempts bounded for runtime predictability.
         return sequence[:4]
 
-    def _click_option_best_target(self, letter: str) -> None:
+    def _click_option_best_target(self, letter: str) -> str:
         """
         Click an option using precise local-AI target when available,
         otherwise fallback to calibrated static option mapping.
         """
+        target_letter = letter.strip().upper()
         if OCR_LAYOUT_PRIMARY_ENABLED and self._latest_interaction_ocr_layout is not None:
-            ocr_target = self._latest_interaction_ocr_layout.locate_option_target(letter)
+            resolved = self._latest_interaction_ocr_layout.locate_option_target_by_content(
+                self._current_answer_text_for_click,
+                target_letter,
+            )
+            if resolved is not None:
+                resolved_letter, ocr_target = resolved
+                if resolved_letter != target_letter:
+                    logger.info(
+                        "Content-locked remap on live frame: intended %s -> %s",
+                        target_letter,
+                        resolved_letter,
+                    )
+                logger.info("Using OCR-derived content-locked target for option %s", resolved_letter)
+                self._last_option_click_target_norm = (float(ocr_target[0]), float(ocr_target[1]))
+                self._click.click_at_normalized(
+                    ocr_target[0],
+                    ocr_target[1],
+                    command=f"CLICK_{resolved_letter}",
+                )
+                return resolved_letter
+
+            ocr_target = self._latest_interaction_ocr_layout.locate_option_target(target_letter)
             if ocr_target is not None:
-                logger.info("Using OCR-derived target for option %s", letter)
+                logger.info("Using OCR-derived target for option %s", target_letter)
                 self._last_option_click_target_norm = (float(ocr_target[0]), float(ocr_target[1]))
                 #region agent log
                 from controller.utils.debug_ndjson import dbg as _dbg
                 _dbg(
                     location="controller/orchestrator/workflow_engine.py:_click_option_best_target",
                     message="click option via OCRLayoutResult",
-                    data={"letter": letter, "norm_x": float(ocr_target[0]), "norm_y": float(ocr_target[1])},
+                    data={"letter": target_letter, "norm_x": float(ocr_target[0]), "norm_y": float(ocr_target[1])},
                     hypothesisId="H3",
                 )
                 #endregion agent log
                 self._click.click_at_normalized(
                     ocr_target[0],
                     ocr_target[1],
-                    command=f"CLICK_{letter.strip().upper()}",
+                    command=f"CLICK_{target_letter}",
                 )
-                return
+                return target_letter
         if LOCAL_AI_ASSIST_ENABLED and self._latest_preprocessed_image_path is not None:
-            target = locate_option_target(self._latest_preprocessed_image_path, letter)
+            target = locate_option_target(self._latest_preprocessed_image_path, target_letter)
             if target is not None:
                 self._last_option_click_target_norm = (float(target[0]), float(target[1]))
                 #region agent log
@@ -773,23 +808,24 @@ class WorkflowEngine:
                 _dbg(
                     location="controller/orchestrator/workflow_engine.py:_click_option_best_target",
                     message="click option via local_ai locate_option_target",
-                    data={"letter": letter, "norm_x": float(target[0]), "norm_y": float(target[1])},
+                    data={"letter": target_letter, "norm_x": float(target[0]), "norm_y": float(target[1])},
                     hypothesisId="H3",
                 )
                 #endregion agent log
-                self._click.click_at_normalized(target[0], target[1], command=f"CLICK_{letter.strip().upper()}")
-                return
+                self._click.click_at_normalized(target[0], target[1], command=f"CLICK_{target_letter}")
+                return target_letter
         #region agent log
         from controller.utils.debug_ndjson import dbg as _dbg
         _dbg(
             location="controller/orchestrator/workflow_engine.py:_click_option_best_target",
             message="click option via calibrated fallback",
-            data={"letter": letter},
+            data={"letter": target_letter},
             hypothesisId="H3",
         )
         #endregion agent log
         self._last_option_click_target_norm = None
-        self._click.click_option(letter)
+        self._click.click_option(target_letter)
+        return target_letter
 
     def _verify_option_click(self, letter: str) -> bool:
         """
@@ -1031,9 +1067,12 @@ class WorkflowEngine:
         This keeps clicks correct when options are shuffled.
         """
         try:
-            if self._latest_ocr_layout is None:
+            # Prefer the latest interaction frame map so letter mapping and click
+            # targeting use the same live on-screen source of truth.
+            layout_source = self._latest_interaction_ocr_layout or self._latest_ocr_layout
+            if layout_source is None:
                 return fallback_letter
-            option_map = self._latest_ocr_layout.get_option_map()
+            option_map = layout_source.get_option_map()
             if option_map is None or not option_map.options:
                 return fallback_letter
             current_options = {opt.label: (opt.text or "") for opt in option_map.options}

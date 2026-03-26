@@ -194,6 +194,8 @@ the calibration workflow instead of the question processing pipeline.
 During normal runs, images may also be explicitly routed as **scroll
 frames** or **verification frames** when the controller is waiting for
 those specific captures from the Capture Phone.
+The controller may also request and route a dedicated **post-AI mapping frame**
+between AI decision and click dispatch to refresh live radio-row mapping.
 
 ---
 # 7A. FRAME STREAMING (Optional, Best-Effort)
@@ -428,7 +430,9 @@ CLICK_D
 CLICK_E  
 CLICK_NEXT  
 SCROLL_LEFT  
-SCROLL_RIGHT
+SCROLL_RIGHT  
+SCROLL_DOWN  
+SCROLL_UP
 
 Example:
 

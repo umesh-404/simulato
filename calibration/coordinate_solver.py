@@ -170,11 +170,24 @@ def calibrate_from_screenshot(image_path: Path, resolution: tuple[int, int] = (1
         if layout is not None and layout.answer_panel is not None:
             option_map = OptionDetector().detect(image_path, layout)
 
-        if option_map is not None and option_map.count >= 4:
-            for letter in ("A", "B", "C", "D"):
-                opt = option_map.get(letter)
-                if opt is None:
-                    raise ValueError(f"missing option {letter} in option_map")
+        if option_map is not None and option_map.count >= 3:
+            ordered = sorted(option_map.options, key=lambda o: int(o.circle_y))
+            ys = [int(o.click_y) for o in ordered]
+            xs = [int(o.click_x) for o in ordered]
+            x_anchor = int(round(sum(xs) / max(1, len(xs))))
+
+            # Validate geometry so we do not persist obviously broken maps.
+            if any(ys[i] >= ys[i + 1] for i in range(len(ys) - 1)):
+                raise ValueError("non-monotonic option rows in primary calibration path")
+            if layout.answer_panel is not None:
+                ap = layout.answer_panel
+                min_x = ap.x + int(ap.w * 0.02)
+                max_x = ap.x + int(ap.w * 0.40)
+                if not (min_x <= x_anchor <= max_x):
+                    raise ValueError("option x-anchor outside expected answer-panel radio band")
+
+            # Store all directly detected rows first.
+            for opt in ordered:
                 sx, sy, gc, gr = _pixel_to_grid(
                     gm,
                     capture_x=int(opt.click_x),
@@ -184,21 +197,34 @@ def calibrate_from_screenshot(image_path: Path, resolution: tuple[int, int] = (1
                     screen_w=resolution[0],
                     screen_h=resolution[1],
                 )
-                gm.positions[letter] = (gc, gr)
-                logger.info("Detected %s: pixel=(%d,%d) → grid=(%d,%d)", letter, sx, sy, gc, gr)
+                gm.positions[opt.label] = (gc, gr)
+                logger.info("Detected %s: pixel=(%d,%d) → grid=(%d,%d)", opt.label, sx, sy, gc, gr)
 
-            opt_e = option_map.get("E")
-            if opt_e is not None:
-                _sx, _sy, egc, egr = _pixel_to_grid(
-                    gm,
-                    capture_x=int(opt_e.click_x),
-                    capture_y=int(opt_e.click_y),
-                    capture_w=w,
-                    capture_h=h,
-                    screen_w=resolution[0],
-                    screen_h=resolution[1],
-                )
-                gm.positions["E"] = (egc, egr)
+            # Deterministically extrapolate missing rows (if any) so we avoid
+            # fragile contour fallback when calibration screenshot has only 3 options.
+            if len(ys) >= 2:
+                steps = [ys[i + 1] - ys[i] for i in range(len(ys) - 1) if ys[i + 1] > ys[i]]
+                step = int(round(float(np.median(steps)))) if steps else 0
+            else:
+                step = 0
+            if 20 <= step <= 600:
+                base_y = ys[0]
+                for idx, letter in enumerate(("A", "B", "C", "D", "E")):
+                    if letter in gm.positions:
+                        continue
+                    est_y = int(base_y + idx * step)
+                    est_y = max(0, min(h - 1, est_y))
+                    _sx, _sy, egc, egr = _pixel_to_grid(
+                        gm,
+                        capture_x=x_anchor,
+                        capture_y=est_y,
+                        capture_w=w,
+                        capture_h=h,
+                        screen_w=resolution[0],
+                        screen_h=resolution[1],
+                    )
+                    gm.positions[letter] = (egc, egr)
+                    logger.info("Estimated %s: pixel=(%d,%d) → grid=(%d,%d)", letter, _sx, _sy, egc, egr)
 
             if layout.next_button is not None:
                 nx, ny = layout.next_button.cx, layout.next_button.cy

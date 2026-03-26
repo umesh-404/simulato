@@ -199,6 +199,7 @@ All implementation follows:
 - [x] HSV color space highlight detection with grid-based region cropping
 - [x] Before/after screenshot comparison for highlight change detection
 - [x] Fallback full-image blue-ratio analysis
+- [x] Exact-target verification path for normalized click coordinates (`verify_click_at_normalized_on_image`)
 
 ## 3.10 Capture Pipeline (Phase 9)
 
@@ -207,7 +208,7 @@ All implementation follows:
 - [x] Base64 and raw bytes reception
 - [x] Public `run_dir` property for artifact access
 - [x] `latest_path` tracking for newest frame
-- [x] Routing support for scroll frames and post-click verification frames
+- [x] Routing support for scroll frames, post-click verification frames, and post-AI mapping frames
 - [x] `controller/capture_pipeline/scroll_detector.py`
 - [x] **v4 structural scroll detection** (rewritten from brightness-based v3)
 - [x] `_find_ui_bounds()` — isolates exam UI content from dark photo borders using column brightness analysis (threshold 130) with run-length filtering
@@ -315,6 +316,8 @@ All implementation follows:
 - [x] REQUERY_AI logs intent (awaits next capture)
 - [x] Device disconnection handler triggers ERROR + alert
 - [x] Graceful shutdown with state transition and cleanup
+- [x] STOP/PAUSE safety guards in async processing (prevents post-stop advance/click actions)
+- [x] Deterministic STOPPED recovery path for START/CALIBRATE/PAUSE (returns through IDLE)
 - [x] `controller/orchestrator/workflow_engine.py`
 - [x] Full 10-step question processing pipeline
 - [x] Screen validation (fail-safe)
@@ -329,8 +332,10 @@ All implementation follows:
 - [x] **Runtime AI Provider Switching:** `SET_AI_PROVIDER` command from Remote Control phone dropdown
 - [x] **Local AI Task Suite:** Scroll verification (initial + each scroll frame), answer state checking using dedicated verification captures, NEXT button localization, screen classification (QUESTION/LOGIN/ERROR/OTHER) with timeout+cooldown safeguards
 - [x] **Click targeting hierarchy:** OCR (primary) → Local Qwen (secondary) → calibrated grid (fallback)
+- [x] Dedicated post-AI mapping recapture before click dispatch to refresh live option/NEXT targets
 - [x] Answer decision engine integration
 - [x] Click execution with `_verify_option_click()` (Local AI or CV) + retry + alert (Law 5)
+- [x] Retry policy tightened to retry the same intended option once (no cross-option fallback chain)
 - [x] Strict local-AI verification enforces selected option letter must match the clicked letter (not just "any option selected")
 - [x] NEXT click with verification + retry + alert (Canonical Law 5)
 - [x] End-of-test detection (`TEST_COMPLETE`) when screen does not change after NEXT

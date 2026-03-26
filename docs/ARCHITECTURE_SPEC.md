@@ -117,7 +117,9 @@ CLICK_D\
 CLICK_E\
 CLICK_NEXT\
 SCROLL_LEFT\
-SCROLL_RIGHT
+SCROLL_RIGHT\
+SCROLL_DOWN\
+SCROLL_UP
 
 The Pi receives commands from the **Main Control PC** and executes them
 deterministically.
@@ -326,6 +328,8 @@ For each question:
     -   request additional captures from the Capture Phone
     -   repeat scroll detection on each scroll frame until content is fully visible
 4.  stitch all frames into a full question image
+5.  send stitched image to cloud AI only for solve/context
+6.  request one fresh post-AI mapping capture and rebuild live option/NEXT targets from that frame
 
 ### 6.1 Scroll Detection Pipeline (v4)
 
@@ -449,8 +453,8 @@ Sequence:
 1.  derive click point (OCR first, then Local Qwen, then calibrated fallback)
 2.  map to HID absolute coordinates
 3.  send click command to Raspberry Pi
-4.  capture screenshot
-5.  detect visual highlight
+4.  capture dedicated verification screenshot
+5.  detect visual highlight around the exact click target when available (normalized target verification)
 
 If highlight detected:
 
@@ -458,7 +462,7 @@ action successful
 
 If highlight missing:
 
-retry click
+retry same intended option once
 
 If retry fails:
 
@@ -605,6 +609,11 @@ Complete run sequence:
 9.  next question triggered
 
 Loop continues until test completion.
+
+STOP safety rule:
+
+- If operator sends STOP during in-flight processing, controller stops scheduling next actions and does not continue fallback click loops.
+- Remote START/CALIBRATE/PAUSE can recover deterministically from STOPPED via IDLE recovery.
 
 ------------------------------------------------------------------------
 

@@ -103,7 +103,7 @@ class OptionDetector:
     SEARCH_STRIP_MAX_WIDTH = 220
     SEARCH_STRIP_WIDTH_FRAC = 0.13
     SEARCH_MAX_RIGHT_FRAC = 0.14
-    SEARCH_TOP_MARGIN_FRAC = 0.02
+    SEARCH_TOP_MARGIN_FRAC = 0.06
     SEARCH_BOTTOM_MARGIN_FRAC = 0.06
 
     # HoughCircles parameters (kept loose — we filter with clustering afterwards)
@@ -232,6 +232,20 @@ class OptionDetector:
                 },
             )
 
+        # Remove obvious non-option rows (typically tiny circles near "Answer here"
+        # header) before A..E labeling. Keep original set if filtering gets too strict.
+        original_clusters = list(clusters)
+        min_row_y = ap.y + int(ap.h * 0.08)
+        max_row_y = ap.y + int(ap.h * 0.97)
+        filtered_clusters = [
+            c for c in clusters
+            if min_row_y <= int(c.get("center_y", ap.y)) <= max_row_y
+        ]
+        if len(filtered_clusters) >= self.MIN_EXPECTED_OPTIONS:
+            clusters = filtered_clusters
+        else:
+            clusters = original_clusters
+
         # Step 4: Build options from clusters
         # Sort clusters by Y (top to bottom)
         clusters.sort(key=lambda c: c["center_y"])
@@ -307,6 +321,10 @@ class OptionDetector:
                 "best_strip_x2": (best_strip[1] if best_strip else None),
                 "search_y1": best_search_y1,
                 "search_y2": best_search_y2,
+                "row_filter_min_y": min_row_y,
+                "row_filter_max_y": max_row_y,
+                "clusters_before_filter": len(original_clusters),
+                "clusters_after_filter": len(filtered_clusters),
                 "best_score": best_score,
                 "raw_candidates_count": int(len(abs_candidates)),
             },
