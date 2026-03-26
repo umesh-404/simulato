@@ -67,6 +67,7 @@ Supported commands:
     CLICK_B
     CLICK_C
     CLICK_D
+    CLICK_E
     CLICK_NEXT
     SCROLL_LEFT
     SCROLL_RIGHT
@@ -208,6 +209,7 @@ Example coordinates:
     option_B
     option_C
     option_D
+    option_E
     next_button
     scroll_left
     scroll_right
@@ -233,6 +235,7 @@ Example grid coordinates:
     B -> (15,10)
     C -> (15,12)
     D -> (15,14)
+    E -> (15,16)
     NEXT -> (18,19)
 
 PC converts grid coordinates to pixel coordinates before sending
@@ -293,6 +296,7 @@ SQLite database is used.
   option_b           option text
   option_c           option text
   option_d           option text
+  option_e           option text
   correct_answer     correct option
   timestamp          stored time
 
@@ -320,7 +324,8 @@ Example JSON:
     "A": "...",
     "B": "...",
     "C": "...",
-    "D": "..."
+    "D": "...",
+    "E": "..."
   },
   "answer": "B",
   "answer_content": "..."
@@ -370,7 +375,8 @@ Expected JSON response:
    "A": "...",
    "B": "...",
    "C": "...",
-   "D": "..."
+  "D": "...",
+  "E": "..."
  },
  "answer": "C",
  "answer_content": "..."
@@ -425,7 +431,7 @@ If matched, stored answer is used.
 
 Once answer is determined:
 
-1.  Map option → grid coordinate
+1.  Map option → virtual letter (A..E) based on top-to-bottom radio-row order, then to click target
 2.  Convert grid → pixel
 3.  Send command to Pi
 

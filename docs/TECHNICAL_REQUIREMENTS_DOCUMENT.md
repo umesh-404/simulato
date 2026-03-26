@@ -239,7 +239,8 @@ Expected output format:
   "A": "...",
   "B": "...",
   "C": "...",
-  "D": "..."
+  "D": "...",
+  "E": ""
  },
  "answer": "A",
  "answer_content": "..."
@@ -301,6 +302,7 @@ Location:
   option_b           text
   option_c           text
   option_d           text
+  option_e           text
   correct_answer     text
   timestamp          timestamp
 
@@ -328,7 +330,8 @@ JSON format:
    "A":"...",
    "B":"...",
    "C":"...",
-   "D":"..."
+   "D":"...",
+   "E":""
  },
  "answer":"B",
  "answer_content":"..."
@@ -373,6 +376,7 @@ Example coordinates:
     B (15,10)
     C (15,12)
     D (15,14)
+    E (15,16)
     NEXT (18,19)
 
 ------------------------------------------------------------------------
@@ -422,6 +426,7 @@ Commands:
     CLICK_B
     CLICK_C
     CLICK_D
+    CLICK_E
     CLICK_NEXT
     SCROLL_LEFT
     SCROLL_RIGHT

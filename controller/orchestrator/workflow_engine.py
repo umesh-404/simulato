@@ -219,10 +219,34 @@ class WorkflowEngine:
         self._question_number += 1
         logger.info("=== Processing question %d ===", self._question_number)
 
+        #region agent log
+        from controller.utils.debug_ndjson import dbg as _dbg
+        _dbg(
+            location="controller/orchestrator/workflow_engine.py:process_question",
+            message="process_question start",
+            data={
+                "state": self._sm.state.value,
+                "question_number": self._question_number,
+                "test_id": self._test_id,
+                "ocr_enabled": bool(OCR_LAYOUT_PRIMARY_ENABLED),
+                "local_ai_enabled": bool(LOCAL_AI_ASSIST_ENABLED),
+            },
+            hypothesisId="H1",
+        )
+        #endregion agent log
+
         with ExecutionTimer(f"question_{self._question_number}"):
             # Step 1: Receive and save image
             image_path = self._receiver.receive_image(image_data)
             initial_preprocessed_path = image_path
+            #region agent log
+            _dbg(
+                location="controller/orchestrator/workflow_engine.py:process_question",
+                message="image received",
+                data={"image_path": str(image_path)},
+                hypothesisId="H1",
+            )
+            #endregion agent log
 
             # End-of-test detection: after NEXT, the question should change.
             # If we keep receiving essentially the same screen after NEXT, alert and pause.
@@ -296,6 +320,17 @@ class WorkflowEngine:
             # Step 5: Preprocess
             preprocessed_path = self._preprocessor.preprocess(stitched_path)
             self._latest_preprocessed_image_path = preprocessed_path
+            #region agent log
+            _dbg(
+                location="controller/orchestrator/workflow_engine.py:process_question",
+                message="preprocess complete",
+                data={
+                    "stitched_path": str(stitched_path),
+                    "preprocessed_path": str(preprocessed_path),
+                },
+                hypothesisId="H1",
+            )
+            #endregion agent log
 
             # Persist preprocess meta into the event log for replay/debug.
             meta_path = preprocessed_path.parent / f"{preprocessed_path.stem}.preprocess_meta.json"
@@ -311,6 +346,17 @@ class WorkflowEngine:
                 self._latest_ocr_layout = self._ocr.analyze(preprocessed_path)
             else:
                 self._latest_ocr_layout = None
+            #region agent log
+            _dbg(
+                location="controller/orchestrator/workflow_engine.py:process_question",
+                message="ocr_layout done",
+                data={
+                    "ocr_layout_available": self._latest_ocr_layout is not None,
+                    "ocr_words": (len(self._latest_ocr_layout.words) if self._latest_ocr_layout is not None else 0),
+                },
+                hypothesisId="H2",
+            )
+            #endregion agent log
 
             # Step 5.5: Image-hash DB-first lookup (no AI call on hit)
             image_phash = self._compute_image_phash(stitched_path)
@@ -324,6 +370,18 @@ class WorkflowEngine:
                         self._test_id,
                     )
                     self._image_hash_hits += 1
+            #region agent log
+            _dbg(
+                location="controller/orchestrator/workflow_engine.py:process_question",
+                message="db image_phash lookup",
+                data={
+                    "image_phash_present": image_phash is not None,
+                    "cached_hit": cached_question is not None,
+                    "question_id": (cached_question.get("question_id") if cached_question else None),
+                },
+                hypothesisId="H4",
+            )
+            #endregion agent log
 
             ai_response = None
             ai_model_used = ""
@@ -537,6 +595,15 @@ class WorkflowEngine:
             ocr_target = self._latest_ocr_layout.locate_option_target(letter)
             if ocr_target is not None:
                 logger.info("Using OCR-derived target for option %s", letter)
+                #region agent log
+                from controller.utils.debug_ndjson import dbg as _dbg
+                _dbg(
+                    location="controller/orchestrator/workflow_engine.py:_click_option_best_target",
+                    message="click option via OCRLayoutResult",
+                    data={"letter": letter, "norm_x": float(ocr_target[0]), "norm_y": float(ocr_target[1])},
+                    hypothesisId="H3",
+                )
+                #endregion agent log
                 self._click.click_at_normalized(
                     ocr_target[0],
                     ocr_target[1],
@@ -546,8 +613,26 @@ class WorkflowEngine:
         if LOCAL_AI_ASSIST_ENABLED and self._latest_preprocessed_image_path is not None:
             target = locate_option_target(self._latest_preprocessed_image_path, letter)
             if target is not None:
+                #region agent log
+                from controller.utils.debug_ndjson import dbg as _dbg
+                _dbg(
+                    location="controller/orchestrator/workflow_engine.py:_click_option_best_target",
+                    message="click option via local_ai locate_option_target",
+                    data={"letter": letter, "norm_x": float(target[0]), "norm_y": float(target[1])},
+                    hypothesisId="H3",
+                )
+                #endregion agent log
                 self._click.click_at_normalized(target[0], target[1], command=f"CLICK_{letter.strip().upper()}")
                 return
+        #region agent log
+        from controller.utils.debug_ndjson import dbg as _dbg
+        _dbg(
+            location="controller/orchestrator/workflow_engine.py:_click_option_best_target",
+            message="click option via calibrated fallback",
+            data={"letter": letter},
+            hypothesisId="H3",
+        )
+        #endregion agent log
         self._click.click_option(letter)
 
     def _verify_option_click(self, letter: str) -> bool:

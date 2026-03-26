@@ -238,7 +238,6 @@ class CaptureActivity : AppCompatActivity() {
                 try {
                     AppLogger.e("Capture", "Streaming frame capture failed", exception)
                 } finally {
-                    image.close()
                     isCapturingStreamFrame = false
                 }
             }

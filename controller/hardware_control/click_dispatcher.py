@@ -146,6 +146,15 @@ class ClickDispatcher:
             command: Pi command label for logging/protocol consistency.
         """
         logger.info("Dispatching %s at normalized (%.4f, %.4f)", command, norm_x, norm_y)
+        #region agent log
+        from controller.utils.debug_ndjson import dbg as _dbg
+        _dbg(
+            location="controller/hardware_control/click_dispatcher.py:click_at_normalized",
+            message="click_at_normalized",
+            data={"command": command, "norm_x": float(norm_x), "norm_y": float(norm_y)},
+            hypothesisId="H3",
+        )
+        #endregion agent log
         coords = self._absolute_for_normalized(norm_x, norm_y)
         return self._pi.send_command(command, coords=coords)
 

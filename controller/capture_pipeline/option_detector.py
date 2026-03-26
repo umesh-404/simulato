@@ -168,6 +168,19 @@ class OptionDetector:
 
         ap = layout.answer_panel
 
+        #region agent log
+        from controller.utils.debug_ndjson import dbg as _dbg
+        _dbg(
+            location="controller/capture_pipeline/option_detector.py:detect",
+            message="option_detect start",
+            data={
+                "image": str(image_path),
+                "ap": {"x": ap.x, "y": ap.y, "w": ap.w, "h": ap.h},
+            },
+            hypothesisId="H2",
+        )
+        #endregion agent log
+
         # Step 1: adaptive strip search across the left-to-mid answer panel.
         candidate_strips = self._candidate_strips(ap)
         best_clusters: list[dict] = []

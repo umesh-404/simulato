@@ -55,6 +55,8 @@ def _load_grid_map_from_file() -> None:
             converted[name] = (ax, ay)
         load_grid_map(converted)
         print(f"[Pi] Loaded fallback grid map with {len(converted)} positions")
+        if len(converted) < 8:
+            print("[Pi] Warning: local grid_map.json appears incomplete/outdated (expected >= 8 incl. E).")
     except Exception as e:
         print(f"[Pi] Failed to load local grid map: {e}")
 

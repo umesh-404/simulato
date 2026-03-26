@@ -194,6 +194,7 @@ Create schema.sql:
      option_b TEXT,
      option_c TEXT,
      option_d TEXT,
+     option_e TEXT,
      correct_answer TEXT,
      timestamp TIMESTAMP
     );
@@ -232,7 +233,7 @@ Output:
 
 Construct canonical string:
 
-    question|A|B|C|D
+    question|A|B|C|D|E
 
 ------------------------------------------------------------------------
 
@@ -286,7 +287,8 @@ Expected format:
        "A": "...",
        "B": "...",
        "C": "...",
-       "D": "..."
+       "D": "...",
+       "E": ""
      },
      "answer": "A",
      "answer_content": "..."
@@ -366,6 +368,7 @@ Commands supported:
     CLICK_B
     CLICK_C
     CLICK_D
+    CLICK_E
     CLICK_NEXT
     SCROLL_LEFT
     SCROLL_RIGHT

@@ -81,6 +81,15 @@ class DatabaseManager:
                     "ALTER TABLE questions ADD COLUMN option_e TEXT NOT NULL DEFAULT ''"
                 )
                 self._conn.commit()
+                #region agent log
+                from controller.utils.debug_ndjson import dbg as _dbg
+                _dbg(
+                    location="database/db_manager.py:_migrate_schema",
+                    message="migrated questions.option_e",
+                    data={},
+                    hypothesisId="H4",
+                )
+                #endregion agent log
 
     def close(self) -> None:
         with self._lock:
