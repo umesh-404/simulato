@@ -319,7 +319,8 @@ class WorkflowEngine:
                         layout_for_scroll = fallback_layout_res.layout if fallback_layout_res is not None else None
                     if layout_for_scroll is not None:
                         dual = self._scroll_detector.detect_dual(image_path, layout_for_scroll)
-                        needs_scroll = bool(dual.question.needs_scroll)
+                        # Slightly aggressive threshold for question panel truncation.
+                        needs_scroll = bool(dual.question.needs_scroll or dual.question.confidence >= 0.12)
                         if not needs_scroll and scroll_ocr_res is not None:
                             needs_scroll = self._question_panel_text_truncated(scroll_ocr_res)
                         scroll_direction = "down" if needs_scroll else None

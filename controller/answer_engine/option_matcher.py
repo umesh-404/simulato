@@ -74,34 +74,35 @@ def match_option_by_content(
                 confidence="substring",
             )
 
-    # Pass 3: Fuzzy similarity for minor OCR/format drift.
-    # Deterministic tie-break: highest score, then alphabetical letter order.
-    best_letter = None
-    best_text = None
-    best_score = 0.0
+    # Pass 3: Fuzzy similarity (strict gate to avoid wrong remaps).
+    # Deterministic tie-break: alphabetical order when scores equal.
+    scored: list[tuple[float, str, str]] = []
     for letter in sorted(current_options.keys()):
         text = current_options[letter]
         norm_option = normalize_for_matching(text)
         if not norm_option or not norm_answer:
             continue
         score = SequenceMatcher(None, norm_answer, norm_option).ratio()
-        if score > best_score:
-            best_score = score
-            best_letter = letter
-            best_text = text
+        scored.append((score, letter, text))
 
-    if best_letter is not None and best_score >= 0.62:
-        logger.info(
-            "Fuzzy content match: %s (score=%.3f) = '%s'",
-            best_letter,
-            best_score,
-            (best_text or "")[:60],
-        )
-        return OptionMatchResult(
-            matched_letter=best_letter,
-            matched_text=best_text,
-            confidence="fuzzy",
-        )
+    if scored:
+        scored.sort(key=lambda t: (-t[0], t[1]))
+        best_score, best_letter, best_text = scored[0]
+        second_score = scored[1][0] if len(scored) > 1 else 0.0
+        # Require very strong + unambiguous fuzzy match.
+        if best_score >= 0.93 and (best_score - second_score) >= 0.08:
+            logger.info(
+                "Fuzzy content match: %s (score=%.3f, delta=%.3f) = '%s'",
+                best_letter,
+                best_score,
+                best_score - second_score,
+                (best_text or "")[:60],
+            )
+            return OptionMatchResult(
+                matched_letter=best_letter,
+                matched_text=best_text,
+                confidence="fuzzy",
+            )
 
     logger.warning("No option content match found for: '%s'", correct_answer_text[:60])
     return OptionMatchResult(

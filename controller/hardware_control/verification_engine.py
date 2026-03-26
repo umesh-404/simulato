@@ -103,13 +103,44 @@ class VerificationEngine:
             return VerificationResult(verified=False, details="unreadable_screenshot")
 
         if self._grid_map is not None:
-            pixel_coords = self._grid_map.get_pixel_for(expected_letter)
-            if pixel_coords:
+            screen_coords = self._grid_map.get_pixel_for(expected_letter)
+            if screen_coords:
+                pixel_coords = self._screen_to_capture_pixel(screen_coords)
                 return self._verify_with_grid(
                     post_img, pixel_coords, expected_letter
                 )
 
         return self._verify_with_color_analysis(post_img, expected_letter)
+
+    def _screen_to_capture_pixel(self, screen_coords: tuple[int, int]) -> tuple[int, int]:
+        """
+        Convert exam-screen pixel coordinates to capture-image pixel coordinates.
+        GridMap stores option positions in screen space, while verification images
+        are in capture camera space.
+        """
+        sx, sy = int(screen_coords[0]), int(screen_coords[1])
+        gm = self._grid_map
+        try:
+            scale_x = float(gm.transform.get("scale_x", 1.0))
+            scale_y = float(gm.transform.get("scale_y", 1.0))
+            offset_x = float(gm.transform.get("offset_x", 0.0))
+            offset_y = float(gm.transform.get("offset_y", 0.0))
+            if abs(scale_x) > 1e-6 and abs(scale_y) > 1e-6:
+                cx = int(round((sx - offset_x) / scale_x))
+                cy = int(round((sy - offset_y) / scale_y))
+            else:
+                raise ValueError("invalid scale")
+        except Exception:
+            # Fallback ratio conversion.
+            sw, sh = gm.resolution
+            cw, ch = gm.capture_resolution
+            cx = int(round(sx * (cw / max(1, sw))))
+            cy = int(round(sy * (ch / max(1, sh))))
+
+        cw, ch = gm.capture_resolution
+        cx = max(0, min(max(1, cw) - 1, cx))
+        cy = max(0, min(max(1, ch) - 1, cy))
+        return (cx, cy)
 
     def _verify_with_grid(
         self, img: np.ndarray, pixel_coords: tuple[int, int], letter: str
