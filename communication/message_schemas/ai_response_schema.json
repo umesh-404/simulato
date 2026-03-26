@@ -11,18 +11,19 @@
     },
     "options": {
       "type": "object",
-      "required": ["A", "B", "C", "D"],
+      "required": ["A", "B", "C", "D", "E"],
       "properties": {
         "A": { "type": "string" },
         "B": { "type": "string" },
         "C": { "type": "string" },
-        "D": { "type": "string" }
+        "D": { "type": "string" },
+        "E": { "type": "string" }
       },
       "additionalProperties": false
     },
     "answer": {
       "type": "string",
-      "enum": ["A", "B", "C", "D"],
+      "enum": ["A", "B", "C", "D", "E"],
       "description": "The letter of the correct option"
     },
     "answer_content": {

@@ -196,6 +196,33 @@ frames** or **verification frames** when the controller is waiting for
 those specific captures from the Capture Phone.
 
 ---
+# 7A. FRAME STREAMING (Optional, Best-Effort)
+
+Used by Capture Mode to reduce latency between the controller requesting a
+`CAPTURE_IMAGE` and the capture phone having a fresh frame ready.
+
+Behavior:
+- The capture phone periodically sends `STREAM_FRAME` messages over WebSocket
+  to the controller (best-effort; if disconnected, streaming is skipped).
+- The controller stores the latest streamed JPEG bytes in-memory only.
+- Deterministic replay still uses the authoritative `CAPTURE_IMAGE` uploads
+  via `POST /api/upload_image`.
+
+When the controller sends `CAPTURE_IMAGE`:
+- the capture phone uploads the cached latest streamed JPEG if available
+- otherwise it falls back to taking a fresh shutter capture and uploading it
+
+WebSocket message (Capture Phone → Controller):
+{
+  "type": "STREAM_FRAME",
+  "payload": {
+    "seq": <integer>,
+    "timestamp": "ISO8601_TIMESTAMP",
+    "image_jpeg": "BASE64_ENCODED_JPEG"
+  }
+}
+
+---
 
 # 8. REMOTE CONTROL COMMAND PROTOCOL
 
@@ -398,6 +425,7 @@ CLICK_A
 CLICK_B  
 CLICK_C  
 CLICK_D  
+CLICK_E  
 CLICK_NEXT  
 SCROLL_LEFT  
 SCROLL_RIGHT

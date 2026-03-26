@@ -22,7 +22,7 @@ logger = get_logger("pi_client")
 MAX_RESPONSE_BYTES = 65536
 
 VALID_COMMANDS = {
-    "CLICK_A", "CLICK_B", "CLICK_C", "CLICK_D",
+    "CLICK_A", "CLICK_B", "CLICK_C", "CLICK_D", "CLICK_E",
     "CLICK_NEXT", "SCROLL_LEFT", "SCROLL_RIGHT",
 }
 

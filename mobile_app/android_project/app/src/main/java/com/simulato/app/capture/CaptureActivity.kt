@@ -7,11 +7,15 @@ import android.media.AudioManager
 import android.media.ToneGenerator
 import android.view.MotionEvent
 import android.widget.Toast
+import android.os.Handler
+import android.os.Looper
+import android.util.Base64
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import com.google.gson.JsonObject
 import com.simulato.app.databinding.ActivityCaptureBinding
 import com.simulato.app.networking.ApiClient
 import com.simulato.app.networking.SimulatoWebSocket
@@ -23,6 +27,7 @@ import java.io.ByteArrayOutputStream
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.time.Instant
 
 class CaptureActivity : AppCompatActivity() {
 
@@ -36,6 +41,21 @@ class CaptureActivity : AppCompatActivity() {
     @Volatile private var isRegistering = false
     private var zoomLevel = 1.0f
     private var camera: Camera? = null
+
+    // MJPEG-like frame streaming (capture-only): periodically send latest frames over WS.
+    private val streamIntervalMs = 1200L
+    private val streamHandler = Handler(Looper.getMainLooper())
+    @Volatile private var isStreamingFrames = false
+    @Volatile private var isCapturingStreamFrame = false
+    @Volatile private var latestStreamJpeg: ByteArray? = null
+    @Volatile private var streamSeq: Long = 0
+    private val streamRunnable: Runnable = object : Runnable {
+        override fun run() {
+            if (!isStreamingFrames) return
+            attemptStreamFrame()
+            streamHandler.postDelayed(this, streamIntervalMs)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -79,7 +99,7 @@ class CaptureActivity : AppCompatActivity() {
                 if (command == "CAPTURE_IMAGE") {
                     runOnUiThread {
                         if (isDestroyed) return@runOnUiThread
-                        captureAndUpload()
+                        captureAndUpload(forceFresh = false)
                     }
                 }
             },
@@ -100,7 +120,7 @@ class CaptureActivity : AppCompatActivity() {
             ActivityCompat.requestPermissions(this, REQUIRED_PERMISSIONS, REQUEST_CODE_PERMISSIONS)
         }
 
-        binding.btnCapture.setOnClickListener { captureAndUpload() }
+        binding.btnCapture.setOnClickListener { captureAndUpload(forceFresh = true) }
         binding.btnCalibrate.setOnClickListener { sendCalibrateCommand() }
         binding.btnZoomIn.setOnClickListener { adjustZoom(0.1f) }
         binding.btnZoomOut.setOnClickListener { adjustZoom(-0.1f) }
@@ -147,11 +167,82 @@ class CaptureActivity : AppCompatActivity() {
                     binding.txtStatus.text = "Registered as Capture Device"
                     heartbeatManager.start()
                     webSocket.connect()
+                    startStreamingFrames()
                 } else {
                     binding.txtStatus.text = "Registration failed: $response"
                 }
             }
         }
+    }
+
+    private fun startStreamingFrames() {
+        if (isStreamingFrames) return
+        isStreamingFrames = true
+        streamHandler.removeCallbacks(streamRunnable)
+        streamHandler.post(streamRunnable)
+        AppLogger.i("Capture", "Started frame streaming")
+    }
+
+    private fun stopStreamingFrames() {
+        isStreamingFrames = false
+        streamHandler.removeCallbacks(streamRunnable)
+        AppLogger.i("Capture", "Stopped frame streaming")
+    }
+
+    private fun attemptStreamFrame() {
+        if (isDestroyed || !isRegistered) return
+        val capture = imageCapture ?: return
+        if (isCapturingStreamFrame) return
+
+        isCapturingStreamFrame = true
+        capture.takePicture(cameraExecutor, object : ImageCapture.OnImageCapturedCallback() {
+            override fun onCaptureSuccess(image: ImageProxy) {
+                try {
+                    val buffer = image.planes[0].buffer
+                    val bytes = ByteArray(buffer.remaining())
+                    buffer.get(bytes)
+
+                    val outputStream = ByteArrayOutputStream()
+                    val bitmap = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                    if (bitmap == null) return
+                    bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 70, outputStream)
+                    val jpegBytes = outputStream.toByteArray()
+
+                    latestStreamJpeg = jpegBytes
+
+                    // Send over WS only if controller is connected; still keep the latest cached frame.
+                    if (webSocket.isConnected) {
+                        val seq = streamSeq + 1
+                        streamSeq = seq
+                        val base64 = Base64.encodeToString(jpegBytes, Base64.NO_WRAP)
+                        val payload = JsonObject().apply {
+                            addProperty("seq", seq)
+                            addProperty("timestamp", Instant.now().toString())
+                            addProperty("image_jpeg", base64)
+                        }
+                        val msg = JsonObject().apply {
+                            addProperty("type", "STREAM_FRAME")
+                            add("payload", payload)
+                        }
+                        webSocket.send(msg.toString())
+                    }
+                } catch (e: Exception) {
+                    AppLogger.e("Capture", "Streaming frame failed", e)
+                } finally {
+                    image.close()
+                    isCapturingStreamFrame = false
+                }
+            }
+
+            override fun onError(exception: ImageCaptureException) {
+                try {
+                    AppLogger.e("Capture", "Streaming frame capture failed", exception)
+                } finally {
+                    image.close()
+                    isCapturingStreamFrame = false
+                }
+            }
+        })
     }
 
     private fun startCamera() {
@@ -183,7 +274,38 @@ class CaptureActivity : AppCompatActivity() {
         binding.txtZoom.text = "Zoom: ${zoomLevel}x"
     }
 
-    private fun captureAndUpload() {
+    private fun captureAndUpload(forceFresh: Boolean = false) {
+        val cached = latestStreamJpeg
+        if (!isRegistered) {
+            Toast.makeText(this, "Not registered with controller", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (!forceFresh && cached != null && cached.isNotEmpty()) {
+            binding.txtStatus.text = "Uploading (cached frame)..."
+
+            // Quick flash on the preview to indicate a capture occurred.
+            binding.viewFinder.animate().cancel()
+            binding.viewFinder.alpha = 1f
+            binding.viewFinder.animate()
+                .alpha(0.2f)
+                .setDuration(80L)
+                .withEndAction {
+                    binding.viewFinder.animate()
+                        .alpha(1f)
+                        .setDuration(80L)
+                        .start()
+                }
+                .start()
+
+            apiClient.uploadImage(cached) { success, response ->
+                runOnUiThread {
+                    if (isDestroyed) return@runOnUiThread
+                    binding.txtStatus.text = if (success) "Upload complete" else "Upload failed: $response"
+                }
+            }
+            return
+        }
+
         val capture = imageCapture
         if (capture == null) {
             binding.txtStatus.text = "Camera not ready"
@@ -265,6 +387,7 @@ class CaptureActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        stopStreamingFrames()
         heartbeatManager.stop()
         webSocket.disconnect()
         cameraExecutor.shutdown()

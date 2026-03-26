@@ -90,7 +90,7 @@ Ensure the following 5 devices are connected to the **same WiFi network**:
 
 ## 5. First Run & Calibration
 Now that everything is running and talking to the Mother PC:
-1. Make sure the Exam Laptop is displaying a testing screen with radio buttons (Option A, B, C, D) and a NEXT button.
+1. Make sure the Exam Laptop is displaying a testing screen with radio buttons (3 to 5 options; virtual letters A..E) and a NEXT button.
 2. On the **Remote Control** phone, tap **START**.
    - If no valid `grid_map.json` exists yet, the controller automatically enters calibration and requests a capture from the Capture Phone.
    - If calibration fails, adjust framing and press **START** again to retry calibration.
@@ -98,6 +98,6 @@ Now that everything is running and talking to the Mother PC:
    - This starts (or resumes) the run from the controller.
 4. During the run:
    - For each question it captures, preprocesses, checks DB/image-hash first, and calls Grok/Gemini only for new questions.
-   - It uses OCR on the whole screen as primary layout targeting (option/NEXT), then falls back to local Qwen and calibrated grid/CV if OCR misses.
+  - It uses OCR + adaptive radio-circle detection as primary option/NEXT targeting, then falls back to local Qwen and calibrated grid/CV if needed.
    - It verifies answer selection after click using a dedicated capture before advancing.
    - On failures, it pauses and alerts the Remote phone for explicit operator action.

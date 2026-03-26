@@ -87,6 +87,7 @@ def decide_answer(
         "B": grok_response.options.B,
         "C": grok_response.options.C,
         "D": grok_response.options.D,
+        "E": grok_response.options.E,
     }
 
     match = match_question(
@@ -158,6 +159,7 @@ def decide_answer(
             option_b=grok_response.options.B,
             option_c=grok_response.options.C,
             option_d=grok_response.options.D,
+            option_e=grok_response.options.E,
             correct_answer=grok_response.answer_content,
             answer_letter=grok_response.answer,
         )

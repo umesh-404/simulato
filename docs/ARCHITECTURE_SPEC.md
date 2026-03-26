@@ -114,6 +114,7 @@ CLICK_A\
 CLICK_B\
 CLICK_C\
 CLICK_D\
+CLICK_E\
 CLICK_NEXT\
 SCROLL_LEFT\
 SCROLL_RIGHT
@@ -315,10 +316,11 @@ NEXT = (18,19)
 For each question:
 
 1.  capture screenshot from the Capture Phone
-2.  run the **local CV scroll detection pipeline** on the Main Control PC:
-    -   `exam_layout.py` detects the split-pane layout (question/answer panels, divider)
-    -   `scroll_detector.py` (v4) analyzes each panel independently for scrollbar presence
-    -   detection uses structural UI-bounds isolation + column brightness profile analysis
+    (Capture Phone may upload a cached streamed frame when `CAPTURE_IMAGE` is requested.)
+2.  run **scroll requirement detection** on the Main Control PC:
+    -   if `LOCAL_AI_ASSIST_ENABLED=True`: use OCR bottom-edge truncation heuristic (confidence-gated)
+        and fall back to Ollama `SCROLL_CHECK_PROMPT`
+    -   else: run the **local CV scroll detection pipeline** v4 (`exam_layout.py` + `scroll_detector.py`)
 3.  if scrolling is needed:
     -   command the Pi to scroll via HID
     -   request additional captures from the Capture Phone
@@ -327,8 +329,12 @@ For each question:
 
 ### 6.1 Scroll Detection Pipeline (v4)
 
-Scroll detection is performed entirely via **local Computer Vision** on the
-Main Control PC — no AI calls are used for scroll detection.
+Scroll detection is performed with a tiered strategy on the Main Control PC:
+- If `LOCAL_AI_ASSIST_ENABLED=True`, the system first uses an OCR truncation
+  heuristic (bottom-edge text bounding boxes) and only calls Ollama when
+  the heuristic confidence is low.
+- If `LOCAL_AI_ASSIST_ENABLED=False`, scroll detection runs entirely via
+  **local Computer Vision** (no AI calls).
 
 The detector operates in two stages:
 
@@ -374,12 +380,18 @@ Simulato uses a **Tiered AI Strategy**:
 screen understanding and **never used to answer questions**:
     -   OCR Full-Screen Layout Pass on each processed question frame
         (primary source for option/NEXT target localization).
+    -   Anchored preprocessing: top-bar template matching finds a stable ROI;
+        the preprocessed image is masked (same dimensions) and `preprocess_meta.json`
+        is saved for replay/debug.
     -   Scroll Verification (detecting clipped text), called for **every
         new screen and each scroll frame**.
+        Scroll verification uses OCR truncation heuristic first (confidence-gated),
+        then falls back to Ollama `SCROLL_CHECK_PROMPT` when needed.
     -   Answer Verification (detecting post-click highlights using
         dedicated verification captures).
     -   Option Target Localization (returning precise normalized click
-        coordinates for A/B/C/D).
+        coordinates for virtual letters A/B/C/D/E, mapped by top-to-bottom
+        radio-circle row order).
     -   NEXT Button Localization (returning precise normalized click
         coordinates, with calibrated-grid fallback).
     -   Screen Type Identification (login vs. question vs. error).
@@ -387,6 +399,7 @@ screen understanding and **never used to answer questions**:
 The local analyst utilizes Ollama (e.g. `qwen2.5vl:7b-q4_K_M`) for
 air-gapped or low-latency screen classification and is wrapped with a
 short timeout plus cooldown so failures never stall the main pipeline.
+For scroll verification, Ollama is the fallback when OCR confidence is low.
 
 Processing steps:
 
@@ -479,10 +492,10 @@ Stored components:
 
 -   screenshot
 -   question text
--   options (A, B, C, D)
+-   options (A, B, C, D, E)
 -   AI response (full JSON)
 -   selected answer (text)
--   answer letter (A/B/C/D)
+-   answer letter (A/B/C/D/E)
 -   canonical hash (SHA256)
 -   SimHash fingerprint (64-bit)
 -   embedding vector (bge-small-en-v1.5)

@@ -89,7 +89,7 @@ curl http://localhost:8000/api/status
 - [ ] Controller log shows: `Calibration successful: N positions mapped`
 - [ ] `config/grid_map.json` saved and loaded
 - [ ] Capture Phone shows "Calibration successful" toast
-- [ ] Test click on each option (A, B, C, D) verified
+- [ ] Test click on each visible option row verified (3-5 rows, virtual letters A..E)
 - [ ] NEXT button click verified
 - [ ] Scroll action verified (if applicable)
 

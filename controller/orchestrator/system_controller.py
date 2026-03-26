@@ -62,6 +62,10 @@ class SystemController:
         self._pending_resume_after_calibration: bool = False
         self._timers: list[threading.Timer] = []
         self._timers_lock = threading.Lock()
+        self._stream_frames_lock = threading.Lock()
+        # Latest streamed JPEG bytes per device_id (in-memory only).
+        self._latest_stream_frames: dict[str, bytes] = {}
+        self._latest_stream_seq: dict[str, int | None] = {}
 
     @property
     def state(self) -> SystemState:
@@ -349,6 +353,19 @@ class SystemController:
             # Trigger the next capture after a brief delay for the screen to settle
             self._schedule_timer(1.5, self._request_capture)
 
+    def on_stream_frame_received(self, image_data: bytes, device_id: str = "", seq: int | None = None) -> None:
+        """
+        Called when the capture phone sends a streamed frame over WS.
+
+        We keep only the latest JPEG bytes in-memory per device_id.
+        (Deterministic replay still uses the authoritative CAPTURE_IMAGE uploads.)
+        """
+        if not image_data:
+            return
+        with self._stream_frames_lock:
+            self._latest_stream_frames[device_id] = image_data
+            self._latest_stream_seq[device_id] = seq
+
     def _request_capture(self) -> None:
         """Send CAPTURE_IMAGE command to the capture phone via WebSocket."""
         if self._sm.state != SystemState.RUNNING:
@@ -392,6 +409,14 @@ class SystemController:
 
         if result.success:
             result.grid_map.save()  # saves to config/grid_map.json
+            # Create/update header anchor template used for anchored preprocessing.
+            # This is best-effort: failures should not break calibration.
+            try:
+                from controller.capture_pipeline.header_anchor import HeaderAnchor
+
+                HeaderAnchor.ensure_template_from_image(img_path, force=True)
+            except Exception as e:
+                logger.debug("Header anchor template update failed: %s", e)
             logger.info(
                 "Calibration successful: %d positions mapped",
                 len(result.grid_map.positions),
@@ -539,6 +564,7 @@ class SystemController:
                     "B": match_result.question_record.get("option_b", ""),
                     "C": match_result.question_record.get("option_c", ""),
                     "D": match_result.question_record.get("option_d", ""),
+                    "E": match_result.question_record.get("option_e", ""),
                 }
                 option = match_option_by_content(conflict.db_answer, options)
                 if option.found:
@@ -558,6 +584,7 @@ class SystemController:
                     "B": match_result.question_record.get("option_b", ""),
                     "C": match_result.question_record.get("option_c", ""),
                     "D": match_result.question_record.get("option_d", ""),
+                    "E": match_result.question_record.get("option_e", ""),
                 }
                 option = match_option_by_content(conflict.ai_answer, options)
                 if option.found:

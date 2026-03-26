@@ -66,6 +66,7 @@ def _command_to_coords(command: str) -> Optional[tuple[int, int]]:
         "CLICK_B": "B",
         "CLICK_C": "C",
         "CLICK_D": "D",
+        "CLICK_E": "E",
         "CLICK_NEXT": "NEXT",
         "SCROLL_LEFT": "SCROLL_LEFT",
         "SCROLL_RIGHT": "SCROLL_RIGHT",

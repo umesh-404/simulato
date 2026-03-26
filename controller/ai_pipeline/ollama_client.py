@@ -22,6 +22,7 @@ from controller.config import (
     OLLAMA_COOLDOWN_SECONDS,
     OLLAMA_TIMEOUT_COOLDOWN_SECONDS,
     OLLAMA_KEEP_ALIVE,
+    OCR_LAYOUT_PRIMARY_ENABLED,
 )
 from controller.ai_pipeline.aux_prompts import (
     SCROLL_CHECK_PROMPT,
@@ -36,6 +37,63 @@ from controller.utils.timer import ExecutionTimer
 
 logger = get_logger("ollama_client")
 _OLLAMA_UNAVAILABLE_UNTIL = 0.0
+
+
+def _check_needs_scroll_ocr_heuristic(image_path: Path) -> tuple[bool, float]:
+    """
+    OCR-based truncation heuristic (no Ollama call).
+
+    Idea:
+      - Ignore bottom bar words by only considering words whose center is
+        above the bottom-panel end.
+      - If the lowest detected text bounding box in the question panel
+        reaches close to the bottom end of the panel, assume the content
+        is truncated and scrolling is needed.
+
+    Returns:
+        (needs_scroll, confidence) where confidence in [0,1].
+    """
+    if not OCR_LAYOUT_PRIMARY_ENABLED:
+        return (False, 0.0)
+
+    try:
+        from controller.capture_pipeline.ocr_layout_analyzer import OCRLayoutAnalyzer
+
+        ocr = OCRLayoutAnalyzer()
+        result = ocr.analyze(image_path)
+        if result is None or not result.words:
+            return (False, 0.0)
+
+        # Exclude bottom-bar area (NEXT/CLEAR) from truncation scoring.
+        # Matches ExamLayoutDetector's default bottom bar fraction.
+        bottom_bar_frac = 0.08
+        panel_end_y = int(result.image_h * (1.0 - bottom_bar_frac))
+        question_words = [w for w in result.words if w.cy < panel_end_y]
+        if len(question_words) < 5:
+            return (False, 0.1)
+
+        lowest_y2 = max(w.y + w.h for w in question_words)
+
+        # How close lowest text is to the panel end determines confidence.
+        band_px = max(10, int(result.image_h * 0.06))
+        band_start = max(0, panel_end_y - band_px)
+
+        if lowest_y2 < band_start:
+            # Significant whitespace remains at the bottom of the question panel.
+            return (False, 0.9 * max(0.0, (band_start - lowest_y2) / max(1, band_px)))
+
+        # Content reaches the bottom band => likely truncation.
+        conf = (lowest_y2 - band_start) / max(1, band_px)
+        conf = max(0.0, min(1.0, float(conf)))
+
+        # Optional strengthening: count words inside the bottom band.
+        bottom_band_words = [w for w in question_words if (w.y + w.h) >= band_start]
+        if len(bottom_band_words) >= 6:
+            conf = min(1.0, conf + 0.15)
+
+        return (True, conf)
+    except Exception:
+        return (False, 0.0)
 
 
 class OllamaAPIError(Exception):
@@ -106,10 +164,20 @@ def check_needs_scroll(image_path: Path) -> bool:
     """
     Check if the question/options are cut off and need scrolling.
     """
+    # Step 1: Fast OCR heuristic (deterministic; helps avoid slow Ollama calls).
+    if OCR_LAYOUT_PRIMARY_ENABLED:
+        needs_scroll, conf = _check_needs_scroll_ocr_heuristic(image_path)
+        if conf >= 0.65:
+            logger.info("OCR scroll heuristic used: needs_scroll=%s conf=%.2f", needs_scroll, conf)
+            return needs_scroll
+        if conf > 0.0:
+            logger.info("OCR scroll heuristic low confidence (%.2f) — falling back to Ollama", conf)
+
+    # Step 2: Existing Ollama scroll-check prompt (fallback / safety).
     try:
         result = _call_ollama_task(image_path, SCROLL_CHECK_PROMPT)
         needs_scroll = result.get("needs_scroll", False)
-        logger.info("Local AI scroll check: %s", needs_scroll)
+        logger.info("Local AI scroll check (Ollama): %s", needs_scroll)
         return needs_scroll
     except Exception:
         return False  # Fail-safe to False (assume no scroll if AI fails)

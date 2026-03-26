@@ -24,6 +24,7 @@ from controller.mobile_api.api_server import (
     app,
     set_command_callback,
     set_image_callback,
+    set_stream_frame_callback,
     set_decision_callback,
     set_status_provider,
     set_disconnection_callback,
@@ -85,6 +86,7 @@ def main() -> None:
 
     set_command_callback(controller.handle_command)
     set_image_callback(controller.on_image_received)
+    set_stream_frame_callback(controller.on_stream_frame_received)
     set_decision_callback(controller.handle_operator_decision)
     set_status_provider(controller.get_status)
     set_disconnection_callback(controller.on_device_disconnected)

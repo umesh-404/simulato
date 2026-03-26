@@ -84,7 +84,7 @@ All implementation follows:
 - [x] SQLite with WAL journal mode and foreign keys enabled
 - [x] `create_test()`, `get_test_by_name()`, `get_or_create_test()`
 - [x] `store_question()` with immutable versioning (Canonical Law 7)
-- [x] `answer_letter` column for storing the letter (A/B/C/D) alongside answer text
+- [x] `answer_letter` column for storing the letter (A/B/C/D/E) alongside answer text
 - [x] `lookup_by_hash()` — SHA256 exact match within test context
 - [x] `lookup_by_simhash()` — fuzzy SimHash match with Hamming distance
 - [x] `get_all_questions_for_test()` — for embedding scan
@@ -236,10 +236,10 @@ All implementation follows:
 - [x] Tesseract OCR integration for full-screen word extraction
 - [x] Per-word confidence filtering (`OCR_MIN_WORD_CONFIDENCE`)
 - [x] `OCRWord` dataclass with text, confidence, bounding box, and center properties
-- [x] `OCRLayoutResult.locate_option_target(letter)` — finds option anchor text and returns normalized click coordinates
+- [x] `OCRLayoutResult.locate_option_target(letter)` — returns normalized click coordinates for virtual letters A..E using `OptionDetector` row mapping
 - [x] `OCRLayoutResult.locate_next_target()` — finds NEXT button text and returns normalized click coordinates
-- [x] Letter anchor detection via regex cleaning, preferring high-confidence anchors near left side
-- [x] Row-band grouping to find option text row and offset click target left to hit radio area
+- [x] Removed dependency on visible OCR option letters (exam UI may not show A/B/C/D/E labels)
+- [x] Option targeting now relies on deterministic radio-row mapping from `OptionDetector`
 - [x] Primary click-targeting method used before falling back to Local AI or calibrated grid
 
 ### 3.10c Exam Layout Detector (NEW)
@@ -256,12 +256,12 @@ All implementation follows:
 
 - [x] `controller/capture_pipeline/option_detector.py`
 - [x] Y-clustering approach for radio button detection
-- [x] HoughCircles on narrow left-edge strip of the answer panel
-- [x] Y-coordinate clustering to group noisy circle candidates into radio-button rows
+- [x] Adaptive strip search across answer panel (deterministic multi-strip scan)
+- [x] Y-coordinate clustering + coherent row-sequence scoring to reject noise/watermark circles
 - [x] Supports 3–5 options (A through E)
 - [x] Per-option OCR text extraction with upscaling for small regions
 - [x] `DetectedOption` dataclass with label, text, circle coordinates, click coordinates, bounds, confidence
-- [x] `OptionMap` with `get(label)` and normalized coordinate conversion
+- [x] `OptionMap` with `get(label)`, normalized coordinate conversion, and debug metadata for chosen strip/score
 
 ## 3.11 Alert System (Phase 11)
 
@@ -349,7 +349,7 @@ All implementation follows:
 - [x] `calibration/grid_mapper.py` — GridMap class with resolution, grid size, positions
 - [x] Grid-to-pixel coordinate conversion
 - [x] JSON save/load for `grid_map.json`
-- [x] Default positions template (A, B, C, D, NEXT, SCROLL_LEFT, SCROLL_RIGHT)
+- [x] Default positions template (A, B, C, D, E, NEXT, SCROLL_LEFT, SCROLL_RIGHT)
 - [x] `calibration/coordinate_solver.py` — automated calibration from screenshot
 - [x] Contour-based option region detection with aspect ratio filtering
 - [x] Bottom-right NEXT button detection
@@ -422,6 +422,7 @@ All implementation follows:
 - [x] Added OCR configuration variables to `controller/config.py` and `.env`
 - [x] Added `image_phash` column to `question_snapshots` schema (via migration)
 - [x] Added `answer_letter` column to `questions` schema
+- [x] Added `option_e` column to `questions` schema (via migration)
 - [x] Added `gemini_client.py` as second cloud AI provider
 - [x] Added `ollama_client.py` + `aux_prompts.py` as dedicated local AI modules
 - [x] Added `exam_layout.py`, `ocr_layout_analyzer.py`, `option_detector.py` to capture pipeline
@@ -444,7 +445,14 @@ All implementation follows:
 - [x] Question change detection in `controller/capture_pipeline/change_detector.py` (pHash via DCT)
 - [x] Exam layout detection in `capture_pipeline/exam_layout.py` (split-pane divider via Sobel-X)
 - [x] Option radio button detection in `capture_pipeline/option_detector.py` (HoughCircles + Y-clustering)
+- [x] Option detector upgraded to adaptive strip search + sequence scoring; detection method logged as `adaptive_y_cluster`
 - [x] OCR-first click targeting in `capture_pipeline/ocr_layout_analyzer.py` (Tesseract)
+- [x] OCR option targeting uses virtual A..E row mapping from `OptionDetector` (no literal letter-anchor dependency)
+- [x] Benchmark debug artifacts now include:
+      - `answer_panel_detected_options.png`
+      - `answer_panel_ocr_words.png`
+      - clean strip overlays from the selected adaptive strip
+      - `--save-debug-all` mode for full visual dataset inspection
 
 ## 7.2 Android Application — COMPLETE
 

@@ -13,7 +13,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from controller.config import (
     OCR_MIN_WORD_CONFIDENCE,
@@ -22,6 +22,9 @@ from controller.config import (
     TESSERACT_CMD,
 )
 from controller.utils.logger import get_logger
+from controller.capture_pipeline.exam_layout import ExamLayoutDetector, Rect
+from controller.capture_pipeline.exam_layout import ExamLayout
+from controller.capture_pipeline.option_detector import OptionDetector
 
 logger = get_logger("ocr_layout")
 
@@ -45,10 +48,23 @@ class OCRWord:
 
 
 class OCRLayoutResult:
-    def __init__(self, image_w: int, image_h: int, words: list[OCRWord]) -> None:
+    def __init__(
+        self,
+        image_w: int,
+        image_h: int,
+        words: list[OCRWord],
+        answer_panel: Optional[Rect] = None,
+        image_path: Optional[Path] = None,
+        layout: Optional[ExamLayout] = None,
+    ) -> None:
         self.image_w = image_w
         self.image_h = image_h
         self.words = words
+        # Used to constrain A/B/C/D anchors to the answer panel.
+        self.answer_panel = answer_panel
+        self.image_path = image_path
+        self.layout = layout
+        self._option_map_cache: Optional[Any] = None
 
     def _norm(self, x: int, y: int) -> tuple[float, float]:
         nx = max(0.0, min(1.0, float(x) / float(max(1, self.image_w - 1))))
@@ -58,6 +74,13 @@ class OCRLayoutResult:
     def _letter_anchors(self) -> dict[str, list[OCRWord]]:
         anchors: dict[str, list[OCRWord]] = {"A": [], "B": [], "C": [], "D": []}
         for w in self.words:
+            if self.answer_panel is not None:
+                # Constrain anchors to the answer panel region to avoid
+                # picking stray A/B/C/D letters elsewhere on the screen.
+                if not (self.answer_panel.x <= w.cx <= self.answer_panel.x2):
+                    continue
+                if not (self.answer_panel.y <= w.cy <= self.answer_panel.y2):
+                    continue
             txt = w.text.strip().upper()
             cleaned = re.sub(r"[^A-Z]", "", txt)
             if cleaned in anchors and len(cleaned) == 1:
@@ -66,27 +89,19 @@ class OCRLayoutResult:
 
     def locate_option_target(self, letter: str) -> Optional[tuple[float, float]]:
         letter = letter.strip().upper()
-        if letter not in {"A", "B", "C", "D"}:
+        if letter not in {"A", "B", "C", "D", "E"}:
             return None
 
-        anchors = self._letter_anchors()
-        candidates = anchors.get(letter, [])
-        if not candidates:
+        # Deterministic source of truth: use the radio-circle Y-clustering
+        # from OptionDetector (no OCR-letter anchoring on the exam UI).
+        if self.image_path is None or self.layout is None:
             return None
-
-        # Prefer high-confidence anchor near left side where option labels usually appear.
-        anchor = sorted(candidates, key=lambda w: (-w.conf, w.x))[0]
-        row_band = max(18, int(self.image_h * 0.03))
-        row_words = [w for w in self.words if abs(w.cy - anchor.cy) <= row_band]
-        if row_words:
-            row_left = min(w.x for w in row_words)
-        else:
-            row_left = anchor.x
-
-        # Click slightly left to hit the option radio/selection area reliably.
-        target_x = max(0, row_left - int(self.image_w * 0.035))
-        target_y = anchor.cy
-        return self._norm(target_x, target_y)
+        if self._option_map_cache is None:
+            self._option_map_cache = OptionDetector().detect(self.image_path, self.layout)
+        opt = self._option_map_cache.get(letter)
+        if opt is None:
+            return None
+        return self._norm(int(opt.click_x), int(opt.click_y))
 
     def locate_next_target(self) -> Optional[tuple[float, float]]:
         next_words: list[OCRWord] = []
@@ -119,6 +134,15 @@ class OCRLayoutAnalyzer:
             return None
         h, w = img.shape[:2]
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+        # Use deterministic layout detection to constrain anchors.
+        layout: Optional[ExamLayout] = None
+        try:
+            layout = ExamLayoutDetector().detect(image_path)
+            answer_panel = layout.answer_panel
+        except Exception as e:
+            logger.debug("ExamLayoutDetector failed inside OCR analyzer: %s", e)
+            answer_panel = None
 
         try:
             data = pytesseract.image_to_data(
@@ -155,5 +179,12 @@ class OCRLayoutAnalyzer:
             )
 
         logger.info("OCR words extracted: %d", len(words))
-        return OCRLayoutResult(image_w=w, image_h=h, words=words)
+        return OCRLayoutResult(
+            image_w=w,
+            image_h=h,
+            words=words,
+            answer_panel=answer_panel,
+            image_path=image_path,
+            layout=layout,
+        )
 

@@ -32,13 +32,15 @@ class ImagePreprocessor:
         Args:
             image_path: Input image path.
             output_path: Where to save the preprocessed image.
-                         If None, overwrites the input.
+                         If None, saves next to input as a new file.
 
         Returns:
             Path to the preprocessed image.
         """
         if output_path is None:
-            output_path = image_path
+            # Important: do not overwrite the input image.
+            # Downstream code may use the raw image bytes for DB lookups (pHash).
+            output_path = image_path.with_name(f"{image_path.stem}_preprocessed{image_path.suffix}")
 
         try:
             import cv2
@@ -63,6 +65,61 @@ class ImagePreprocessor:
         enhanced = clahe.apply(gray)
         img_enhanced = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
 
+        # --- PROPOSAL / NON-BINDING (now implemented): header anchored masking ---
+        # We keep the output image size identical to the input, so normalized targets
+        # remain compatible with the calibrated capture coordinate mapping.
+        roi_y = 0
+        mask_applied = False
+        header_meta: dict | None = None
+        try:
+            from controller.capture_pipeline.header_anchor import HeaderAnchor
+
+            anchor_meta = HeaderAnchor.locate_anchor(image_path)
+            if anchor_meta is not None:
+                roi_y = int(anchor_meta.roi_y)
+                mask_applied = roi_y > 0
+                header_meta = anchor_meta.to_dict()
+            else:
+                roi_y = max(0, int(img.shape[0] * HeaderAnchor.FALLBACK_HEADER_HEIGHT_FRAC) - HeaderAnchor.ROI_MARGIN_PX)
+                mask_applied = roi_y > 0
+                header_meta = {
+                    "method": "no_template_or_match",
+                    "template_path": str(HeaderAnchor.TEMPLATE_PATH),
+                    "template_w": 0,
+                    "template_h": 0,
+                    "anchor_x": 0,
+                    "anchor_y": 0,
+                    "match_score": 0.0,
+                    "roi_x": 0,
+                    "roi_y": roi_y,
+                    "roi_w": img.shape[1],
+                    "roi_h": img.shape[0] - roi_y,
+                }
+        except Exception as e:
+            logger.debug("Header anchor masking failed: %s", e)
+            roi_y = 0
+            mask_applied = False
+
+        if mask_applied and roi_y > 0:
+            img_enhanced[0:roi_y, :, :] = 0  # Mask out the top header region for OCR/local AI.
+
         cv2.imwrite(str(output_path), img_enhanced)
-        logger.info("Preprocessed image saved: %s", output_path.name)
+
+        # Sidecar meta for replay/debug.
+        import json
+
+        meta_path = output_path.parent / f"{output_path.stem}.preprocess_meta.json"
+        meta_payload = {
+            "input_image": image_path.name,
+            "output_image": output_path.name,
+            "mask_applied": mask_applied,
+            "roi_y": int(roi_y),
+            "header_anchor": header_meta,
+        }
+        try:
+            meta_path.write_text(json.dumps(meta_payload, indent=2), encoding="utf-8")
+        except Exception as e:
+            logger.debug("Could not write preprocess meta: %s", e)
+
+        logger.info("Preprocessed image saved: %s (mask_applied=%s, roi_y=%d)", output_path.name, mask_applied, roi_y)
         return output_path

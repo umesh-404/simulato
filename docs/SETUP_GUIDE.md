@@ -200,9 +200,9 @@ Check DB: have we seen this question before?
 If DB hit → use cached answer (skip cloud AI call)
 If new → send to Grok/Gemini AI → get answer
         ↓
-Match answer text to option letter (A/B/C/D)
+Match answer text to option letter (A/B/C/D/E)
         ↓
-OCR scans whole screen and localizes option row target (primary)
+OCR scans whole screen and adaptive radio-circle detection localize option row target (primary)
         ↓
 If OCR cannot localize confidently → Local Qwen targeting fallback
         ↓
@@ -244,7 +244,7 @@ When the AI gives a different answer than what's in the database:
 | `ConnectionResetError 10054` during cloud AI call | Transient internet/provider reset. Controller now wraps it as AI provider failure and auto-falls back to alternate provider once |
 | Cloud AI intermittently fails | Retries use exponential backoff (`AI_API_BACKOFF_BASE_SECONDS`: 1s, 2s, ...) before final failure |
 | Local AI not active / timing out early | `start.bat` now enforces Ollama readiness and warmup when `LOCAL_AI_ASSIST_ENABLED=True`; increase `OLLAMA_TIMEOUT_SECONDS` only if needed |
-| Click lands on wrong option | Keep full exam window in frame, rerun calibration, and ensure local AI assist is enabled for precise target localization (`LOCAL_AI_ASSIST_ENABLED=True`) |
+| Click lands on wrong option | Keep full exam window in frame, rerun calibration, and verify `runs/calibration_benchmark_*/debug/*/answer_panel_detected_options.png` for correct A..E row mapping. Keep `LOCAL_AI_ASSIST_ENABLED=True`. |
 | Local AI responses are slow | Normal for first query (~5s). Subsequent queries are faster |
 | Cloud AI fails | Check API keys in `.env` for both Gemini and Grok. Controller now auto-falls back to alternate cloud provider once before alerting |
 

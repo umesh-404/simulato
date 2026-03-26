@@ -106,6 +106,7 @@ class WorkflowEngine:
         self._preprocessor = ImagePreprocessor()
         self._ocr = OCRLayoutAnalyzer()
         self._latest_ocr_layout: Optional[OCRLayoutResult] = None
+        self._latest_preprocessed_image_path: Optional[Path] = None
 
         self._test_id: Optional[int] = None
         self._test_name: Optional[str] = None
@@ -184,6 +185,7 @@ class WorkflowEngine:
         self._expecting_next_change = False
         self._no_change_after_next_count = 0
         self._last_raw_phash = None
+        self._latest_preprocessed_image_path = None
         logger.info("Test context set: %s (id=%d)", test_name, self._test_id)
 
     def receive_scroll_frame(self, image_data: bytes) -> None:
@@ -220,6 +222,7 @@ class WorkflowEngine:
         with ExecutionTimer(f"question_{self._question_number}"):
             # Step 1: Receive and save image
             image_path = self._receiver.receive_image(image_data)
+            initial_preprocessed_path = image_path
 
             # End-of-test detection: after NEXT, the question should change.
             # If we keep receiving essentially the same screen after NEXT, alert and pause.
@@ -248,7 +251,9 @@ class WorkflowEngine:
 
             # Step 2: Validate screen
             if LOCAL_AI_ASSIST_ENABLED:
-                screen_state = check_screen_state(image_path)
+                # Local AI tasks are more robust when they see an anchored, exam-aligned region.
+                initial_preprocessed_path = self._preprocessor.preprocess(image_path)
+                screen_state = check_screen_state(initial_preprocessed_path)
                 if screen_state not in ("QUESTION", "OTHER"):
                     self._sm.force_error(f"Abnormal screen detected: {screen_state}")
                     self._alerts.raise_alert(
@@ -271,7 +276,7 @@ class WorkflowEngine:
             # Step 3: Detect scrolling and capture additional frames
             # Use Local AI for scroll check if enabled
             if LOCAL_AI_ASSIST_ENABLED:
-                needs_scroll = check_needs_scroll(image_path)
+                needs_scroll = check_needs_scroll(initial_preprocessed_path)
                 scroll_direction = "right" # Default direction for stitched questions
             else:
                 scroll_result = self._scroll_detector.detect(image_path)
@@ -289,11 +294,21 @@ class WorkflowEngine:
             self._stitcher.stitch(frames, stitched_path)
 
             # Step 5: Preprocess
-            self._preprocessor.preprocess(stitched_path)
+            preprocessed_path = self._preprocessor.preprocess(stitched_path)
+            self._latest_preprocessed_image_path = preprocessed_path
+
+            # Persist preprocess meta into the event log for replay/debug.
+            meta_path = preprocessed_path.parent / f"{preprocessed_path.stem}.preprocess_meta.json"
+            if meta_path.exists():
+                try:
+                    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                    self._log_event("preprocess_meta", {"stitched": True, "header_anchor": meta.get("header_anchor")})
+                except Exception:
+                    pass
 
             # Step 5.25: OCR layout pass (whole screen, deterministic)
             if OCR_LAYOUT_PRIMARY_ENABLED:
-                self._latest_ocr_layout = self._ocr.analyze(stitched_path)
+                self._latest_ocr_layout = self._ocr.analyze(preprocessed_path)
             else:
                 self._latest_ocr_layout = None
 
@@ -316,7 +331,7 @@ class WorkflowEngine:
             # Step 6: Query AI (dispatch to active provider) — only if no image-hash hit
             try:
                 if cached_question is None:
-                    ai_response, ai_model_used, provider_used = self._query_primary_with_fallback(stitched_path)
+                    ai_response, ai_model_used, provider_used = self._query_primary_with_fallback(preprocessed_path)
                     self._api_calls += 1
                     self._log_event("ai_response", {
                         "provider": provider_used,
@@ -398,6 +413,7 @@ class WorkflowEngine:
                             "B": ai_response.options.B,
                             "C": ai_response.options.C,
                             "D": ai_response.options.D,
+                            "E": ai_response.options.E,
                         },
                         "answer": ai_response.answer,
                         "answer_content": ai_response.answer_content,
@@ -467,12 +483,12 @@ class WorkflowEngine:
                 logger.info("Using OCR-derived NEXT target")
                 self._click.click_at_normalized(ocr_next[0], ocr_next[1], command="CLICK_NEXT")
                 return
-        if LOCAL_AI_ASSIST_ENABLED and self._receiver.latest_path is not None:
-            norm_target = locate_next_button_target(self._receiver.latest_path)
+        if LOCAL_AI_ASSIST_ENABLED and self._latest_preprocessed_image_path is not None:
+            norm_target = locate_next_button_target(self._latest_preprocessed_image_path)
             if norm_target is not None:
                 self._click.click_at_normalized(norm_target[0], norm_target[1], command="CLICK_NEXT")
                 return
-            visible, grid_pos = locate_next_button_grid(self._receiver.latest_path)
+            visible, grid_pos = locate_next_button_grid(self._latest_preprocessed_image_path)
             if visible and grid_pos is not None:
                 self._click.click_next_at_grid(grid_pos[0], grid_pos[1])
                 return
@@ -527,8 +543,8 @@ class WorkflowEngine:
                     command=f"CLICK_{letter.strip().upper()}",
                 )
                 return
-        if LOCAL_AI_ASSIST_ENABLED and self._receiver.latest_path is not None:
-            target = locate_option_target(self._receiver.latest_path, letter)
+        if LOCAL_AI_ASSIST_ENABLED and self._latest_preprocessed_image_path is not None:
+            target = locate_option_target(self._latest_preprocessed_image_path, letter)
             if target is not None:
                 self._click.click_at_normalized(target[0], target[1], command=f"CLICK_{letter.strip().upper()}")
                 return
@@ -551,7 +567,8 @@ class WorkflowEngine:
             self._is_waiting_verification_flag = False
             if arrived and self._verification_frame_data is not None:
                 verify_path = self._receiver.receive_image(self._verification_frame_data)
-                verified, selected = check_is_answered(verify_path)
+                verify_preprocessed_path = self._preprocessor.preprocess(verify_path)
+                verified, selected = check_is_answered(verify_preprocessed_path)
                 if not verified:
                     return False
                 # Strict verification: clicked option must match selected option.
@@ -608,7 +625,7 @@ class WorkflowEngine:
 
             # Check if more scrolling is needed (local AI first if enabled)
             if LOCAL_AI_ASSIST_ENABLED:
-                still_needs_scroll = check_needs_scroll(frame_path)
+                still_needs_scroll = check_needs_scroll(self._preprocessor.preprocess(frame_path))
             else:
                 scroll_result = self._scroll_detector.detect(frame_path)
                 still_needs_scroll = scroll_result.needs_scroll
@@ -637,6 +654,7 @@ class WorkflowEngine:
                 "B": response.options.B,
                 "C": response.options.C,
                 "D": response.options.D,
+                "E": response.options.E,
             },
             "answer": response.answer,
             "answer_content": response.answer_content,

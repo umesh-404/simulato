@@ -175,6 +175,7 @@ registry = DeviceRegistry()
 
 _command_callback = None
 _image_callback = None
+_stream_frame_callback = None
 _decision_callback = None
 _status_provider = None
 _disconnection_callback = None
@@ -191,6 +192,11 @@ def set_command_callback(callback) -> None:
 def set_image_callback(callback) -> None:
     global _image_callback
     _image_callback = callback
+
+
+def set_stream_frame_callback(callback) -> None:
+    global _stream_frame_callback
+    _stream_frame_callback = callback
 
 
 def set_decision_callback(callback) -> None:
@@ -396,6 +402,38 @@ async def websocket_endpoint(websocket: WebSocket, device_id: str):
                 logger.info("WS operator decision from %s: %s", device_id, decision)
                 if _decision_callback:
                     _decision_callback(decision)
+
+            elif msg_type == "STREAM_FRAME":
+                # Capture phone streaming: store latest JPEG bytes (in-memory only).
+                payload = message.get("payload", {}) or {}
+                image_b64 = payload.get("image_jpeg")
+                if not image_b64:
+                    continue
+
+                seq = payload.get("seq")
+                try:
+                    import base64
+
+                    image_bytes = base64.b64decode(image_b64)
+                except Exception:
+                    logger.warning("Invalid STREAM_FRAME base64 from device=%s", device_id)
+                    continue
+
+                # Safety: avoid unbounded memory growth in case of oversized frames.
+                MAX_STREAM_BYTES = 5_000_000
+                if len(image_bytes) > MAX_STREAM_BYTES:
+                    logger.warning(
+                        "STREAM_FRAME too large (%d bytes) from device=%s — ignored",
+                        len(image_bytes),
+                        device_id,
+                    )
+                    continue
+
+                if _stream_frame_callback:
+                    try:
+                        _stream_frame_callback(image_bytes, device_id, seq)
+                    except Exception as e:
+                        logger.error("STREAM_FRAME callback failed for device=%s: %s", device_id, e)
 
             else:
                 logger.debug("WS message from %s: %s", device_id, msg_type)

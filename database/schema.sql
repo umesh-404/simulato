@@ -21,8 +21,9 @@ CREATE TABLE IF NOT EXISTS questions (
     option_b         TEXT    NOT NULL,
     option_c         TEXT    NOT NULL,
     option_d         TEXT    NOT NULL,
+    option_e         TEXT    NOT NULL,
     correct_answer   TEXT    NOT NULL,  -- The actual answer TEXT, not letter
-    answer_letter    TEXT,              -- Letter (A/B/C/D) for reference only
+    answer_letter    TEXT,              -- Letter (A/B/C/D/E) for reference only
     version          INTEGER NOT NULL DEFAULT 1,
     created_at       TEXT    NOT NULL,  -- ISO8601 UTC
     FOREIGN KEY (test_id) REFERENCES tests(test_id)

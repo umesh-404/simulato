@@ -30,6 +30,7 @@ class GrokResponseOptions(BaseModel):
     B: str
     C: str = ""
     D: str = ""
+    E: str = ""
 
 
 class GrokResponse(BaseModel):
@@ -42,8 +43,8 @@ class GrokResponse(BaseModel):
     @classmethod
     def validate_answer_letter(cls, v: str) -> str:
         v = v.strip().upper()
-        if v not in ("A", "B", "C", "D"):
-            raise ValueError(f"answer must be A, B, C, or D — got '{v}'")
+        if v not in ("A", "B", "C", "D", "E"):
+            raise ValueError(f"answer must be A, B, C, D, or E — got '{v}'")
         return v
 
 

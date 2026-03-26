@@ -72,6 +72,16 @@ class DatabaseManager:
                 )
                 self._conn.commit()
 
+            # 2) Ensure questions.option_e column exists (A-E support)
+            cursor = self._conn.execute("PRAGMA table_info(questions)")
+            q_columns = [row["name"] for row in cursor.fetchall()]
+            if "option_e" not in q_columns:
+                logger.info("Migrating DB: adding option_e column to questions")
+                self._conn.execute(
+                    "ALTER TABLE questions ADD COLUMN option_e TEXT NOT NULL DEFAULT ''"
+                )
+                self._conn.commit()
+
     def close(self) -> None:
         with self._lock:
             if self._conn:
@@ -127,6 +137,7 @@ class DatabaseManager:
         option_b: str,
         option_c: str,
         option_d: str,
+        option_e: str,
         correct_answer: str,
         answer_letter: str = "",
     ) -> int:
@@ -145,12 +156,12 @@ class DatabaseManager:
             cursor = self._conn.execute(
                 """INSERT INTO questions
                    (test_id, canonical_text, sha256_hash, simhash, embedding_vector,
-                    option_a, option_b, option_c, option_d,
+                    option_a, option_b, option_c, option_d, option_e,
                     correct_answer, answer_letter, version, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     test_id, canonical_text, sha256_hash, simhash, embedding_vector,
-                    option_a, option_b, option_c, option_d,
+                    option_a, option_b, option_c, option_d, option_e,
                     correct_answer, answer_letter, version, now,
                 ),
             )
@@ -172,6 +183,7 @@ class DatabaseManager:
             "option_b": option_b,
             "option_c": option_c,
             "option_d": option_d,
+            "option_e": option_e,
             "correct_answer": correct_answer,
             "answer_letter": answer_letter,
             "version": version,

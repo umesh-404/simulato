@@ -62,6 +62,7 @@ class OptionMap:
     detection_method: str = ""              # "y-cluster" / "contour" / "none"
     image_w: int = 0
     image_h: int = 0
+    debug_meta: dict | None = None         # optional debug metadata (strip bounds etc.)
 
     @property
     def count(self) -> int:
@@ -96,8 +97,14 @@ class OptionDetector:
 
     # --- Tunable thresholds -------------------------------------------
 
-    # Width of the search strip (pixels from the left edge of the answer panel)
+    # Width of each search strip (pixels from a candidate left anchor).
     SEARCH_STRIP_WIDTH = 130
+    SEARCH_STRIP_MIN_WIDTH = 90
+    SEARCH_STRIP_MAX_WIDTH = 220
+    SEARCH_STRIP_WIDTH_FRAC = 0.13
+    SEARCH_MAX_RIGHT_FRAC = 0.20
+    SEARCH_TOP_MARGIN_FRAC = 0.08
+    SEARCH_BOTTOM_MARGIN_FRAC = 0.12
 
     # HoughCircles parameters (kept loose — we filter with clustering afterwards)
     HOUGH_DP = 1.2
@@ -109,6 +116,8 @@ class OptionDetector:
 
     # Y-clustering: merge circles within this Y distance into one cluster
     Y_CLUSTER_GAP = 60              # Pixels
+    MIN_ROW_GAP_PX = 28
+    MAX_ROW_GAP_PX = 320
 
     # Minimum cluster size to be considered a real radio button row
     MIN_CLUSTER_SIZE = 1
@@ -159,75 +168,56 @@ class OptionDetector:
 
         ap = layout.answer_panel
 
-        # Step 1: Extract narrow search strip at left edge of answer panel
-        strip_x1 = ap.x
-        strip_x2 = min(ap.x2, ap.x + self.SEARCH_STRIP_WIDTH)
-        strip_y1 = ap.y
-        strip_y2 = ap.y2
+        # Step 1: adaptive strip search across the left-to-mid answer panel.
+        candidate_strips = self._candidate_strips(ap)
+        best_clusters: list[dict] = []
+        best_abs_candidates: list[tuple[int, int, int]] = []
+        best_strip: tuple[int, int] | None = None
+        best_search_y1 = ap.y
+        best_search_y2 = ap.y2
+        best_score = float("-inf")
 
-        strip_img = img[strip_y1:strip_y2, strip_x1:strip_x2]
-        if strip_img.size == 0:
-            logger.warning("Search strip is empty")
-            return OptionMap(options=[], panel_bounds=ap,
-                             image_w=layout.image_w, image_h=layout.image_h)
+        search_y1 = ap.y + int(ap.h * self.SEARCH_TOP_MARGIN_FRAC)
+        search_y2 = ap.y2 - int(ap.h * self.SEARCH_BOTTOM_MARGIN_FRAC)
+        search_y1 = max(ap.y, min(search_y1, ap.y2 - 1))
+        search_y2 = max(search_y1 + 1, min(search_y2, ap.y2))
 
-        gray_strip = cv2.cvtColor(strip_img, cv2.COLOR_BGR2GRAY)
+        for strip_x1, strip_x2 in candidate_strips:
+            seq, seq_score, abs_candidates = self._detect_best_sequence_for_strip(
+                img,
+                strip_x1=strip_x1,
+                strip_x2=strip_x2,
+                strip_y1=search_y1,
+                strip_y2=search_y2,
+            )
+            if seq_score > best_score:
+                best_score = seq_score
+                best_clusters = seq
+                best_abs_candidates = abs_candidates
+                best_strip = (strip_x1, strip_x2)
+                best_search_y1 = search_y1
+                best_search_y2 = search_y2
 
-        # Step 2: HoughCircles on the narrow strip
-        blurred = cv2.GaussianBlur(gray_strip, (9, 9), 2)
-        raw_circles = cv2.HoughCircles(
-            blurred,
-            cv2.HOUGH_GRADIENT,
-            dp=self.HOUGH_DP,
-            minDist=self.HOUGH_MIN_DIST,
-            param1=self.HOUGH_PARAM1,
-            param2=self.HOUGH_PARAM2,
-            minRadius=self.HOUGH_MIN_RADIUS,
-            maxRadius=self.HOUGH_MAX_RADIUS,
-        )
-
-        if raw_circles is None:
-            logger.warning("No HoughCircles detected in search strip")
+        clusters = best_clusters
+        abs_candidates = best_abs_candidates
+        if not clusters:
+            logger.warning("No reliable radio-row sequence detected in adaptive strips")
             return OptionMap(
-                options=[], panel_bounds=ap, detection_method="none",
-                image_w=layout.image_w, image_h=layout.image_h,
+                options=[],
+                panel_bounds=ap,
+                detection_method="none",
+                image_w=layout.image_w,
+                image_h=layout.image_h,
+                debug_meta={
+                    "adaptive": True,
+                    "best_strip_x1": None,
+                    "best_strip_x2": None,
+                    "search_y1": best_search_y1,
+                    "search_y2": best_search_y2,
+                    "best_score": best_score,
+                    "raw_candidates_count": 0,
+                },
             )
-
-        candidates = np.round(raw_circles[0]).astype(int)
-        logger.debug("HoughCircles raw: %d candidates in strip", len(candidates))
-
-        # Convert to absolute coordinates
-        abs_candidates = []
-        for cx, cy, cr in candidates:
-            abs_candidates.append((strip_x1 + int(cx), strip_y1 + int(cy), int(cr)))
-
-        # Step 3: Cluster by Y-coordinate
-        clusters = self._cluster_by_y(abs_candidates)
-        logger.debug("Y-clusters: %d clusters from %d candidates",
-                      len(clusters), len(abs_candidates))
-
-        if len(clusters) < self.MIN_EXPECTED_OPTIONS:
-            # Try with more permissive HoughCircles
-            raw_circles2 = cv2.HoughCircles(
-                blurred,
-                cv2.HOUGH_GRADIENT,
-                dp=1.0,
-                minDist=15,
-                param1=60,
-                param2=12,
-                minRadius=4,
-                maxRadius=28,
-            )
-            if raw_circles2 is not None:
-                candidates2 = np.round(raw_circles2[0]).astype(int)
-                abs_candidates2 = []
-                for cx, cy, cr in candidates2:
-                    abs_candidates2.append((strip_x1 + int(cx), strip_y1 + int(cy), int(cr)))
-                clusters2 = self._cluster_by_y(abs_candidates2)
-                if len(clusters2) > len(clusters):
-                    clusters = clusters2
-                    logger.debug("Permissive pass: %d clusters from %d candidates",
-                                  len(clusters2), len(candidates2))
 
         # Step 4: Build options from clusters
         # Sort clusters by Y (top to bottom)
@@ -285,7 +275,7 @@ class OptionDetector:
                 label, cx, cy, cr, text[:60] if text else "", text_conf,
             )
 
-        method = "y-cluster" if options else "none"
+        method = "adaptive_y_cluster" if options else "none"
         logger.info("Detected %d options via %s (%d raw candidates)",
                      len(options), method, len(abs_candidates))
 
@@ -295,7 +285,161 @@ class OptionDetector:
             detection_method=method,
             image_w=layout.image_w,
             image_h=layout.image_h,
+            debug_meta={
+                "adaptive": True,
+                "best_strip_x1": (best_strip[0] if best_strip else None),
+                "best_strip_x2": (best_strip[1] if best_strip else None),
+                "search_y1": best_search_y1,
+                "search_y2": best_search_y2,
+                "best_score": best_score,
+                "raw_candidates_count": int(len(abs_candidates)),
+            },
         )
+
+    def _candidate_strips(self, ap: Rect) -> list[tuple[int, int]]:
+        """Generate deterministic candidate strip ranges inside answer panel."""
+        width = max(
+            self.SEARCH_STRIP_MIN_WIDTH,
+            min(self.SEARCH_STRIP_MAX_WIDTH, int(ap.w * self.SEARCH_STRIP_WIDTH_FRAC)),
+        )
+        right_limit = ap.x + int(ap.w * self.SEARCH_MAX_RIGHT_FRAC)
+        if right_limit <= ap.x + width:
+            right_limit = min(ap.x2, ap.x + width + 10)
+
+        # Deterministic offsets from panel left to avoid getting stuck on one strip.
+        rel_starts = [0.00, 0.03, 0.06, 0.09, 0.12, 0.15]
+        strips: list[tuple[int, int]] = []
+        for rel in rel_starts:
+            sx1 = ap.x + int(ap.w * rel)
+            sx2 = min(ap.x2, sx1 + width)
+            if sx2 - sx1 < 40:
+                continue
+            if sx1 >= right_limit:
+                continue
+            strips.append((sx1, sx2))
+
+        if not strips:
+            strips.append((ap.x, min(ap.x2, ap.x + width)))
+
+        # De-duplicate while preserving order.
+        dedup: list[tuple[int, int]] = []
+        seen: set[tuple[int, int]] = set()
+        for s in strips:
+            if s not in seen:
+                seen.add(s)
+                dedup.append(s)
+        return dedup
+
+    def _detect_best_sequence_for_strip(
+        self,
+        img: np.ndarray,
+        strip_x1: int,
+        strip_x2: int,
+        strip_y1: int,
+        strip_y2: int,
+    ) -> tuple[list[dict], float, list[tuple[int, int, int]]]:
+        """Run multi-pass Hough on one strip and return best coherent 3-5 row sequence."""
+        import cv2
+
+        strip_img = img[strip_y1:strip_y2, strip_x1:strip_x2]
+        if strip_img.size == 0:
+            return ([], float("-inf"), [])
+        gray_strip = cv2.cvtColor(strip_img, cv2.COLOR_BGR2GRAY)
+        blurred = cv2.GaussianBlur(gray_strip, (9, 9), 2)
+
+        param_sets = [
+            dict(dp=self.HOUGH_DP, minDist=self.HOUGH_MIN_DIST, param1=self.HOUGH_PARAM1, param2=self.HOUGH_PARAM2, minRadius=self.HOUGH_MIN_RADIUS, maxRadius=self.HOUGH_MAX_RADIUS),
+            dict(dp=1.0, minDist=15, param1=60, param2=12, minRadius=4, maxRadius=28),
+            dict(dp=1.0, minDist=12, param1=60, param2=9, minRadius=4, maxRadius=35),
+        ]
+
+        best_seq: list[dict] = []
+        best_score = float("-inf")
+        best_abs_candidates: list[tuple[int, int, int]] = []
+        for ps in param_sets:
+            raw = cv2.HoughCircles(
+                blurred,
+                cv2.HOUGH_GRADIENT,
+                dp=ps["dp"],
+                minDist=ps["minDist"],
+                param1=ps["param1"],
+                param2=ps["param2"],
+                minRadius=ps["minRadius"],
+                maxRadius=ps["maxRadius"],
+            )
+            if raw is None:
+                continue
+            cand = np.round(raw[0]).astype(int)
+            abs_candidates = [(strip_x1 + int(cx), strip_y1 + int(cy), int(cr)) for cx, cy, cr in cand]
+            clusters = self._cluster_by_y(abs_candidates)
+            seq, score = self._select_best_cluster_sequence(clusters)
+            if score > best_score:
+                best_score = score
+                best_seq = seq
+                best_abs_candidates = abs_candidates
+        return (best_seq, best_score, best_abs_candidates)
+
+    def _select_best_cluster_sequence(self, clusters: list[dict]) -> tuple[list[dict], float]:
+        """Pick the best contiguous 3-5 row sequence from cluster candidates."""
+        if not clusters:
+            return ([], float("-inf"))
+        ordered = sorted(clusters, key=lambda c: c["center_y"])
+        n = len(ordered)
+        best_seq: list[dict] = []
+        best_score = float("-inf")
+
+        min_k = min(self.MIN_EXPECTED_OPTIONS, n)
+        max_k = min(self.MAX_EXPECTED_OPTIONS, n)
+        for k in range(max_k, min_k - 1, -1):
+            for i in range(0, n - k + 1):
+                seq = ordered[i : i + k]
+                score = self._score_cluster_sequence(seq)
+                if score > best_score:
+                    best_score = score
+                    best_seq = seq
+        return (best_seq, best_score)
+
+    def _score_cluster_sequence(self, seq: list[dict]) -> float:
+        """Score how much a sequence looks like real radio rows."""
+        if not seq:
+            return float("-inf")
+        k = len(seq)
+        if k < self.MIN_EXPECTED_OPTIONS:
+            return -1e6
+
+        xs = np.array([float(s["center_x"]) for s in seq], dtype=np.float64)
+        ys = np.array([float(s["center_y"]) for s in seq], dtype=np.float64)
+        rs = np.array([float(max(1, s["median_r"])) for s in seq], dtype=np.float64)
+        counts = np.array([float(max(1, s.get("count", 1))) for s in seq], dtype=np.float64)
+
+        if k > 1:
+            y_diffs = np.diff(ys)
+            gap_penalty = float(
+                np.sum((y_diffs < self.MIN_ROW_GAP_PX) | (y_diffs > self.MAX_ROW_GAP_PX))
+            )
+            y_std = float(np.std(y_diffs))
+        else:
+            gap_penalty = 5.0
+            y_std = 999.0
+
+        x_std = float(np.std(xs))
+        r_std = float(np.std(rs))
+        mean_count = float(np.mean(counts))
+        y_span = float(ys[-1] - ys[0]) if k > 1 else 0.0
+
+        # Higher is better.
+        score = 0.0
+        if gap_penalty > 0:
+            return -1e6
+        score += 250.0 if self.MIN_EXPECTED_OPTIONS <= k <= self.MAX_EXPECTED_OPTIONS else -200.0
+        score += (k * 12.0)
+        score += (mean_count * 6.0)
+        score -= (x_std * 0.9)
+        score -= (y_std * 0.7)
+        score -= (r_std * 6.0)
+        score -= (gap_penalty * 120.0)
+        score -= (max(0.0, y_span - 1200.0) * 0.25)
+        return score
 
     # ------------------------------------------------------------------
     # Internal helpers

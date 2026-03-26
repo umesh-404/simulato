@@ -16,7 +16,7 @@ SYSTEM_PROMPT = """You are an expert exam question analyzer. You will be given a
 
 Your task:
 1. Read the question text carefully and completely.
-2. Read all answer options (A, B, C, D).
+2. Read all answer options (A, B, C, D, E).
 3. Determine the correct answer.
 4. Return your response as a JSON object with this exact structure:
 
@@ -26,7 +26,8 @@ Your task:
     "A": "<option A text>",
     "B": "<option B text>",
     "C": "<option C text>",
-    "D": "<option D text>"
+    "D": "<option D text>",
+    "E": "<option E text>"
   },
   "answer": "<letter of correct answer>",
   "answer_content": "<full text of the correct answer option>"
@@ -34,7 +35,8 @@ Your task:
 
 Rules:
 - Extract the EXACT text shown in the image. Do not paraphrase.
-- The "answer" field must be a single letter: A, B, C, or D.
+- The "answer" field must be a single letter: A, B, C, D, or E.
+- If an option letter is not visible on the screen, set that option text to an empty string "".
 - The "answer_content" field must contain the exact text of the option you selected.
 - Return ONLY the JSON object. No explanation, no markdown, no extra text.
 - If you cannot read the image clearly, return: {"error": "unreadable"}
@@ -96,11 +98,12 @@ def get_grok_response_schema() -> dict:
                             "B": {"type": "string"},
                             "C": {"type": "string"},
                             "D": {"type": "string"},
+                            "E": {"type": "string"},
                         },
-                        "required": ["A", "B", "C", "D"],
+                        "required": ["A", "B", "C", "D", "E"],
                         "additionalProperties": False,
                     },
-                    "answer": {"type": "string", "enum": ["A", "B", "C", "D"]},
+                    "answer": {"type": "string", "enum": ["A", "B", "C", "D", "E"]},
                     "answer_content": {"type": "string"},
                 },
                 "required": ["question", "options", "answer", "answer_content"],

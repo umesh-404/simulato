@@ -10,6 +10,7 @@
     "option_b",
     "option_c",
     "option_d",
+    "option_e",
     "correct_answer",
     "version"
   ],
@@ -36,13 +37,14 @@
     "option_b": { "type": "string" },
     "option_c": { "type": "string" },
     "option_d": { "type": "string" },
+    "option_e": { "type": "string" },
     "correct_answer": {
       "type": "string",
       "description": "Text content of the correct answer (not the letter)"
     },
     "answer_letter": {
       "type": "string",
-      "enum": ["A", "B", "C", "D", ""],
+      "enum": ["A", "B", "C", "D", "E", ""],
       "description": "Original letter designation from AI"
     },
     "version": {

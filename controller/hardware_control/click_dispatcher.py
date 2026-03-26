@@ -21,6 +21,7 @@ LETTER_TO_COMMAND = {
     "B": "CLICK_B",
     "C": "CLICK_C",
     "D": "CLICK_D",
+    "E": "CLICK_E",
 }
 
 
@@ -47,6 +48,28 @@ class ClickDispatcher:
             from calibration.grid_mapper import GridMap
             gm = GridMap.load()
             pixel = gm.get_pixel_for(key)
+            if pixel is None and key.strip().upper() == "E":
+                # If E was not part of the calibration grid_map, deterministically
+                # extrapolate it from the calibrated A-D option row spacing.
+                # This keeps click_option('E') usable for operator conflict resolution.
+                pA = gm.get_pixel_for("A")
+                pB = gm.get_pixel_for("B")
+                pC = gm.get_pixel_for("C")
+                pD = gm.get_pixel_for("D")
+                if pC and pD:
+                    # Average step between consecutive known rows.
+                    steps = []
+                    for l1, l2 in (("A", "B"), ("B", "C"), ("C", "D")):
+                        p1 = gm.get_pixel_for(l1)
+                        p2 = gm.get_pixel_for(l2)
+                        if p1 and p2:
+                            steps.append((p2[0] - p1[0], p2[1] - p1[1]))
+                    if steps:
+                        avg_dx = int(round(sum(dx for dx, _dy in steps) / len(steps)))
+                        avg_dy = int(round(sum(dy for _dx, dy in steps) / len(steps)))
+                        pixel = (pD[0] + avg_dx, pD[1] + avg_dy)
+                    else:
+                        pixel = (pD[0], pD[1] + (pD[1] - pC[1]))
             if pixel is None:
                 return None
             return self._pixel_to_absolute(pixel[0], pixel[1], gm.resolution[0], gm.resolution[1])
@@ -87,7 +110,7 @@ class ClickDispatcher:
         Click an answer option by letter.
 
         Args:
-            letter: "A", "B", "C", or "D"
+            letter: "A", "B", "C", "D", or "E"
 
         Returns:
             Pi response dict.
