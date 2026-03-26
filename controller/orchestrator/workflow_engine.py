@@ -136,6 +136,7 @@ class WorkflowEngine:
         self._is_waiting_verification_flag: bool = False
         self._request_capture_callback: Optional[callable] = None
         self._ai_provider: str = DEFAULT_AI_PROVIDER  # "grok" or "gemini"
+        self._last_verification_timed_out: bool = False
 
     def set_capture_callback(self, callback) -> None:
         """Set callback to request capture from the phone."""
@@ -667,8 +668,14 @@ class WorkflowEngine:
 
         Retry with deterministic nearby radio-row fallbacks, then alert.
         """
+        if self._sm.state != SystemState.RUNNING:
+            logger.info("Skipping click execution for %s — state is %s", letter, self._sm.state.value)
+            return
         candidates = self._candidate_option_click_sequence(letter)
         for idx, candidate in enumerate(candidates):
+            if self._sm.state != SystemState.RUNNING:
+                logger.info("Stopping click retries for %s — state is %s", letter, self._sm.state.value)
+                return
             if idx == 0:
                 logger.info("Click attempt %d for intended option %s", idx + 1, letter)
             else:
@@ -682,6 +689,12 @@ class WorkflowEngine:
             # Give UI time to update
             time.sleep(1.0)
             verified = self._verify_option_click(letter)
+            if self._last_verification_timed_out:
+                logger.warning(
+                    "Verification capture timed out while checking option %s; stopping retries",
+                    letter,
+                )
+                break
             if verified:
                 if candidate == letter:
                     logger.info("Click verified for option %s", letter)
@@ -801,8 +814,10 @@ class WorkflowEngine:
             self._request_capture_callback()
         arrived = self._verification_frame_event.wait(timeout=VERIFY_FRAME_TIMEOUT)
         self._is_waiting_verification_flag = False
+        self._last_verification_timed_out = False
         if not arrived or self._verification_frame_data is None:
             logger.warning("Verification capture timed out after %ds", VERIFY_FRAME_TIMEOUT)
+            self._last_verification_timed_out = True
             return False
 
         verify_path = self._receiver.receive_image(self._verification_frame_data)
@@ -826,11 +841,17 @@ class WorkflowEngine:
         The stitched image is only used for question solving/context building.
         Live click coordinates are rebuilt from this fresh frame.
         """
+        if self._sm.state != SystemState.RUNNING:
+            logger.info("Skipping post-AI mapping capture — state is %s", self._sm.state.value)
+            return
         self._mapping_frame_event.clear()
         self._mapping_frame_data = None
         self._is_waiting_mapping_flag = True
         if self._request_capture_callback:
             self._request_capture_callback()
+        if self._sm.state != SystemState.RUNNING:
+            self._is_waiting_mapping_flag = False
+            return
         arrived = self._mapping_frame_event.wait(timeout=VERIFY_FRAME_TIMEOUT)
         self._is_waiting_mapping_flag = False
         if not arrived or self._mapping_frame_data is None:
@@ -859,6 +880,9 @@ class WorkflowEngine:
         additional_frames = []
 
         for i in range(MAX_SCROLL_FRAMES):
+            if self._sm.state != SystemState.RUNNING:
+                logger.info("Stopping scroll capture loop — state is %s", self._sm.state.value)
+                break
             logger.info("Scroll frame %d/%d — scrolling %s", i + 1, MAX_SCROLL_FRAMES, direction)
 
             # Send scroll command.

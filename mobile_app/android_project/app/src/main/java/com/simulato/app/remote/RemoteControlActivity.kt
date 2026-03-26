@@ -174,6 +174,10 @@ class RemoteControlActivity : AppCompatActivity() {
                 } else {
                     if (responseError != null) "$command: FAILED ($responseError)" else "$command: FAILED"
                 }
+                // Reflect backend state changes immediately in UI.
+                fetchStatus()
+                statusHandler.removeCallbacks(statusRunnable)
+                statusHandler.postDelayed(statusRunnable, 1200L)
             }
         }
     }
@@ -206,10 +210,35 @@ class RemoteControlActivity : AppCompatActivity() {
     }
 
     private fun fetchStatus() {
+        binding.txtLastAction.text = "Fetching status..."
         apiClient.getStatus { success, body ->
             runOnUiThread {
                 if (isDestroyed) return@runOnUiThread
-                binding.txtSystemStatus.text = if (success) body else "Status unavailable"
+                if (success) {
+                    val pretty = try {
+                        val obj = JsonParser.parseString(body).asJsonObject
+                        val payload = obj.getAsJsonObject("payload")
+                        val state = payload?.get("system_state")?.asString ?: "UNKNOWN"
+                        val test = payload?.get("active_test")?.asString ?: "—"
+                        val provider = payload?.get("active_ai_provider")?.asString ?: "—"
+                        val qn = payload?.get("question_number")?.asInt ?: 0
+                        val apiCalls = payload?.get("api_calls")?.asInt ?: 0
+                        val cacheHits = payload?.get("cache_hits")?.asInt ?: 0
+                        val imageHashHits = payload?.get("image_hash_hits")?.asInt ?: 0
+                        "state=$state\n" +
+                            "test=$test\n" +
+                            "provider=$provider\n" +
+                            "question=$qn api_calls=$apiCalls\n" +
+                            "cache_hits=$cacheHits image_hash_hits=$imageHashHits"
+                    } catch (_: Exception) {
+                        body
+                    }
+                    binding.txtSystemStatus.text = pretty
+                    binding.txtLastAction.text = "Status refreshed"
+                } else {
+                    binding.txtSystemStatus.text = "Status unavailable: $body"
+                    binding.txtLastAction.text = "Status fetch failed"
+                }
             }
         }
     }

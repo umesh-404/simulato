@@ -102,7 +102,7 @@ class OptionDetector:
     SEARCH_STRIP_MIN_WIDTH = 90
     SEARCH_STRIP_MAX_WIDTH = 220
     SEARCH_STRIP_WIDTH_FRAC = 0.13
-    SEARCH_MAX_RIGHT_FRAC = 0.20
+    SEARCH_MAX_RIGHT_FRAC = 0.14
     SEARCH_TOP_MARGIN_FRAC = 0.02
     SEARCH_BOTTOM_MARGIN_FRAC = 0.06
 
@@ -241,6 +241,9 @@ class OptionDetector:
             clusters = clusters[:self.MAX_EXPECTED_OPTIONS]
 
         options: list[DetectedOption] = []
+        # Radio buttons lie on a stable left column; derive a shared anchor X
+        # to avoid drifting into option-text circles (e.g., "o"/"e" glyph loops).
+        stable_radio_x = self._stable_radio_anchor_x(clusters, ap)
         for i, cluster in enumerate(clusters):
             if i >= len(OPTION_LABELS):
                 break
@@ -277,7 +280,7 @@ class OptionDetector:
                 circle_x=cx,
                 circle_y=cy,
                 circle_r=cr,
-                click_x=cx,
+                click_x=stable_radio_x,
                 click_y=cy,
                 bounds=option_bounds,
                 text_confidence=text_conf,
@@ -308,6 +311,26 @@ class OptionDetector:
                 "raw_candidates_count": int(len(abs_candidates)),
             },
         )
+
+    def _stable_radio_anchor_x(self, clusters: list[dict], ap: Rect) -> int:
+        """
+        Derive a robust click X for radio buttons from cluster centers.
+
+        We bias to the left-most consistent column so clicks stay on the
+        radio circles rather than drifting onto option text.
+        """
+        if not clusters:
+            return ap.x + int(ap.w * 0.10)
+
+        xs = sorted(int(c.get("center_x", ap.x + int(ap.w * 0.10))) for c in clusters)
+        # Use lower quartile as the stable radio column anchor.
+        q_idx = max(0, min(len(xs) - 1, int(round((len(xs) - 1) * 0.25))))
+        x = xs[q_idx]
+
+        # Keep inside a conservative left band of answer panel.
+        min_x = ap.x + int(ap.w * 0.03)
+        max_x = ap.x + int(ap.w * 0.28)
+        return max(min_x, min(max_x, x))
 
     def _candidate_strips(self, ap: Rect) -> list[tuple[int, int]]:
         """Generate deterministic candidate strip ranges inside answer panel."""

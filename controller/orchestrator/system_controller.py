@@ -116,8 +116,10 @@ class SystemController:
         # Allow operator recovery after STOP without requiring app restart.
         # STOPPED is terminal for active run state, but START/CALIBRATE should
         # deterministically revive the controller back to IDLE first.
-        if self._sm.state == SystemState.STOPPED and command in {"START", "CALIBRATE"}:
+        if self._sm.state == SystemState.STOPPED and command in {"START", "CALIBRATE", "PAUSE"}:
             self._sm.transition_to(SystemState.IDLE, reason=f"recover_from_stopped:{command.lower()}")
+            if command == "PAUSE":
+                return {"status": "idle", "reason": "recovered_from_stopped"}
 
         handlers = {
             "CALIBRATE": self._handle_calibrate,
@@ -360,11 +362,12 @@ class SystemController:
     def _process_primary_frame_async(self, image_data: bytes, device_id: str) -> None:
         """Run heavy workflow processing off the API thread."""
         try:
-            if self._workflow is None:
+            workflow = self._workflow
+            if workflow is None:
                 logger.error("Workflow engine not initialized")
                 return
 
-            decision = self._workflow.process_question(image_data)
+            decision = workflow.process_question(image_data)
 
             if decision and decision.outcome.value == "conflict":
                 self._last_conflict_decision = {
@@ -374,6 +377,13 @@ class SystemController:
                 }
 
             if decision and decision.outcome.value == "click":
+                # STOP/PAUSE may have been issued while processing.
+                if self._sm.state != SystemState.RUNNING:
+                    logger.info("Skipping advance_to_next — state is %s", self._sm.state.value)
+                    return
+                if self._workflow is None:
+                    logger.info("Skipping advance_to_next — workflow cleaned up")
+                    return
                 self._workflow.advance_to_next()
                 # Trigger the next capture after a brief delay for the screen to settle
                 self._schedule_timer(1.5, self._request_capture)
