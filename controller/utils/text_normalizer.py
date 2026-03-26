@@ -24,7 +24,7 @@ def normalize_text(text: str) -> str:
     text = unicodedata.normalize("NFC", text)
     text = text.lower().strip()
     text = re.sub(r"\s+", " ", text)
-    text = re.sub(r"[^a-z0-9\s]", "", text)
+    text = re.sub(r"[^a-z0-9\s/\.\^\(\)\-\+]", "", text)
     text = re.sub(r"\b0+(\d)", r"\1", text)
     return text.strip()
 

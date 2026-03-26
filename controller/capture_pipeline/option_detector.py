@@ -98,12 +98,12 @@ class OptionDetector:
     # --- Tunable thresholds -------------------------------------------
 
     # Width of each search strip (pixels from a candidate left anchor).
-    SEARCH_STRIP_WIDTH = 130
-    SEARCH_STRIP_MIN_WIDTH = 90
-    SEARCH_STRIP_MAX_WIDTH = 220
-    SEARCH_STRIP_WIDTH_FRAC = 0.13
-    SEARCH_MAX_RIGHT_FRAC = 0.14
-    SEARCH_TOP_MARGIN_FRAC = 0.06
+    SEARCH_STRIP_WIDTH = 80
+    SEARCH_STRIP_MIN_WIDTH = 50
+    SEARCH_STRIP_MAX_WIDTH = 140
+    SEARCH_STRIP_WIDTH_FRAC = 0.06
+    SEARCH_MAX_RIGHT_FRAC = 0.12
+    SEARCH_TOP_MARGIN_FRAC = 0.18
     SEARCH_BOTTOM_MARGIN_FRAC = 0.06
 
     # HoughCircles parameters (kept loose — we filter with clustering afterwards)
@@ -232,10 +232,12 @@ class OptionDetector:
                 },
             )
 
-        # Remove obvious non-option rows (typically tiny circles near "Answer here"
-        # header) before A..E labeling. Keep original set if filtering gets too strict.
+        # Remove obvious non-option rows (header circles from "Answer here"
+        # text, watermark artefacts, etc.) before A..E labeling.
         original_clusters = list(clusters)
-        min_row_y = ap.y + int(ap.h * 0.08)
+        # The "Answer here" header plus its vertical padding typically
+        # occupies the top ~18 % of the answer panel.
+        min_row_y = ap.y + int(ap.h * 0.18)
         max_row_y = ap.y + int(ap.h * 0.97)
         filtered_clusters = [
             c for c in clusters
@@ -253,6 +255,12 @@ class OptionDetector:
         # Trim to max expected options
         if len(clusters) > self.MAX_EXPECTED_OPTIONS:
             clusters = clusters[:self.MAX_EXPECTED_OPTIONS]
+
+        # Spacing regularity filter: real radio buttons are roughly evenly
+        # spaced.  If the gap between the first and second row is more than
+        # 2× the median of other inter-row gaps, the first row is almost
+        # certainly a phantom header circle — drop it.
+        clusters = self._drop_spacing_outliers(clusters)
 
         options: list[DetectedOption] = []
         # Radio buttons lie on a stable left column; derive a shared anchor X
@@ -275,9 +283,13 @@ class OptionDetector:
             row_top_abs = ap.y + row_top
             row_bottom_abs = ap.y + row_bottom
 
-            # OCR text region: from right of circle to end of panel
+            # OCR text region: from right of circle, limited width to avoid
+            # picking up background watermark noise.  Cap at 60% of panel
+            # width (option text rarely exceeds that).
             text_x = cx + cr + self.TEXT_OFFSET_X_PX
-            text_region = img[row_top_abs:row_bottom_abs, text_x:ap.x2]
+            max_text_w = int(ap.w * 0.60)
+            text_x2 = min(text_x + max_text_w, ap.x2)
+            text_region = img[row_top_abs:row_bottom_abs, text_x:text_x2]
 
             text, text_conf = self._ocr_text(text_region)
 
@@ -360,8 +372,9 @@ class OptionDetector:
         if right_limit <= ap.x + width:
             right_limit = min(ap.x2, ap.x + width + 10)
 
-        # Deterministic offsets from panel left to avoid getting stuck on one strip.
-        rel_starts = [0.00, 0.03, 0.06, 0.09, 0.12, 0.15]
+        # Deterministic offsets from panel left. Finer steps for better
+        # isolation of the narrow radio-button column.
+        rel_starts = [0.00, 0.02, 0.04, 0.06, 0.08, 0.10]
         strips: list[tuple[int, int]] = []
         for rel in rel_starts:
             sx1 = ap.x + int(ap.w * rel)
@@ -486,10 +499,11 @@ class OptionDetector:
         if gap_penalty > 0:
             return -1e6
         score += 250.0 if self.MIN_EXPECTED_OPTIONS <= k <= self.MAX_EXPECTED_OPTIONS else -200.0
-        # Strongly prefer fuller 5-row sequences when available.
         score += (k * 26.0)
         score += (mean_count * 6.0)
-        score -= (x_std * 0.9)
+        # X-alignment is the strongest signal: real radio buttons share a
+        # nearly identical X coordinate (std < ~15 px).  Penalise heavily.
+        score -= (x_std * 3.5)
         score -= (y_std * 0.7)
         score -= (r_std * 6.0)
         score -= (gap_penalty * 120.0)
@@ -547,6 +561,59 @@ class OptionDetector:
 
         return result
 
+    def _drop_spacing_outliers(self, clusters: list[dict]) -> list[dict]:
+        """Remove leading/trailing phantom rows that break even spacing.
+
+        Real radio-button rows follow a roughly regular vertical rhythm.
+        A phantom "Answer here" header circle will create an abnormally
+        large first gap.  Similarly a phantom near the bottom can create
+        an abnormally large last gap.
+
+        Algorithm:
+            1. Compute all inter-row gaps.
+            2. If the first gap is > 1.8× the median of the *other* gaps,
+               drop the first cluster (it's a header phantom).
+            3. Repeat analogous check for the last gap.
+        """
+        if len(clusters) < 3:
+            return clusters
+
+        ys = [c["center_y"] for c in clusters]
+        gaps = [ys[i + 1] - ys[i] for i in range(len(ys) - 1)]
+
+        result = list(clusters)
+
+        # Check first row
+        if len(gaps) >= 2:
+            first_gap = gaps[0]
+            other_gaps = gaps[1:]
+            median_other = float(np.median(other_gaps))
+            if median_other > 0 and first_gap > median_other * 1.8:
+                logger.info(
+                    "Dropping phantom header row at Y=%d (first_gap=%d, median_other=%.0f)",
+                    result[0]["center_y"], first_gap, median_other,
+                )
+                result = result[1:]
+
+        # Recompute gaps for trailing check
+        if len(result) >= 3:
+            ys2 = [c["center_y"] for c in result]
+            gaps2 = [ys2[i + 1] - ys2[i] for i in range(len(ys2) - 1)]
+            if len(gaps2) >= 2:
+                last_gap = gaps2[-1]
+                other_gaps2 = gaps2[:-1]
+                median_other2 = float(np.median(other_gaps2))
+                if median_other2 > 0 and last_gap > median_other2 * 1.8:
+                    logger.info(
+                        "Dropping phantom trailing row at Y=%d (last_gap=%d, median_other=%.0f)",
+                        result[-1]["center_y"], last_gap, median_other2,
+                    )
+                    result = result[:-1]
+
+        if len(result) >= self.MIN_EXPECTED_OPTIONS:
+            return result
+        return clusters
+
     def _compute_option_row(
         self,
         index: int,
@@ -590,7 +657,12 @@ class OptionDetector:
         return (row_top, row_bottom)
 
     def _ocr_text(self, text_region: np.ndarray) -> tuple[str, float]:
-        """Run OCR on a cropped text region. Returns (text, confidence)."""
+        """Run OCR on a cropped text region. Returns (text, confidence).
+
+        Applies adaptive thresholding to suppress background watermarks,
+        runs two PSM modes (7=line, 8=word) and picks the higher-confidence
+        result.
+        """
         if text_region.size == 0:
             return ("", 0.0)
 
@@ -602,43 +674,55 @@ class OptionDetector:
             if TESSERACT_CMD.strip():
                 pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD.strip()
 
-            # Convert to grayscale if needed
             if len(text_region.shape) == 3:
                 gray = cv2.cvtColor(text_region, cv2.COLOR_BGR2GRAY)
             else:
                 gray = text_region
 
-            # Upscale small regions for better OCR accuracy
-            h, w = gray.shape[:2]
-            if h < 30:
-                scale = max(2, 60 // max(h, 1))
-                gray = cv2.resize(gray, (w * scale, h * scale),
-                                  interpolation=cv2.INTER_CUBIC)
-
-            data = pytesseract.image_to_data(
-                gray,
-                output_type=pytesseract.Output.DICT,
-                config="--oem 3 --psm 6",
-                timeout=OCR_TIMEOUT_SECONDS,
+            # Adaptive threshold suppresses light watermarks while keeping
+            # dark option text.
+            cleaned = cv2.adaptiveThreshold(
+                gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                cv2.THRESH_BINARY, 31, 15,
             )
 
-            words = []
-            confidences = []
-            for i in range(len(data.get("text", []))):
-                txt = str(data["text"][i]).strip()
-                if not txt:
-                    continue
-                try:
-                    conf = float(data["conf"][i])
-                except (ValueError, TypeError):
-                    conf = -1.0
-                if conf >= 0:
-                    words.append(txt)
-                    confidences.append(conf)
+            h, w = cleaned.shape[:2]
+            if h < 40:
+                scale = max(2, 80 // max(h, 1))
+                cleaned = cv2.resize(cleaned, (w * scale, h * scale),
+                                     interpolation=cv2.INTER_CUBIC)
 
-            text = " ".join(words)
-            avg_conf = (sum(confidences) / len(confidences)) if confidences else 0.0
-            return (text, avg_conf)
+            best_text = ""
+            best_conf = 0.0
+            # Try two page-segmentation modes: line then single word.
+            for psm in (7, 8):
+                cfg = f"--oem 3 --psm {psm} -c tessedit_char_whitelist=0123456789/.-+abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ "
+                data = pytesseract.image_to_data(
+                    cleaned,
+                    output_type=pytesseract.Output.DICT,
+                    config=cfg,
+                    timeout=OCR_TIMEOUT_SECONDS,
+                )
+                words = []
+                confidences = []
+                for i in range(len(data.get("text", []))):
+                    txt = str(data["text"][i]).strip()
+                    if not txt:
+                        continue
+                    try:
+                        conf = float(data["conf"][i])
+                    except (ValueError, TypeError):
+                        conf = -1.0
+                    if conf >= 0:
+                        words.append(txt)
+                        confidences.append(conf)
+                text = " ".join(words)
+                avg = (sum(confidences) / len(confidences)) if confidences else 0.0
+                if avg > best_conf:
+                    best_conf = avg
+                    best_text = text
+
+            return (best_text, best_conf)
 
         except Exception as e:
             logger.debug("OCR failed: %s", e)

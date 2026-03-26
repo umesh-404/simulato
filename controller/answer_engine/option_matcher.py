@@ -8,6 +8,7 @@ Uses normalized text comparison (Canonical Law 8 — answer by content,
 not position). This handles option shuffling between exam attempts.
 """
 
+import re
 from typing import Optional
 from difflib import SequenceMatcher
 
@@ -63,9 +64,44 @@ def match_option_by_content(
                 confidence="exact",
             )
 
-    # Pass 2: Substring containment (one contains the other)
+    # Pass 1.5: Stripped-raw match — compare with only whitespace removed
+    # from the raw input (no lowering of math chars like / ^ . - +).
+    # This handles short numeric options like "3/2", "1/3" where
+    # normalize_text might over-strip.
+    raw_answer = re.sub(r"\s+", "", correct_answer_text.strip())
+    for letter, text in current_options.items():
+        raw_option = re.sub(r"\s+", "", text.strip())
+        if raw_answer and raw_option and raw_answer == raw_option:
+            logger.info("Raw exact match: %s = '%s'", letter, text[:60])
+            return OptionMatchResult(
+                matched_letter=letter,
+                matched_text=text,
+                confidence="exact_raw",
+            )
+    # Case-insensitive raw match
+    raw_answer_lower = raw_answer.lower()
+    for letter, text in current_options.items():
+        raw_option_lower = re.sub(r"\s+", "", text.strip()).lower()
+        if raw_answer_lower and raw_option_lower and raw_answer_lower == raw_option_lower:
+            logger.info("Raw case-insensitive match: %s = '%s'", letter, text[:60])
+            return OptionMatchResult(
+                matched_letter=letter,
+                matched_text=text,
+                confidence="exact_raw_ci",
+            )
+
+    # Pass 2: Substring containment — only safe for longer strings where a
+    # partial overlap is meaningful.  For short numeric options like "3", "2",
+    # "3/2" the substring check produces false positives (e.g. "2" in "32").
+    # Guard: shorter side must be >= 4 chars and >= 60 % of longer side.
     for letter, text in current_options.items():
         norm_option = normalize_for_matching(text)
+        if not norm_option or not norm_answer:
+            continue
+        shorter_len = min(len(norm_answer), len(norm_option))
+        longer_len = max(len(norm_answer), len(norm_option))
+        if shorter_len < 4 or shorter_len / longer_len < 0.6:
+            continue
         if norm_answer in norm_option or norm_option in norm_answer:
             logger.info("Substring content match: %s = '%s'", letter, text[:60])
             return OptionMatchResult(
