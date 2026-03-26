@@ -108,6 +108,7 @@ class WorkflowEngine:
         self._preprocessor = ImagePreprocessor()
         self._ocr = OCRLayoutAnalyzer()
         self._latest_ocr_layout: Optional[OCRLayoutResult] = None
+        self._latest_interaction_ocr_layout: Optional[OCRLayoutResult] = None
         self._latest_preprocessed_image_path: Optional[Path] = None
 
         self._test_id: Optional[int] = None
@@ -125,6 +126,10 @@ class WorkflowEngine:
         self._scroll_frame_event.set()  # Start set (not waiting)
         self._scroll_frame_data: Optional[bytes] = None
         self._is_waiting_flag: bool = False
+        self._mapping_frame_event = threading.Event()
+        self._mapping_frame_event.set()
+        self._mapping_frame_data: Optional[bytes] = None
+        self._is_waiting_mapping_flag: bool = False
         self._verification_frame_event = threading.Event()
         self._verification_frame_event.set()
         self._verification_frame_data: Optional[bytes] = None
@@ -175,6 +180,11 @@ class WorkflowEngine:
         """True if the engine is currently waiting for a verification capture."""
         return self._is_waiting_verification_flag
 
+    @property
+    def is_waiting_for_mapping(self) -> bool:
+        """True if the engine is currently waiting for a post-AI mapping capture."""
+        return self._is_waiting_mapping_flag
+
     def set_test_context(self, test_name: str) -> None:
         """Load or create the test context."""
         test = self._db.get_or_create_test(test_name)
@@ -187,7 +197,12 @@ class WorkflowEngine:
         self._expecting_next_change = False
         self._no_change_after_next_count = 0
         self._last_raw_phash = None
+        self._latest_ocr_layout = None
+        self._latest_interaction_ocr_layout = None
         self._latest_preprocessed_image_path = None
+        self._mapping_frame_data = None
+        self._is_waiting_mapping_flag = False
+        self._mapping_frame_event.set()
         logger.info("Test context set: %s (id=%d)", test_name, self._test_id)
 
     def receive_scroll_frame(self, image_data: bytes) -> None:
@@ -199,6 +214,11 @@ class WorkflowEngine:
         """Called by system_controller when a verification frame is received."""
         self._verification_frame_data = image_data
         self._verification_frame_event.set()
+
+    def receive_mapping_frame(self, image_data: bytes) -> None:
+        """Called by system_controller when a post-AI mapping frame is received."""
+        self._mapping_frame_data = image_data
+        self._mapping_frame_event.set()
 
     def process_question(self, image_data: bytes) -> Optional[AnswerDecision]:
         """
@@ -220,6 +240,9 @@ class WorkflowEngine:
 
         self._question_number += 1
         logger.info("=== Processing question %d ===", self._question_number)
+        # Prevent stale layout/target coordinates from previous question.
+        self._latest_ocr_layout = None
+        self._latest_interaction_ocr_layout = None
 
         #region agent log
         from controller.utils.debug_ndjson import dbg as _dbg
@@ -345,7 +368,11 @@ class WorkflowEngine:
 
             # Step 5: Preprocess
             preprocessed_path = self._preprocessor.preprocess(stitched_path)
-            self._latest_preprocessed_image_path = preprocessed_path
+            # Keep a separate preprocessed frame for interaction targeting.
+            # Click/scroll/NEXT should target the current visible frame,
+            # not the vertically stitched composite.
+            interaction_preprocessed_path = self._preprocessor.preprocess(frames[-1])
+            self._latest_preprocessed_image_path = interaction_preprocessed_path
             #region agent log
             _dbg(
                 location="controller/orchestrator/workflow_engine.py:process_question",
@@ -370,8 +397,10 @@ class WorkflowEngine:
             # Step 5.25: OCR layout pass (whole screen, deterministic)
             if OCR_LAYOUT_PRIMARY_ENABLED:
                 self._latest_ocr_layout = self._ocr.analyze(preprocessed_path)
+                self._latest_interaction_ocr_layout = self._ocr.analyze(interaction_preprocessed_path)
             else:
                 self._latest_ocr_layout = None
+                self._latest_interaction_ocr_layout = None
             #region agent log
             _dbg(
                 location="controller/orchestrator/workflow_engine.py:process_question",
@@ -496,6 +525,11 @@ class WorkflowEngine:
                 self._sm.force_error(decision.error_message or "Decision error")
                 return decision
 
+            # Use stitched image for AI solve only. Before click dispatch, capture
+            # a fresh frame and rebuild radio-button mapping from that live frame.
+            if decision.click_letter:
+                self._refresh_interaction_targets_post_ai()
+
             # Step 9: Execute click
             if decision.click_letter:
                 self._execute_click_with_verification(decision.click_letter)
@@ -598,11 +632,23 @@ class WorkflowEngine:
 
     def _click_next_best_target(self) -> None:
         """Click NEXT using OCR/Qwen-assisted targeting with calibrated fallback."""
-        if OCR_LAYOUT_PRIMARY_ENABLED and self._latest_ocr_layout is not None:
-            ocr_next = self._latest_ocr_layout.locate_next_target()
+        if OCR_LAYOUT_PRIMARY_ENABLED and self._latest_interaction_ocr_layout is not None:
+            ocr_next = self._latest_interaction_ocr_layout.locate_next_target()
             if ocr_next is not None:
                 logger.info("Using OCR-derived NEXT target")
                 self._click.click_at_normalized(ocr_next[0], ocr_next[1], command="CLICK_NEXT")
+                return
+            # If OCR text doesn't detect "NEXT", use deterministic layout fallback
+            # near the bottom-right of the answer panel before static calibration.
+            layout = self._latest_interaction_ocr_layout.layout
+            if layout is not None and layout.answer_panel is not None:
+                ap = layout.answer_panel
+                ix = self._latest_interaction_ocr_layout.image_w
+                iy = self._latest_interaction_ocr_layout.image_h
+                nx = max(0.0, min(1.0, float(ap.x + int(ap.w * 0.90)) / float(max(1, ix - 1))))
+                ny = max(0.0, min(1.0, float(ap.y + int(ap.h * 0.96)) / float(max(1, iy - 1))))
+                logger.info("Using layout-derived NEXT fallback target")
+                self._click.click_at_normalized(nx, ny, command="CLICK_NEXT")
                 return
         if LOCAL_AI_ASSIST_ENABLED and self._latest_preprocessed_image_path is not None:
             norm_target = locate_next_button_target(self._latest_preprocessed_image_path)
@@ -654,8 +700,8 @@ class WorkflowEngine:
         Click an option using precise local-AI target when available,
         otherwise fallback to calibrated static option mapping.
         """
-        if OCR_LAYOUT_PRIMARY_ENABLED and self._latest_ocr_layout is not None:
-            ocr_target = self._latest_ocr_layout.locate_option_target(letter)
+        if OCR_LAYOUT_PRIMARY_ENABLED and self._latest_interaction_ocr_layout is not None:
+            ocr_target = self._latest_interaction_ocr_layout.locate_option_target(letter)
             if ocr_target is not None:
                 logger.info("Using OCR-derived target for option %s", letter)
                 #region agent log
@@ -729,6 +775,33 @@ class WorkflowEngine:
         # Local AI assist disabled: still verify against a dedicated fresh frame,
         # never reuse the pre-click screenshot path.
         return self._verify.verify_click_on_image(letter, verify_path).verified
+
+    def _refresh_interaction_targets_post_ai(self) -> None:
+        """
+        Refresh click-target mapping from a dedicated post-AI capture.
+
+        The stitched image is only used for question solving/context building.
+        Live click coordinates are rebuilt from this fresh frame.
+        """
+        self._mapping_frame_event.clear()
+        self._mapping_frame_data = None
+        self._is_waiting_mapping_flag = True
+        if self._request_capture_callback:
+            self._request_capture_callback()
+        arrived = self._mapping_frame_event.wait(timeout=VERIFY_FRAME_TIMEOUT)
+        self._is_waiting_mapping_flag = False
+        if not arrived or self._mapping_frame_data is None:
+            logger.warning(
+                "Post-AI mapping capture timed out after %ds; using existing interaction targets",
+                VERIFY_FRAME_TIMEOUT,
+            )
+            return
+
+        mapping_path = self._receiver.receive_image(self._mapping_frame_data)
+        mapping_preprocessed = self._preprocessor.preprocess(mapping_path)
+        self._latest_preprocessed_image_path = mapping_preprocessed
+        if OCR_LAYOUT_PRIMARY_ENABLED:
+            self._latest_interaction_ocr_layout = self._ocr.analyze(mapping_preprocessed)
 
     def _capture_scroll_frames(self, direction: str) -> list[Path]:
         """

@@ -321,6 +321,11 @@ class SystemController:
             self._workflow.receive_scroll_frame(image_data)
             return
 
+        if getattr(self._workflow, 'is_waiting_for_mapping', False):
+            logger.info("Routing image as post-AI mapping frame")
+            self._workflow.receive_mapping_frame(image_data)
+            return
+
         if getattr(self._workflow, 'is_waiting_for_verification', False):
             logger.info("Routing image as verification frame")
             self._workflow.receive_verification_frame(image_data)
