@@ -1,0 +1,12 @@
+{
+  "question_id": 9,
+  "canonical_text": "pritam and priyanka enter into a partnership then for how many months did pritam invest his money|both i and ii together are not sufficient|both i and ii together are sufficient|either i alone or ii alone is sufficient|i alone is sufficient|ii alone is sufficient",
+  "option_a": "Either I alone or II alone is sufficient",
+  "option_b": "Both I and II together are sufficient",
+  "option_c": "I alone is sufficient",
+  "option_d": "Both I and II together are not sufficient",
+  "option_e": "II alone is sufficient",
+  "correct_answer": "Both I and II together are not sufficient",
+  "answer_letter": "D",
+  "version": 1
+}

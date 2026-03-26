@@ -9,6 +9,7 @@ not position). This handles option shuffling between exam attempts.
 """
 
 from typing import Optional
+from difflib import SequenceMatcher
 
 from controller.utils.text_normalizer import normalize_for_matching
 from controller.utils.logger import get_logger
@@ -72,6 +73,35 @@ def match_option_by_content(
                 matched_text=text,
                 confidence="substring",
             )
+
+    # Pass 3: Fuzzy similarity for minor OCR/format drift.
+    # Deterministic tie-break: highest score, then alphabetical letter order.
+    best_letter = None
+    best_text = None
+    best_score = 0.0
+    for letter in sorted(current_options.keys()):
+        text = current_options[letter]
+        norm_option = normalize_for_matching(text)
+        if not norm_option or not norm_answer:
+            continue
+        score = SequenceMatcher(None, norm_answer, norm_option).ratio()
+        if score > best_score:
+            best_score = score
+            best_letter = letter
+            best_text = text
+
+    if best_letter is not None and best_score >= 0.62:
+        logger.info(
+            "Fuzzy content match: %s (score=%.3f) = '%s'",
+            best_letter,
+            best_score,
+            (best_text or "")[:60],
+        )
+        return OptionMatchResult(
+            matched_letter=best_letter,
+            matched_text=best_text,
+            confidence="fuzzy",
+        )
 
     logger.warning("No option content match found for: '%s'", correct_answer_text[:60])
     return OptionMatchResult(

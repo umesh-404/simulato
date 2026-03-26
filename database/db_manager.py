@@ -319,3 +319,50 @@ class DatabaseManager:
             )
             return dict(row)
         return None
+
+    def lookup_by_image_phash_near(
+        self,
+        test_id: int,
+        image_phash: str,
+        max_distance: int = 6,
+    ) -> Optional[dict]:
+        """
+        Near-match lookup by pHash Hamming distance.
+        Helps avoid unnecessary cloud AI calls when screenshot noise differs
+        slightly but question is effectively the same.
+        """
+        if not image_phash:
+            return None
+
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT q.*, s.image_phash, s.created_at
+                FROM questions q
+                JOIN question_snapshots s ON s.question_id = q.question_id
+                WHERE q.test_id = ? AND s.image_phash IS NOT NULL
+                ORDER BY s.created_at DESC
+                """,
+                (test_id,),
+            ).fetchall()
+
+        def _ham(a: str, b: str) -> int:
+            if len(a) != len(b):
+                return 10**9
+            return sum(1 for x, y in zip(a, b) if x != y)
+
+        best_row = None
+        best_dist = 10**9
+        for row in rows:
+            dist = _ham(image_phash, str(row["image_phash"]))
+            if dist < best_dist:
+                best_dist = dist
+                best_row = row
+
+        if best_row is not None and best_dist <= max_distance:
+            logger.debug(
+                "Near image hash match found: question_id=%d, dist=%d, phash=%s",
+                best_row["question_id"], best_dist, image_phash,
+            )
+            return dict(best_row)
+        return None

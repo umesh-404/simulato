@@ -66,6 +66,13 @@ class OCRLayoutResult:
         self.layout = layout
         self._option_map_cache: Optional[Any] = None
 
+    def get_option_map(self):
+        if self.image_path is None or self.layout is None:
+            return None
+        if self._option_map_cache is None:
+            self._option_map_cache = OptionDetector().detect(self.image_path, self.layout)
+        return self._option_map_cache
+
     def _norm(self, x: int, y: int) -> tuple[float, float]:
         nx = max(0.0, min(1.0, float(x) / float(max(1, self.image_w - 1))))
         ny = max(0.0, min(1.0, float(y) / float(max(1, self.image_h - 1))))

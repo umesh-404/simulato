@@ -55,6 +55,8 @@ from controller.answer_engine.decision_engine import (
     AnswerDecision,
     DecisionOutcome,
 )
+from controller.answer_engine.option_matcher import match_option_by_content
+from controller.question_engine.question_matcher import match_question
 from controller.alerts.alert_manager import AlertManager, AlertType, OperatorDecision
 from controller.capture_pipeline.image_receiver import ImageReceiver
 from controller.capture_pipeline.image_stitcher import ImageStitcher
@@ -303,9 +305,32 @@ class WorkflowEngine:
                 needs_scroll = check_needs_scroll(initial_preprocessed_path)
                 scroll_direction = "right" # Default direction for stitched questions
             else:
-                scroll_result = self._scroll_detector.detect(image_path)
-                needs_scroll = scroll_result.needs_scroll
-                scroll_direction = scroll_result.direction
+                # Prefer panel-aware structural detection when layout is available.
+                needs_scroll = False
+                scroll_direction = "down"
+                try:
+                    layout_for_scroll = None
+                    scroll_ocr_res = None
+                    if OCR_LAYOUT_PRIMARY_ENABLED and self._latest_ocr_layout is not None:
+                        layout_for_scroll = self._latest_ocr_layout.layout
+                    if layout_for_scroll is None:
+                        fallback_layout_res = self._ocr.analyze(initial_preprocessed_path)
+                        scroll_ocr_res = fallback_layout_res
+                        layout_for_scroll = fallback_layout_res.layout if fallback_layout_res is not None else None
+                    if layout_for_scroll is not None:
+                        dual = self._scroll_detector.detect_dual(image_path, layout_for_scroll)
+                        needs_scroll = bool(dual.question.needs_scroll)
+                        if not needs_scroll and scroll_ocr_res is not None:
+                            needs_scroll = self._question_panel_text_truncated(scroll_ocr_res)
+                        scroll_direction = "down" if needs_scroll else None
+                    else:
+                        scroll_result = self._scroll_detector.detect(image_path)
+                        needs_scroll = scroll_result.needs_scroll
+                        scroll_direction = scroll_result.direction
+                except Exception:
+                    scroll_result = self._scroll_detector.detect(image_path)
+                    needs_scroll = scroll_result.needs_scroll
+                    scroll_direction = scroll_result.direction
 
             frames = [image_path]
             if needs_scroll:
@@ -363,6 +388,8 @@ class WorkflowEngine:
             cached_question = None
             if image_phash is not None:
                 cached_question = self._db.lookup_by_image_phash(self._test_id, image_phash)
+                if cached_question is None:
+                    cached_question = self._db.lookup_by_image_phash_near(self._test_id, image_phash, max_distance=6)
                 if cached_question:
                     logger.info(
                         "Image-hash DB HIT: question_id=%d (test_id=%d)",
@@ -370,6 +397,11 @@ class WorkflowEngine:
                         self._test_id,
                     )
                     self._image_hash_hits += 1
+
+            # Step 5.6: OCR-text DB pre-check (no cloud call if cached by text/options)
+            ocr_cached_decision = None
+            if cached_question is None:
+                ocr_cached_decision = self._try_db_decision_from_ocr()
             #region agent log
             _dbg(
                 location="controller/orchestrator/workflow_engine.py:process_question",
@@ -389,16 +421,17 @@ class WorkflowEngine:
             # Step 6: Query AI (dispatch to active provider) — only if no image-hash hit
             try:
                 if cached_question is None:
-                    ai_response, ai_model_used, provider_used = self._query_primary_with_fallback(preprocessed_path)
-                    self._api_calls += 1
-                    self._log_event("ai_response", {
-                        "provider": provider_used,
-                        "model": ai_model_used,
-                        "question": ai_response.question[:100],
-                        "answer": ai_response.answer,
-                        "answer_content": ai_response.answer_content[:100],
-                    })
-                    self._save_ai_response(ai_response, ai_model_used)
+                    if ocr_cached_decision is None:
+                        ai_response, ai_model_used, provider_used = self._query_primary_with_fallback(preprocessed_path)
+                        self._api_calls += 1
+                        self._log_event("ai_response", {
+                            "provider": provider_used,
+                            "model": ai_model_used,
+                            "question": ai_response.question[:100],
+                            "answer": ai_response.answer,
+                            "answer_content": ai_response.answer_content[:100],
+                        })
+                        self._save_ai_response(ai_response, ai_model_used)
             except (GrokAPIError, GeminiAPIError, OllamaAPIError, ParseError) as e:
                 self._sm.force_error(f"AI processing failed: {e}")
                 self._alerts.raise_alert(
@@ -423,14 +456,26 @@ class WorkflowEngine:
                     "Using DB answer via image-hash fast path: letter=%s",
                     answer_letter,
                 )
+                remapped = self._remap_letter_by_option_content(
+                    db_answer_text=db_answer,
+                    fallback_letter=answer_letter,
+                )
                 decision = AnswerDecision(
                     outcome=DecisionOutcome.CLICK,
-                    click_letter=answer_letter,
+                    click_letter=remapped,
                     source="database_image_hash",
                     question_id=cached_question.get("question_id"),
                 )
+            elif ocr_cached_decision is not None:
+                decision = ocr_cached_decision
             else:
                 decision = decide_answer(self._db, self._test_id, ai_response)  # type: ignore[arg-type]
+                # Always remap by live on-screen option content to handle shuffled options.
+                if decision.click_letter and ai_response is not None:
+                    decision.click_letter = self._remap_letter_by_option_content(
+                        db_answer_text=ai_response.answer_content,
+                        fallback_letter=decision.click_letter,
+                    )
 
             if decision.source and decision.source != "ai_new":
                 self._cache_hits += 1
@@ -840,3 +885,113 @@ class WorkflowEngine:
                 raise primary_error
             logger.info("Falling back to cloud %s AI (%s)", fallback_name.capitalize(), fallback_model)
             return fallback_fn(stitched_path), fallback_model, fallback_name
+
+    def _remap_letter_by_option_content(self, db_answer_text: str, fallback_letter: str) -> str:
+        """
+        Map DB/AI answer text to current on-screen option content.
+        This keeps clicks correct when options are shuffled.
+        """
+        try:
+            if self._latest_ocr_layout is None:
+                return fallback_letter
+            option_map = self._latest_ocr_layout.get_option_map()
+            if option_map is None or not option_map.options:
+                return fallback_letter
+            current_options = {opt.label: (opt.text or "") for opt in option_map.options}
+            match = match_option_by_content(db_answer_text or "", current_options)
+            if match.found and match.matched_letter:
+                logger.info(
+                    "Remapped answer by on-screen content: %s -> %s (confidence=%s)",
+                    fallback_letter,
+                    match.matched_letter,
+                    match.confidence,
+                )
+                return match.matched_letter
+            return fallback_letter
+        except Exception:
+            return fallback_letter
+
+    def _question_panel_text_truncated(self, ocr_res: OCRLayoutResult) -> bool:
+        """
+        Heuristic: if OCR words in question panel touch near the bottom edge,
+        treat as truncated content requiring scroll.
+        """
+        try:
+            if ocr_res is None or ocr_res.layout is None or ocr_res.layout.question_panel is None:
+                return False
+            qp = ocr_res.layout.question_panel
+            panel_h = max(1, qp.h)
+            bottom_band_y = qp.y + int(panel_h * 0.93)
+            words = [
+                w for w in ocr_res.words
+                if qp.x <= w.cx <= qp.x2 and qp.y <= w.cy <= qp.y2
+            ]
+            if len(words) < 10:
+                return False
+            near_bottom = [w for w in words if w.cy >= bottom_band_y]
+            return len(near_bottom) >= 2
+        except Exception:
+            return False
+
+    def _try_db_decision_from_ocr(self) -> Optional[AnswerDecision]:
+        """
+        Attempt a DB-only decision using OCR-extracted question/options.
+        This runs before cloud AI to reduce unnecessary API calls.
+        """
+        try:
+            if self._latest_ocr_layout is None or self._latest_ocr_layout.layout is None:
+                return None
+            layout = self._latest_ocr_layout.layout
+            q_panel = layout.question_panel
+            if q_panel is None:
+                return None
+
+            # Build question text from OCR words inside question panel.
+            q_words = [
+                w for w in self._latest_ocr_layout.words
+                if q_panel.x <= w.cx <= q_panel.x2 and q_panel.y <= w.cy <= q_panel.y2
+            ]
+            if len(q_words) < 8:
+                return None
+            q_words_sorted = sorted(q_words, key=lambda w: (w.y, w.x))
+            question_text = " ".join(w.text for w in q_words_sorted).strip()
+            if len(question_text) < 40:
+                return None
+
+            option_map = self._latest_ocr_layout.get_option_map()
+            if option_map is None or not option_map.options:
+                return None
+            current_options = {opt.label: (opt.text or "") for opt in option_map.options}
+            non_empty = sum(1 for t in current_options.values() if (t or "").strip())
+            if non_empty < 2:
+                return None
+
+            match = match_question(
+                db=self._db,
+                test_id=self._test_id,
+                question_text=question_text,
+                options=current_options,
+            )
+            if not match.is_cached or not match.question_record:
+                return None
+
+            db_answer = match.correct_answer or ""
+            option_match = match_option_by_content(db_answer, current_options)
+            if not option_match.found or not option_match.matched_letter:
+                return None
+
+            logger.info(
+                "OCR DB pre-check HIT: question_id=%d source=%s mapped=%s",
+                match.question_record["question_id"],
+                match.source.value,
+                option_match.matched_letter,
+            )
+            return AnswerDecision(
+                outcome=DecisionOutcome.CLICK,
+                click_letter=option_match.matched_letter,
+                source=f"database_ocr_{match.source.value}",
+                question_id=match.question_record["question_id"],
+                match_result=match,
+            )
+        except Exception:
+            return None
