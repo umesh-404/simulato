@@ -1,0 +1,423 @@
+"""
+Exam screen layout detector.
+
+Detects the fixed-layout exam UI structure from a captured screenshot
+and returns pixel coordinates for every significant region:
+
+    - Question panel (left)
+    - Answer panel (right)
+    - Vertical divider between panels
+    - Bottom bar (Clear / Prev / Next buttons)
+    - Question navigation sidebar (numbered buttons on far left)
+
+The exam uses a split-pane layout with a draggable vertical divider
+(a thin line with a '⁞' dot-handle).  The divider position is treated
+as FIXED for a given exam session.
+
+Detection strategy:
+    1. Convert image to grayscale.
+    2. Find the "Answer here" header via template matching / OCR to
+       anchor the right-panel origin.
+    3. Find the vertical divider using edge + column-projection analysis
+       in the expected region (~40-55 % of width).
+    4. Find bottom bar by locating "Clear" / "Next" text near the bottom.
+    5. Find the nav sidebar as the narrow strip left of the question panel
+       that contains numbered colored boxes.
+
+All coordinates are in absolute pixels of the source image.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Optional
+
+import numpy as np
+
+from controller.utils.logger import get_logger
+
+logger = get_logger("exam_layout")
+
+
+# ---------------------------------------------------------------------------
+# Data structures
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class Rect:
+    """Axis-aligned bounding rectangle in absolute pixels."""
+    x: int
+    y: int
+    w: int
+    h: int
+
+    @property
+    def x2(self) -> int:
+        return self.x + self.w
+
+    @property
+    def y2(self) -> int:
+        return self.y + self.h
+
+    @property
+    def cx(self) -> int:
+        return self.x + self.w // 2
+
+    @property
+    def cy(self) -> int:
+        return self.y + self.h // 2
+
+
+@dataclass
+class ExamLayout:
+    """Complete layout of the exam screen with all detected regions."""
+
+    # Core panels
+    question_panel: Optional[Rect] = None       # Left panel (question text)
+    answer_panel: Optional[Rect] = None         # Right panel (answer options)
+    divider_x: int = 0                          # X-coordinate of the vertical divider
+
+    # Bottom bar buttons
+    bottom_bar: Optional[Rect] = None
+    next_button: Optional[Rect] = None
+    prev_button: Optional[Rect] = None
+    clear_button: Optional[Rect] = None
+
+    # Navigation sidebar (far left numbered buttons)
+    nav_sidebar: Optional[Rect] = None
+
+    # Header region (contains exam info, timer, submit button)
+    header: Optional[Rect] = None
+
+    # Image dimensions for normalized coordinate conversion
+    image_w: int = 0
+    image_h: int = 0
+
+    # Detection confidence
+    confidence: float = 0.0
+    detection_notes: list[str] = field(default_factory=list)
+
+    def is_valid(self) -> bool:
+        """Layout is valid if we found at least the two main panels."""
+        return (
+            self.question_panel is not None
+            and self.answer_panel is not None
+            and self.divider_x > 0
+        )
+
+    def norm(self, x: int, y: int) -> tuple[float, float]:
+        """Convert absolute pixel coords to normalized [0, 1] coords."""
+        nx = max(0.0, min(1.0, x / max(1, self.image_w)))
+        ny = max(0.0, min(1.0, y / max(1, self.image_h)))
+        return (nx, ny)
+
+
+# ---------------------------------------------------------------------------
+# Detector
+# ---------------------------------------------------------------------------
+
+class ExamLayoutDetector:
+    """
+    Detects the exam screen layout from a screenshot.
+
+    Tunable thresholds are class-level constants.  Override them for
+    calibration by subclassing or mutating the instance.
+    """
+
+    # --- Tunable thresholds -------------------------------------------
+
+    # Divider search region as fraction of image width.
+    # We expect the divider at around 40-55 % of image width.
+    DIVIDER_SEARCH_LEFT_FRAC = 0.38
+    DIVIDER_SEARCH_RIGHT_FRAC = 0.58
+
+    # Minimum vertical span (fraction of image height) for a column
+    # to be considered a divider.
+    DIVIDER_MIN_SPAN_FRAC = 0.45
+
+    # Header is assumed to occupy the top N% of the image.
+    HEADER_HEIGHT_FRAC = 0.12
+
+    # Bottom bar is assumed to occupy the bottom N% of the image.
+    BOTTOM_BAR_HEIGHT_FRAC = 0.08
+
+    # Navigation sidebar is assumed to be within the left N% of the image.
+    NAV_SIDEBAR_WIDTH_FRAC = 0.10
+
+    # Grayscale intensity range for the divider line (light gray).
+    DIVIDER_GRAY_MIN = 150
+    DIVIDER_GRAY_MAX = 230
+
+    def detect(self, image_path: Path) -> ExamLayout:
+        """
+        Analyze an exam screenshot and return the detected layout.
+
+        Parameters
+        ----------
+        image_path : Path
+            Path to the screenshot image.
+
+        Returns
+        -------
+        ExamLayout
+            Detected layout with pixel coordinates for all regions.
+        """
+        logger.info("Detecting exam layout for: %s", image_path.name)
+
+        try:
+            import cv2
+        except ImportError:
+            logger.warning("OpenCV not available — layout detection disabled")
+            return ExamLayout()
+
+        img = cv2.imread(str(image_path))
+        if img is None:
+            logger.warning("Could not read image: %s", image_path)
+            return ExamLayout()
+
+        h, w = img.shape[:2]
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+        layout = ExamLayout(image_w=w, image_h=h)
+        notes: list[str] = []
+
+        # Step 1: Detect header (top bar with exam info + timer)
+        header_h = int(h * self.HEADER_HEIGHT_FRAC)
+        layout.header = Rect(0, 0, w, header_h)
+
+        # Step 2: Detect bottom bar
+        bottom_bar_h = int(h * self.BOTTOM_BAR_HEIGHT_FRAC)
+        bottom_bar_y = h - bottom_bar_h
+        layout.bottom_bar = Rect(0, bottom_bar_y, w, bottom_bar_h)
+        self._detect_bottom_buttons(gray, layout, bottom_bar_y, h, w)
+
+        # Step 3: Detect navigation sidebar
+        nav_w = int(w * self.NAV_SIDEBAR_WIDTH_FRAC)
+        content_top = header_h
+        content_bottom = bottom_bar_y
+        layout.nav_sidebar = Rect(0, content_top, nav_w, content_bottom - content_top)
+
+        # Step 4: Detect the vertical divider
+        divider_x = self._detect_divider(gray, content_top, content_bottom, nav_w, w)
+        if divider_x > 0:
+            layout.divider_x = divider_x
+            notes.append(f"divider found at x={divider_x}")
+        else:
+            # Fallback: assume divider at ~46% of width (observed default)
+            divider_x = int(w * 0.46)
+            layout.divider_x = divider_x
+            notes.append(f"divider FALLBACK at x={divider_x}")
+
+        # Step 5: Define the question and answer panels
+        panel_top = content_top
+        panel_bottom = content_bottom
+
+        layout.question_panel = Rect(
+            x=nav_w,
+            y=panel_top,
+            w=divider_x - nav_w,
+            h=panel_bottom - panel_top,
+        )
+
+        layout.answer_panel = Rect(
+            x=divider_x,
+            y=panel_top,
+            w=w - divider_x,
+            h=panel_bottom - panel_top,
+        )
+
+        # Confidence based on whether we found a real divider
+        layout.confidence = 0.9 if "divider found" in notes[0] else 0.5
+        layout.detection_notes = notes
+
+        logger.info(
+            "Layout detected: divider_x=%d, q_panel=%s, a_panel=%s, confidence=%.2f",
+            layout.divider_x,
+            f"({layout.question_panel.x},{layout.question_panel.y},{layout.question_panel.w},{layout.question_panel.h})"
+            if layout.question_panel else "None",
+            f"({layout.answer_panel.x},{layout.answer_panel.y},{layout.answer_panel.w},{layout.answer_panel.h})"
+            if layout.answer_panel else "None",
+            layout.confidence,
+        )
+        return layout
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _detect_divider(
+        self,
+        gray: np.ndarray,
+        content_top: int,
+        content_bottom: int,
+        nav_w: int,
+        img_w: int,
+    ) -> int:
+        """
+        Find the vertical divider line in the content area.
+
+        Strategy:
+            1. Crop to the expected horizontal region (38-58% of width).
+            2. Apply Sobel-X edge detection → vertical edges.
+            3. Project vertically (sum each column) → peak = divider.
+            4. Validate the candidate has a continuous vertical span.
+        """
+        import cv2
+
+        content_region = gray[content_top:content_bottom, :]
+        c_h, c_w = content_region.shape[:2]
+
+        search_x1 = max(nav_w, int(img_w * self.DIVIDER_SEARCH_LEFT_FRAC))
+        search_x2 = min(c_w, int(img_w * self.DIVIDER_SEARCH_RIGHT_FRAC))
+
+        if search_x2 <= search_x1:
+            return 0
+
+        search_strip = content_region[:, search_x1:search_x2]
+
+        # Sobel-X to find vertical edges
+        sobel_x = cv2.Sobel(search_strip, cv2.CV_64F, 1, 0, ksize=3)
+        sobel_abs = np.abs(sobel_x).astype(np.uint8)
+
+        # Column projection: sum of edge intensity per column
+        col_projection = np.sum(sobel_abs, axis=0)
+
+        if len(col_projection) == 0:
+            return 0
+
+        # Find the column with the maximum edge projection
+        peak_col_local = int(np.argmax(col_projection))
+        peak_col_global = search_x1 + peak_col_local
+
+        # Validate: the candidate column should have a long continuous vertical span
+        candidate_col = gray[content_top:content_bottom, peak_col_global]
+        # The divider line is typically a light gray line
+        in_range = (candidate_col >= self.DIVIDER_GRAY_MIN) & (candidate_col <= self.DIVIDER_GRAY_MAX)
+
+        # Find longest continuous run of gray pixels
+        longest_run = 0
+        current_run = 0
+        for val in in_range:
+            if val:
+                current_run += 1
+                longest_run = max(longest_run, current_run)
+            else:
+                current_run = 0
+
+        span_frac = longest_run / max(c_h, 1)
+        if span_frac >= self.DIVIDER_MIN_SPAN_FRAC:
+            return peak_col_global
+
+        # Second attempt: look for the drag handle dots (⁞).
+        # The drag handle has 6 small dark dots stacked vertically near
+        # the center of the divider.  We search for a narrow column region
+        # with small, repeating dark blobs roughly centered vertically.
+        midpoint_y = c_h // 2
+        handle_search = gray[
+            content_top + midpoint_y - int(c_h * 0.15):content_top + midpoint_y + int(c_h * 0.15),
+            search_x1:search_x2,
+        ]
+
+        # Threshold to find dark dots (the drag handle dots are darker than background)
+        _, binary = cv2.threshold(handle_search, 140, 255, cv2.THRESH_BINARY_INV)
+        col_sums = np.sum(binary > 0, axis=0)
+
+        if len(col_sums) == 0:
+            return 0
+
+        # The column with the most dark pixels in the handle region
+        handle_peak_local = int(np.argmax(col_sums))
+        handle_peak_global = search_x1 + handle_peak_local
+
+        # Only accept if the dot pattern has a minimum density
+        if col_sums[handle_peak_local] > int(c_h * 0.03):
+            return handle_peak_global
+
+        return 0
+
+    def _detect_bottom_buttons(
+        self,
+        gray: np.ndarray,
+        layout: ExamLayout,
+        bar_top: int,
+        img_h: int,
+        img_w: int,
+    ) -> None:
+        """
+        Locate Clear, Prev, and Next buttons in the bottom bar using OCR.
+
+        Falls back to fixed positions if OCR is unavailable or fails.
+        """
+        try:
+            import pytesseract
+            from controller.config import TESSERACT_CMD, OCR_TIMEOUT_SECONDS
+
+            if TESSERACT_CMD.strip():
+                pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD.strip()
+
+            bar_region = gray[bar_top:img_h, :]
+            data = pytesseract.image_to_data(
+                bar_region,
+                output_type=pytesseract.Output.DICT,
+                config="--oem 3 --psm 6",
+                timeout=OCR_TIMEOUT_SECONDS,
+            )
+
+            n = len(data.get("text", []))
+            for i in range(n):
+                txt = str(data["text"][i]).strip().lower()
+                if not txt:
+                    continue
+                conf = float(data["conf"][i]) if data["conf"][i] != "-1" else 0
+                if conf < 30:
+                    continue
+
+                bx = int(data["left"][i])
+                by = bar_top + int(data["top"][i])
+                bw = max(1, int(data["width"][i]))
+                bh = max(1, int(data["height"][i]))
+
+                if "next" in txt:
+                    layout.next_button = Rect(bx, by, bw, bh)
+                elif "prev" in txt:
+                    layout.prev_button = Rect(bx, by, bw, bh)
+                elif "clear" in txt:
+                    layout.clear_button = Rect(bx, by, bw, bh)
+
+        except Exception as e:
+            logger.debug("Bottom button OCR failed, using fallback: %s", e)
+
+        # Fallback positions if OCR missed buttons (from observed screenshots)
+        if layout.next_button is None:
+            # Next button: bottom-right corner
+            btn_w, btn_h = int(img_w * 0.05), int(img_h * 0.04)
+            layout.next_button = Rect(
+                img_w - btn_w - int(img_w * 0.02),
+                bar_top + int((img_h - bar_top - btn_h) // 2),
+                btn_w,
+                btn_h,
+            )
+            logger.debug("Next button fallback: %s", layout.next_button)
+
+        if layout.prev_button is None:
+            # Prev button: just left of Next
+            if layout.next_button is not None:
+                btn_w = layout.next_button.w
+                btn_h = layout.next_button.h
+                layout.prev_button = Rect(
+                    layout.next_button.x - btn_w - int(img_w * 0.01),
+                    layout.next_button.y,
+                    btn_w,
+                    btn_h,
+                )
+
+        if layout.clear_button is None:
+            # Clear button: bottom-center-left area
+            btn_w, btn_h = int(img_w * 0.05), int(img_h * 0.04)
+            layout.clear_button = Rect(
+                int(img_w * 0.46),
+                bar_top + int((img_h - bar_top - btn_h) // 2),
+                btn_w,
+                btn_h,
+            )

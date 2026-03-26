@@ -44,15 +44,20 @@ Ensure the following 5 devices are connected to the **same WiFi network**:
    cd simulato
    ```
 3. **Set API Keys and Configure AI:**
-   - **Grok (Cloud Solver):** Get a key from [console.x.ai](https://console.x.ai/).
-     ```powershell
-     $env:GROK_API_KEY="xai-your-api-key"
+   - **Cloud AI Keys (at least one required):**
+     - **Gemini** (default primary): Get a key from [aistudio.google.com](https://aistudio.google.com/).
+     - **Grok** (alternate primary): Get a key from [console.x.ai](https://console.x.ai/).
+   - **Ollama (Local Analyst):** Download from [ollama.com](https://ollama.com/). `start.bat` auto-pulls the model on first run.
+   - **Tesseract OCR:** Download from [github.com/UB-Mannheim/tesseract](https://github.com/UB-Mannheim/tesseract/wiki). Ensure `tesseract` is on PATH or set `TESSERACT_CMD` in `.env`.
+   - **Configuration:** Edit `.env` in the project root:
+     ```env
+     GROK_API_KEY=xai-your-api-key
+     GEMINI_API_KEY=your-gemini-key
+     DEFAULT_AI_PROVIDER=gemini
+     PI_HOST=192.168.1.xxx
+     OLLAMA_MODEL=qwen2.5vl:7b-q4_K_M
+     LOCAL_AI_ASSIST_ENABLED=True
      ```
-   - **Ollama (Local Analyst):** Download from [ollama.com](https://ollama.com/).
-     ```bash
-     ollama run qwen2.5vl:7b-q4_K_M
-     ```
-   - **Configuration:** Open `controller/config.py` and ensure `LOCAL_AI_ASSIST_ENABLED = True` to use the local Qwen model for screen analysis.
 4. Run the startup script (Windows):
    ```powershell
    .\start.bat
@@ -63,9 +68,13 @@ Ensure the following 5 devices are connected to the **same WiFi network**:
 
 ## 4. Android Phones Setup
 *You need the single APK installed on both phones.*
-1. You can find the pre-compiled `simulato-mobile-v1.apk` right here in the root folder of the repo on your PC.
-2. Transfer that APK file to both Android phones (via USB, email, Google Drive, whatever is easiest).
-3. Install the APK on both phones.
+1. Build and install using ADB (USB connected):
+   ```powershell
+   cd mobile_app\android_project
+   .\install-and-run.bat
+   ```
+   Or manually transfer `simulato-release.apk` to both phones.
+2. Install the APK on both phones.
 
 **On the Capture Phone:**
 1. Mount the Capture Phone steadily above the Exam Laptop screen so the camera sees the whole screen clearly.

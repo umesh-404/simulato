@@ -42,6 +42,7 @@ sudo ./start_pi.sh
 ## 3. Main Control PC
 
 - [ ] Ollama installed (https://ollama.com/download)
+- [ ] Tesseract OCR installed and on PATH (or `TESSERACT_CMD` set in `.env`)
 - [ ] `.env` file configured with `GROK_API_KEY` or `GEMINI_API_KEY`, and `PI_HOST`
 - [ ] Python virtual environment activated
 - [ ] Dependencies installed (`pip install -r requirements.txt`)
@@ -49,6 +50,9 @@ sudo ./start_pi.sh
 - [ ] API responds on port 8000
 
 ```bash
+# Verify Tesseract:
+tesseract --version
+
 # Start everything (Ollama + model + controller):
 .\start.bat
 
@@ -88,6 +92,13 @@ curl http://localhost:8000/api/status
 - [ ] Test click on each option (A, B, C, D) verified
 - [ ] NEXT button click verified
 - [ ] Scroll action verified (if applicable)
+
+Optional CV pipeline calibration (validates scroll/option detection across 30-image dataset):
+
+```powershell
+python scripts/calibrate_cv_pipeline.py
+python scripts/calibrate_scroll.py
+```
 
 ## 8. Network
 
@@ -145,3 +156,15 @@ curl http://localhost:8000/api/status
 
 - To stop the system, close the `start.bat` command prompt window or press `Ctrl+C`.
 - `start.bat` will automatically stop the Python server and kill the background Ollama process.
+- On Windows, you can also use `scripts\stop_controller.bat` to kill the controller process.
+
+## Android APK Install
+
+To install or reinstall the APK on a connected Android phone:
+
+```powershell
+cd mobile_app\android_project
+.\install-and-run.bat
+```
+
+This builds a release APK, installs it via ADB, and launches the app.

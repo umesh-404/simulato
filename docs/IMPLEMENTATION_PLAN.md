@@ -2,9 +2,9 @@
 
 ## AI‑Assisted Exam Simulation System
 
-Version: 1.1\
+Version: 1.2\
 Document Type: Implementation Plan\
-Status: Final (Updated)
+Status: Final (Updated 2026-03-26)
 
 > **Note:** The phase descriptions (Sections 5–22) use the original design
 > naming conventions (e.g. `state_manager.py`, `alarm_system.py`). The
@@ -78,10 +78,11 @@ Install dependencies:
     pip install fastapi
     pip install uvicorn
     pip install sentence-transformers
-    pip install imagehash
+    pip install pytesseract
     pip install pydantic
     pip install requests
     pip install python-dotenv
+    pip install websockets
 
 ------------------------------------------------------------------------
 
@@ -95,8 +96,8 @@ The following structure is the authoritative project layout (see REPOSITORY_STRU
         main.py
         config.py
         orchestrator/          (state_machine, system_controller, workflow_engine)
-        capture_pipeline/      (image_receiver, stitcher, scroll_detector, screen_validator, change_detector, preprocessor)
-        ai_pipeline/           (grok_client, response_parser, prompt_builder)
+        capture_pipeline/      (image_receiver, stitcher, scroll_detector, screen_validator, change_detector, preprocessor, ocr_layout_analyzer, exam_layout, option_detector)
+        ai_pipeline/           (grok_client, gemini_client, ollama_client, aux_prompts, response_parser, prompt_builder)
         question_engine/       (question_matcher, canonicalizer, hash_engine, embedding_matcher)
         answer_engine/         (option_matcher, decision_engine, conflict_handler)
         hardware_control/      (pi_client, click_dispatcher, verification_engine)

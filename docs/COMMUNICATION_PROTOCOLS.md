@@ -203,11 +203,13 @@ Used by Remote Control Mode.
 
 Commands:
 
+    CALIBRATE
     START
     CONTINUE
     PAUSE
     STOP
     STATUS
+    SET_AI_PROVIDER
 
 Example message:
 
@@ -221,6 +223,23 @@ Example message:
        "command": "START"
      }
     }
+
+Example — switching cloud AI provider at runtime:
+
+    POST /api/command
+
+    {
+     "type": "REMOTE_COMMAND",
+     "device_id": "phone_remote_01",
+     "timestamp": "ISO8601_TIMESTAMP",
+     "payload": {
+       "command": "SET_AI_PROVIDER",
+       "provider": "grok"
+     }
+    }
+
+Valid providers: `"grok"` or `"gemini"`. The switch takes effect
+immediately and is used for the next question solved.
 
 Controller response:
 

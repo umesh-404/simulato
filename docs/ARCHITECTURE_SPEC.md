@@ -2,8 +2,9 @@
 
 ## Project: Simulato
 
-Version: 1.0\
-Status: Authoritative Architecture Specification
+Version: 1.3.1\
+Status: Authoritative Architecture Specification\
+Last Updated: 2026-03-26
 
 ------------------------------------------------------------------------
 
@@ -314,15 +315,40 @@ NEXT = (18,19)
 For each question:
 
 1.  capture screenshot from the Capture Phone
-2.  use the **Local Qwen analyst on every new screen** to:
-    -   determine whether the screen is a valid question screen
-    -   determine whether the question requires scrolling
+2.  run the **local CV scroll detection pipeline** on the Main Control PC:
+    -   `exam_layout.py` detects the split-pane layout (question/answer panels, divider)
+    -   `scroll_detector.py` (v4) analyzes each panel independently for scrollbar presence
+    -   detection uses structural UI-bounds isolation + column brightness profile analysis
 3.  if scrolling is needed:
     -   command the Pi to scroll via HID
     -   request additional captures from the Capture Phone
-    -   repeat the local scroll check on each scroll frame until the
-        question and options are fully visible
+    -   repeat scroll detection on each scroll frame until content is fully visible
 4.  stitch all frames into a full question image
+
+### 6.1 Scroll Detection Pipeline (v4)
+
+Scroll detection is performed entirely via **local Computer Vision** on the
+Main Control PC — no AI calls are used for scroll detection.
+
+The detector operates in two stages:
+
+1.  **UI Bounds Isolation** — identifies the actual exam UI content area
+    within the phone-captured image by finding the brightness transition
+    between the white exam background (column mean > 130) and the dark
+    photo border (column mean < 80).
+
+2.  **Profile-Range + Dip-Std Detection** — within the isolated UI content,
+    computes column-mean brightness across the rightmost 100 columns of
+    the middle 60% of the panel height.  A scrollbar is detected when:
+    -   the brightness profile range exceeds 10 (scrollbar gradient)
+    -   the column std at the minimum is below 20 (uniform scrollbar gray)
+
+Calibration accuracy (30 images):
+
+-   Layout detection: 100%
+-   Answer-panel scroll: 90% (3/4 answer-scroll, 1 weak signal missed)
+-   No-scroll: 100% (0 false positives)
+-   Q-panel scroll: known limitation (text noise masks scrollbar signal)
 
 Final output:
 
@@ -453,12 +479,20 @@ Stored components:
 
 -   screenshot
 -   question text
--   options
--   AI response
--   selected answer
--   canonical hash
--   embeddings
--   timestamps
+-   options (A, B, C, D)
+-   AI response (full JSON)
+-   selected answer (text)
+-   answer letter (A/B/C/D)
+-   canonical hash (SHA256)
+-   SimHash fingerprint (64-bit)
+-   embedding vector (bge-small-en-v1.5)
+-   image perceptual hash (pHash via DCT, 64-bit)
+-   timestamps (ISO8601 UTC)
+-   decision source (ai_new / database / database_image_hash / operator)
+
+The `image_phash` field enables the **image-hash DB-first fast path**:
+when a previously seen stitched image is captured again, the system
+bypasses the AI call entirely and uses the cached answer directly.
 
 This ensures experiment reproducibility.
 
@@ -501,14 +535,15 @@ Simulato operates primarily on local network.
 
 Local communications:
 
--   capture phone → PC
--   remote phone → PC
--   PC → Raspberry Pi
+-   capture phone → PC (HTTP + WebSocket)
+-   remote phone → PC (HTTP + WebSocket)
+-   PC → Raspberry Pi (TCP socket)
+-   PC → Ollama (localhost HTTP)
 
 Internet communication used for:
 
--   AI API requests (Ollama local / Grok cloud)
--   Mobile HTTP API
+-   Grok Vision API requests (api.x.ai)
+-   Gemini Vision API requests (generativelanguage.googleapis.com)
 
 All other operations occur locally.
 
