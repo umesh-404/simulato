@@ -93,6 +93,7 @@ curl http://localhost:8000/api/status
 - [x] Capture Phone shows "Calibration successful" toast
 - [ ] Test click on each visible option row verified (3-5 rows, virtual letters A..E)
 - [ ] NEXT button click verified
+- [ ] NEXT does not double-click after successful navigation (passive re-check confirms change before retry)
 - [x] Scroll action verified (if applicable)
 
 Optional CV pipeline calibration (validates scroll/option detection across 30-image dataset):
@@ -118,6 +119,7 @@ python scripts/calibrate_scroll.py
 - [x] Perform calibration → state transitions to IDLE
 - [x] Send START command → state transitions to RUNNING
 - [x] First question captured and processed successfully
+- [x] Question number (`N / total`) appears in status/logs when visible in capture header
 - [ ] Send PAUSE command → state transitions to PAUSED
 - [x] Send STOP command → state transitions to STOPPED
 

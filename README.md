@@ -98,7 +98,10 @@ Now that everything is running and talking to the Mother PC:
    - This starts (or resumes) the run from the controller.
 4. During the run:
    - For each question it captures, preprocesses, checks DB/image-hash first, and calls Grok/Gemini only for new questions.
-  - It uses OCR + adaptive radio-circle detection as primary option/NEXT targeting, then falls back to local Qwen and calibrated grid/CV if needed.
+  - It uses OCR + adaptive radio-circle detection as primary option targeting, with calibration-anchored A..E mapping to prevent row-shift mistakes when only a subset of options is visible.
+  - NEXT targeting uses a layered strategy: layout `next_button` rect center (primary), bottom-bar color-shape detection (blue/green button), OCR "next" word anchor, then layout/grid fallback.
   - After AI returns an answer for a stitched question image, the controller requests a dedicated fresh post-AI mapping frame for live radio-row mapping before click dispatch.
   - It verifies answer selection after click using a dedicated capture around the exact click target; on failure it retries the same intended option once (no cross-option jumbling fallback).
+  - For NEXT verification, it first checks screen-change after one click, then performs a passive re-check (no second click) before deciding whether a retry click is required.
+  - Question number (`N / 30`) is read from the header OCR when available and used for status/log visibility.
    - On failures, it pauses and alerts the Remote phone for explicit operator action.

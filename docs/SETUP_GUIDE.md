@@ -204,6 +204,8 @@ Controller requests one fresh post-AI mapping frame for live option-row mapping
         ↓
 Match answer text to option letter (A/B/C/D/E)
         ↓
+Header OCR reads question number (`N / total`) when visible
+        ↓
 OCR scans whole screen and adaptive radio-circle detection localize option row target (primary)
         ↓
 If OCR cannot localize confidently → Local Qwen targeting fallback
@@ -214,11 +216,21 @@ Pi clicks the correct option on exam laptop
         ↓
 Local AI verifies click was registered
         ↓
-OCR localizes NEXT target (primary)
+NEXT target localization (layered):
+  1) layout `next_button` rect center
+  2) bottom-bar blue/green button color detection
+  3) OCR "next" word anchor
+  4) layout/grid fallback
         ↓
-If OCR misses NEXT → Local Qwen, then calibrated grid fallback
+Pi clicks NEXT
         ↓
-Pi clicks NEXT → auto-advance to next question
+Controller verifies screen change
+        ↓
+If first verify fails → passive re-check (no second click yet)
+        ↓
+Only if still unchanged → one NEXT retry click
+        ↓
+When screen changed, process next question
         ↓
 Repeat
 ```

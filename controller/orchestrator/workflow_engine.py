@@ -671,11 +671,22 @@ class WorkflowEngine:
             self._no_change_after_next_count = 0
             return
 
+        # Do one passive re-check (no second click) before retrying.
+        # This prevents accidental double-NEXT when the first click worked
+        # but the first verification sample was too early/noisy.
+        logger.warning("NEXT click verification failed — re-checking before retry")
+        time.sleep(1.0)
+        recheck = self._verify_next_click_by_change(pre_next_path)
+        if recheck.verified:
+            logger.info("NEXT re-check verified (screen changed)")
+            self._expecting_next_change = True
+            self._no_change_after_next_count = 0
+            return
+
         # Capture a fresh reference right before the retry so the
         # comparison reflects the current screen state, not the stale
-        # pre-first-click frame (which may already show the new question
-        # if the first click succeeded but verification was too strict).
-        logger.warning("NEXT click verification failed — retrying")
+        # pre-first-click frame.
+        logger.warning("NEXT still not verified — retrying click")
         pre_retry_path = self._capture_single_frame_for_ref()
         self._click_next_best_target()
         time.sleep(2.5)
@@ -778,6 +789,21 @@ class WorkflowEngine:
                     details="screen_changed",
                     confidence=min(full_mean / 15.0, 1.0),
                 )
+
+            # Additional fallback: perceptual hash distance.
+            # This helps when global brightness shifts keep mean diff low,
+            # but the page content has actually changed.
+            pre_hash = self._compute_image_phash(pre_next_path)
+            post_hash = self._compute_image_phash(post_path)
+            if pre_hash and post_hash:
+                hamming = sum(a != b for a, b in zip(pre_hash, post_hash))
+                logger.info("NEXT verify: pHash hamming distance=%d", hamming)
+                if hamming >= 8:
+                    return VerificationResult(
+                        verified=True,
+                        details="phash_changed",
+                        confidence=min(hamming / 32.0, 1.0),
+                    )
 
             logger.warning(
                 "NEXT verification: screen did NOT change (full=%.1f, q_panel=%s)",

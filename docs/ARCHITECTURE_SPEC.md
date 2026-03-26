@@ -2,9 +2,9 @@
 
 ## Project: Simulato
 
-Version: 1.3.1\
+Version: 1.3.2\
 Status: Authoritative Architecture Specification\
-Last Updated: 2026-03-26
+Last Updated: 2026-03-27
 
 ------------------------------------------------------------------------
 

@@ -2,9 +2,9 @@
 
 ## Project: Simulato
 
-Version: 1.3.1
+Version: 1.3.2
 Status: Full Implementation Complete
-Last Updated: 2026-03-26
+Last Updated: 2026-03-27
 
 ---
 
@@ -238,7 +238,12 @@ All implementation follows:
 - [x] Per-word confidence filtering (`OCR_MIN_WORD_CONFIDENCE`)
 - [x] `OCRWord` dataclass with text, confidence, bounding box, and center properties
 - [x] `OCRLayoutResult.locate_option_target(letter)` — returns normalized click coordinates for virtual letters A..E using `OptionDetector` row mapping
-- [x] `OCRLayoutResult.locate_next_target()` — finds NEXT button text and returns normalized click coordinates
+- [x] `OCRLayoutResult.locate_next_target()` — layered NEXT targeting:
+      1) layout detector `next_button` rect center,
+      2) bottom-bar color-shape detection (blue/green),
+      3) OCR "next" word anchor,
+      4) layout/grid fallback
+- [x] `OCRLayoutResult.detect_question_number()` — extracts `N / M` from top header OCR for status/logging
 - [x] Removed dependency on visible OCR option letters (exam UI may not show A/B/C/D/E labels)
 - [x] Option targeting now relies on deterministic radio-row mapping from `OptionDetector`
 - [x] Primary click-targeting method used before falling back to Local AI or calibrated grid
@@ -338,6 +343,9 @@ All implementation follows:
 - [x] Retry policy tightened to retry the same intended option once (no cross-option fallback chain)
 - [x] Strict local-AI verification enforces selected option letter must match the clicked letter (not just "any option selected")
 - [x] NEXT click with verification + retry + alert (Canonical Law 5)
+- [x] NEXT verification hardened:
+      - question-panel diff + full-frame diff + pHash fallback
+      - passive re-check before issuing second NEXT click (prevents duplicate NEXT when first click already worked)
 - [x] End-of-test detection (`TEST_COMPLETE`) when screen does not change after NEXT
 - [x] **Autonomous capture loop** — automatically trigger next capture after NEXT click
 - [x] Full snapshot storage per question with image_phash (Canonical Law 10)
