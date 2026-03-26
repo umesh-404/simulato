@@ -137,6 +137,7 @@ class WorkflowEngine:
         self._request_capture_callback: Optional[callable] = None
         self._ai_provider: str = DEFAULT_AI_PROVIDER  # "grok" or "gemini"
         self._last_verification_timed_out: bool = False
+        self._last_option_click_target_norm: tuple[float, float] | None = None
 
     def set_capture_callback(self, callback) -> None:
         """Set callback to request capture from the phone."""
@@ -671,40 +672,27 @@ class WorkflowEngine:
         if self._sm.state != SystemState.RUNNING:
             logger.info("Skipping click execution for %s — state is %s", letter, self._sm.state.value)
             return
-        candidates = self._candidate_option_click_sequence(letter)
-        for idx, candidate in enumerate(candidates):
-            if self._sm.state != SystemState.RUNNING:
-                logger.info("Stopping click retries for %s — state is %s", letter, self._sm.state.value)
-                return
-            if idx == 0:
-                logger.info("Click attempt %d for intended option %s", idx + 1, letter)
-            else:
-                logger.warning(
-                    "Click verification-guided fallback %d: intended=%s trying_neighbor=%s",
-                    idx + 1,
-                    letter,
-                    candidate,
-                )
-            self._click_option_best_target(candidate)
-            # Give UI time to update
-            time.sleep(1.0)
-            verified = self._verify_option_click(letter)
-            if self._last_verification_timed_out:
-                logger.warning(
-                    "Verification capture timed out while checking option %s; stopping retries",
-                    letter,
-                )
-                break
-            if verified:
-                if candidate == letter:
-                    logger.info("Click verified for option %s", letter)
-                else:
-                    logger.info(
-                        "Click verified for intended option %s via neighbor target %s",
-                        letter,
-                        candidate,
-                    )
-                return
+        logger.info("Click attempt 1 for intended option %s", letter)
+        self._click_option_best_target(letter)
+        time.sleep(1.0)
+        verified = self._verify_option_click(letter)
+        if verified:
+            logger.info("Click verified for option %s", letter)
+            return
+        if self._last_verification_timed_out:
+            logger.warning(
+                "Verification capture timed out while checking option %s; stopping retries",
+                letter,
+            )
+            return
+
+        logger.warning("Click verification failed for %s — retrying same option", letter)
+        self._click_option_best_target(letter)
+        time.sleep(1.0)
+        verified = self._verify_option_click(letter)
+        if verified:
+            logger.info("Retry click verified for option %s", letter)
+            return
 
         logger.error("Click verification FAILED after retry for option %s", letter)
         self._sm.force_error(f"Input verification failed for option {letter}")
@@ -760,6 +748,7 @@ class WorkflowEngine:
             ocr_target = self._latest_interaction_ocr_layout.locate_option_target(letter)
             if ocr_target is not None:
                 logger.info("Using OCR-derived target for option %s", letter)
+                self._last_option_click_target_norm = (float(ocr_target[0]), float(ocr_target[1]))
                 #region agent log
                 from controller.utils.debug_ndjson import dbg as _dbg
                 _dbg(
@@ -778,6 +767,7 @@ class WorkflowEngine:
         if LOCAL_AI_ASSIST_ENABLED and self._latest_preprocessed_image_path is not None:
             target = locate_option_target(self._latest_preprocessed_image_path, letter)
             if target is not None:
+                self._last_option_click_target_norm = (float(target[0]), float(target[1]))
                 #region agent log
                 from controller.utils.debug_ndjson import dbg as _dbg
                 _dbg(
@@ -798,6 +788,7 @@ class WorkflowEngine:
             hypothesisId="H3",
         )
         #endregion agent log
+        self._last_option_click_target_norm = None
         self._click.click_option(letter)
 
     def _verify_option_click(self, letter: str) -> bool:
@@ -829,6 +820,13 @@ class WorkflowEngine:
             if selected is None:
                 return False
             return selected.strip().upper() == letter.strip().upper()
+
+        # Prefer verification around the exact OCR/local click target used.
+        if self._last_option_click_target_norm is not None:
+            nx, ny = self._last_option_click_target_norm
+            exact = self._verify.verify_click_at_normalized_on_image(letter, verify_path, nx, ny)
+            if exact.verified:
+                return True
 
         # Local AI assist disabled: still verify against a dedicated fresh frame,
         # never reuse the pre-click screenshot path.

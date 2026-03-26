@@ -112,6 +112,35 @@ class VerificationEngine:
 
         return self._verify_with_color_analysis(post_img, expected_letter)
 
+    def verify_click_at_normalized_on_image(
+        self,
+        expected_letter: str,
+        post_screenshot: Path,
+        norm_x: float,
+        norm_y: float,
+    ) -> VerificationResult:
+        """
+        Verify click around explicit normalized target coordinates.
+
+        This is used when click dispatch was done via OCR-derived normalized
+        coordinates and is more reliable than stale calibration grid points.
+        """
+        try:
+            import cv2
+        except ImportError:
+            logger.warning("OpenCV not available — skipping verification")
+            return VerificationResult(verified=True, details="opencv_unavailable")
+
+        post_img = cv2.imread(str(post_screenshot))
+        if post_img is None:
+            logger.warning("Cannot read post-click screenshot")
+            return VerificationResult(verified=False, details="unreadable_screenshot")
+
+        h, w = post_img.shape[:2]
+        px = int(round(max(0.0, min(1.0, float(norm_x))) * max(1, w - 1)))
+        py = int(round(max(0.0, min(1.0, float(norm_y))) * max(1, h - 1)))
+        return self._verify_with_grid(post_img, (px, py), expected_letter)
+
     def _screen_to_capture_pixel(self, screen_coords: tuple[int, int]) -> tuple[int, int]:
         """
         Convert exam-screen pixel coordinates to capture-image pixel coordinates.
