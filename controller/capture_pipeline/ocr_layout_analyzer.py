@@ -67,6 +67,39 @@ class OCRLayoutResult:
         self.layout = layout
         self._option_map_cache: Optional[Any] = None
 
+    def detect_question_number(self) -> Optional[tuple[int, int]]:
+        """Extract the current question number and total from OCR words.
+
+        Looks for patterns like "Question No : 3 / 30" or just "3 / 30"
+        in the top portion of the screen (header area).
+
+        Returns:
+            (current_question, total_questions) or None.
+        """
+        # Collect words from the top 20% of the image (header area).
+        header_limit = int(self.image_h * 0.20)
+        header_words = [w for w in self.words if w.y < header_limit]
+
+        # Build a single text line from header words sorted left-to-right.
+        header_words.sort(key=lambda w: (w.y // 30, w.x))
+        header_text = " ".join(w.text for w in header_words)
+
+        # Pattern: "N / M" or "N/M" where N and M are digits.
+        m = re.search(r"(\d{1,3})\s*/\s*(\d{1,3})", header_text)
+        if m:
+            current = int(m.group(1))
+            total = int(m.group(2))
+            if 1 <= current <= total <= 999:
+                return (current, total)
+
+        # Fallback: look for "Question" followed by number.
+        m = re.search(r"[Qq]uestion\s*(?:[Nn]o\.?\s*:?\s*)?(\d{1,3})", header_text)
+        if m:
+            current = int(m.group(1))
+            return (current, 0)
+
+        return None
+
     def get_option_map(self):
         if self.image_path is None or self.layout is None:
             return None

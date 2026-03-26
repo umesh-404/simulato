@@ -425,6 +425,24 @@ class WorkflowEngine:
             else:
                 self._latest_ocr_layout = None
                 self._latest_interaction_ocr_layout = None
+
+            # Detect question number from the raw (non-preprocessed) image
+            # header, which contains "Question No : N / M".
+            raw_ocr = self._ocr.analyze(image_path) if OCR_LAYOUT_PRIMARY_ENABLED else None
+            if raw_ocr is not None:
+                q_num = raw_ocr.detect_question_number()
+                if q_num is not None:
+                    current_q, total_q = q_num
+                    self._question_number = current_q
+                    logger.info(
+                        "Detected question number: %d / %d",
+                        current_q, total_q,
+                    )
+                    self._log_event("question_number_detected", {
+                        "current": current_q,
+                        "total": total_q,
+                    })
+
             #region agent log
             _dbg(
                 location="controller/orchestrator/workflow_engine.py:process_question",
@@ -432,6 +450,7 @@ class WorkflowEngine:
                 data={
                     "ocr_layout_available": self._latest_ocr_layout is not None,
                     "ocr_words": (len(self._latest_ocr_layout.words) if self._latest_ocr_layout is not None else 0),
+                    "question_number": self._question_number,
                 },
                 hypothesisId="H2",
             )
@@ -652,10 +671,15 @@ class WorkflowEngine:
             self._no_change_after_next_count = 0
             return
 
+        # Capture a fresh reference right before the retry so the
+        # comparison reflects the current screen state, not the stale
+        # pre-first-click frame (which may already show the new question
+        # if the first click succeeded but verification was too strict).
         logger.warning("NEXT click verification failed — retrying")
+        pre_retry_path = self._capture_single_frame_for_ref()
         self._click_next_best_target()
         time.sleep(2.5)
-        result = self._verify_next_click_by_change(pre_next_path)
+        result = self._verify_next_click_by_change(pre_retry_path)
 
         if result.verified:
             logger.info("NEXT retry click verified (screen changed)")
@@ -733,10 +757,10 @@ class WorkflowEngine:
                     "NEXT verify: question_panel_diff=%.1f, full_diff=%.1f",
                     q_diff, full_mean,
                 )
-                # Question panel changes dramatically (mean > 8) on navigation.
-                # Camera noise on the same screen rarely exceeds 5 in the
-                # text-heavy question panel.
-                if q_diff > 8.0:
+                # Question panel changes dramatically on navigation.
+                # Camera noise on the same screen produces q_panel diffs
+                # of 2-4; real page changes produce 5.5+.
+                if q_diff > 5.0:
                     return VerificationResult(
                         verified=True,
                         details="question_panel_changed",
