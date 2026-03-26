@@ -1,0 +1,12 @@
+{
+  "question_id": 13,
+  "canonical_text": "a sealed envelope contains a card with a single digit written on it. three of the following statements are true and one is false. i. the digit is 1. ii. the digit is not 2. iii. the digit is not 9. iv. the digit is 8. which one of the following must necessarily be correct|i is true|ii is false|iii is true|iv is false|the digit is even.",
+  "option_a": "I is true",
+  "option_b": "The digit is even.",
+  "option_c": "II is false",
+  "option_d": "III is true",
+  "option_e": "IV is false",
+  "correct_answer": "III is true",
+  "answer_letter": "D",
+  "version": 1
+}

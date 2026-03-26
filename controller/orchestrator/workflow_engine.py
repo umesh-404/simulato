@@ -122,6 +122,7 @@ class WorkflowEngine:
         self._expecting_next_change: bool = False
         self._no_change_after_next_count: int = 0
         self._last_raw_phash: str | None = None
+        self._last_answered_question_id: int | None = None
 
         # Scroll-frame delivery mechanism
         self._scroll_frame_event = threading.Event()
@@ -203,6 +204,7 @@ class WorkflowEngine:
         self._expecting_next_change = False
         self._no_change_after_next_count = 0
         self._last_raw_phash = None
+        self._last_answered_question_id = None
         self._latest_ocr_layout = None
         self._latest_interaction_ocr_layout = None
         self._latest_preprocessed_image_path = None
@@ -285,10 +287,15 @@ class WorkflowEngine:
             # If we keep receiving essentially the same screen after NEXT, alert and pause.
             raw_phash = self._compute_image_phash(image_path)
             if self._expecting_next_change and raw_phash and self._last_raw_phash:
-                if raw_phash == self._last_raw_phash:
+                hamming = sum(
+                    a != b for a, b in zip(raw_phash, self._last_raw_phash)
+                )
+                same_screen = hamming <= 6
+                if same_screen:
                     self._no_change_after_next_count += 1
                     logger.warning(
-                        "No screen change detected after NEXT (%d)",
+                        "No screen change detected after NEXT (hamming=%d, count=%d)",
+                        hamming,
                         self._no_change_after_next_count,
                     )
                     if self._no_change_after_next_count >= 2:
@@ -299,7 +306,6 @@ class WorkflowEngine:
                         )
                         return None
                 else:
-                    # Changed — reset
                     self._expecting_next_change = False
                     self._no_change_after_next_count = 0
 
@@ -554,16 +560,33 @@ class WorkflowEngine:
                 self._refresh_interaction_targets_post_ai()
 
             # Step 9: Execute click
-            if decision.click_letter:
+            # Guard: if this is the same question we just answered (NEXT
+            # failed to navigate), the option is already selected on screen.
+            # Re-clicking it would deselect it (toggle behaviour).
+            already_answered = (
+                decision.question_id is not None
+                and decision.question_id == self._last_answered_question_id
+            )
+            if already_answered:
+                logger.warning(
+                    "Same question_id=%d already answered — skipping option click to avoid deselection",
+                    decision.question_id,
+                )
+            elif decision.click_letter:
                 self._current_answer_text_for_click = answer_text_for_click.strip()
                 self._execute_click_with_verification(decision.click_letter)
+
+            if decision.click_letter or already_answered:
                 self._log_event("answer_decision", {
                     "question_number": self._question_number,
                     "click_letter": decision.click_letter,
                     "dispatched_letter": self._last_dispatched_click_letter,
                     "source": decision.source,
                     "question_id": decision.question_id,
+                    "skipped_click": already_answered,
                 })
+            if decision.question_id is not None:
+                self._last_answered_question_id = decision.question_id
 
             # Step 10: Store full question snapshot (Canonical Law 10)
             if decision.question_id is not None:
@@ -620,7 +643,7 @@ class WorkflowEngine:
         self._log_event("click_next", {"after_question": self._question_number})
 
         # Browser needs time to process the click and navigate.
-        time.sleep(1.5)
+        time.sleep(2.5)
 
         result = self._verify_next_click_by_change(pre_next_path)
         if result.verified:
@@ -631,7 +654,7 @@ class WorkflowEngine:
 
         logger.warning("NEXT click verification failed — retrying")
         self._click_next_best_target()
-        time.sleep(1.5)
+        time.sleep(2.5)
         result = self._verify_next_click_by_change(pre_next_path)
 
         if result.verified:
@@ -664,9 +687,11 @@ class WorkflowEngine:
         """
         Verify NEXT click by checking the screen has changed.
 
-        Compares a post-click capture against the pre-click reference.
-        A significant pixel difference indicates navigation occurred.
-        Falls back to optimistic pass if captures are unavailable.
+        Compares a post-click capture against the pre-click reference,
+        focusing on the question panel region for a stronger signal.
+        Camera noise between two captures of the *same* screen can
+        produce a full-image mean_diff of 2-4, so we compare only the
+        question panel where content changes dramatically on navigation.
         """
         self._verification_frame_event.clear()
         self._verification_frame_data = None
@@ -696,38 +721,108 @@ class WorkflowEngine:
                 logger.info("NEXT verified: image dimensions changed")
                 return VerificationResult(verified=True, details="dimension_change", confidence=1.0)
 
-            diff = cv2.absdiff(pre_img, post_img)
-            mean_diff = float(diff.mean())
-            # A navigated page has dramatically different pixels (mean > 5).
-            # Same page with just a highlight change is typically < 3.
-            if mean_diff > 3.0:
-                logger.info("NEXT verified: mean pixel diff = %.1f", mean_diff)
-                return VerificationResult(verified=True, details="screen_changed", confidence=min(mean_diff / 10.0, 1.0))
+            # Compare question panel region only for a stronger signal.
+            # The question text changes completely on navigation while the
+            # rest of the UI (header, sidebar) stays mostly the same.
+            q_diff = self._question_panel_diff(pre_img, post_img)
+            full_diff = cv2.absdiff(pre_img, post_img)
+            full_mean = float(full_diff.mean())
 
-            logger.warning("NEXT verification: screen did NOT change (mean_diff=%.1f)", mean_diff)
+            if q_diff is not None:
+                logger.info(
+                    "NEXT verify: question_panel_diff=%.1f, full_diff=%.1f",
+                    q_diff, full_mean,
+                )
+                # Question panel changes dramatically (mean > 8) on navigation.
+                # Camera noise on the same screen rarely exceeds 5 in the
+                # text-heavy question panel.
+                if q_diff > 8.0:
+                    return VerificationResult(
+                        verified=True,
+                        details="question_panel_changed",
+                        confidence=min(q_diff / 20.0, 1.0),
+                    )
+            else:
+                logger.info("NEXT verify: full_diff=%.1f (no q-panel region)", full_mean)
+
+            # Fallback to full-image diff with a higher threshold to
+            # avoid false positives from camera noise (2-4 is normal noise).
+            if full_mean > 6.0:
+                logger.info("NEXT verified: full mean pixel diff = %.1f", full_mean)
+                return VerificationResult(
+                    verified=True,
+                    details="screen_changed",
+                    confidence=min(full_mean / 15.0, 1.0),
+                )
+
+            logger.warning(
+                "NEXT verification: screen did NOT change (full=%.1f, q_panel=%s)",
+                full_mean,
+                f"{q_diff:.1f}" if q_diff is not None else "N/A",
+            )
             return VerificationResult(verified=False, details="no_screen_change", confidence=0.0)
         except Exception as e:
             logger.warning("NEXT verification error: %s — assuming success", e)
             return VerificationResult(verified=True, details="error_pass")
 
+    def _question_panel_diff(self, pre_img, post_img) -> Optional[float]:
+        """Compute mean pixel diff in the question panel region only."""
+        try:
+            import cv2
+            from controller.capture_pipeline.exam_layout import ExamLayoutDetector
+            h, w = pre_img.shape[:2]
+            # Use a deterministic region: left 45% of the image, middle 60% vertically.
+            # This covers the question panel on the exam layout without needing
+            # full layout detection (which would be expensive).
+            y1 = int(h * 0.15)
+            y2 = int(h * 0.75)
+            x1 = int(w * 0.10)
+            x2 = int(w * 0.48)
+            if y2 <= y1 or x2 <= x1:
+                return None
+            pre_region = pre_img[y1:y2, x1:x2]
+            post_region = post_img[y1:y2, x1:x2]
+            diff = cv2.absdiff(pre_region, post_region)
+            return float(diff.mean())
+        except Exception:
+            return None
+
     def _click_next_best_target(self) -> None:
-        """Click NEXT using OCR/Qwen-assisted targeting with calibrated fallback."""
+        """Click NEXT using the best available detection method.
+
+        Priority:
+        1. OCR layout result (uses layout detector rect → CV color → OCR word)
+        2. Layout detector's next_button rect directly from the latest layout
+        3. Local AI (Qwen) target localization
+        4. Calibrated grid-map fallback
+        """
         if OCR_LAYOUT_PRIMARY_ENABLED and self._latest_interaction_ocr_layout is not None:
             ocr_next = self._latest_interaction_ocr_layout.locate_next_target()
             if ocr_next is not None:
-                logger.info("Using OCR-derived NEXT target")
+                logger.info("Using OCR-derived NEXT target (%.4f, %.4f)", ocr_next[0], ocr_next[1])
                 self._click.click_at_normalized(ocr_next[0], ocr_next[1], command="CLICK_NEXT")
                 return
-            # If OCR text doesn't detect "NEXT", use deterministic layout fallback
-            # near the bottom-right of the answer panel before static calibration.
+
+            # Fallback: use layout detector's next_button rect directly.
             layout = self._latest_interaction_ocr_layout.layout
+            if layout is not None and layout.next_button is not None:
+                nb = layout.next_button
+                ix = max(1, self._latest_interaction_ocr_layout.image_w - 1)
+                iy = max(1, self._latest_interaction_ocr_layout.image_h - 1)
+                nx = max(0.0, min(1.0, float(nb.x + nb.w // 2) / float(ix)))
+                ny = max(0.0, min(1.0, float(nb.y + nb.h // 2) / float(iy)))
+                logger.info("Using layout-detector NEXT button rect (%.4f, %.4f)", nx, ny)
+                self._click.click_at_normalized(nx, ny, command="CLICK_NEXT")
+                return
+
+            # Last layout fallback: bottom-right corner of answer panel.
             if layout is not None and layout.answer_panel is not None:
                 ap = layout.answer_panel
-                ix = self._latest_interaction_ocr_layout.image_w
-                iy = self._latest_interaction_ocr_layout.image_h
-                nx = max(0.0, min(1.0, float(ap.x + int(ap.w * 0.90)) / float(max(1, ix - 1))))
-                ny = max(0.0, min(1.0, float(ap.y + int(ap.h * 0.96)) / float(max(1, iy - 1))))
-                logger.info("Using layout-derived NEXT fallback target")
+                ix = max(1, self._latest_interaction_ocr_layout.image_w - 1)
+                iy = max(1, self._latest_interaction_ocr_layout.image_h - 1)
+                nx = max(0.0, min(1.0, float(ap.x + int(ap.w * 0.90)) / float(ix)))
+                ny = max(0.0, min(1.0, float(ap.y + int(ap.h * 0.96)) / float(iy)))
+                logger.info("Using layout-derived NEXT fallback target (%.4f, %.4f)", nx, ny)
                 self._click.click_at_normalized(nx, ny, command="CLICK_NEXT")
                 return
         if LOCAL_AI_ASSIST_ENABLED and self._latest_preprocessed_image_path is not None:

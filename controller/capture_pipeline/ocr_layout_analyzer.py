@@ -180,6 +180,26 @@ class OCRLayoutResult:
         return (fallback, target)
 
     def locate_next_target(self) -> Optional[tuple[float, float]]:
+        # --- Priority 1: Use the layout detector's next_button bounding box.
+        # This is the most reliable because it uses a dedicated bottom-bar
+        # OCR scan and returns the full button rect, not just the text center.
+        if self.layout is not None and self.layout.next_button is not None:
+            nb = self.layout.next_button
+            # Click the center of the button rect.
+            cx = nb.x + nb.w // 2
+            cy = nb.y + nb.h // 2
+            logger.debug(
+                "NEXT target from layout detector: (%d,%d) btn=(%d,%d,%d,%d)",
+                cx, cy, nb.x, nb.y, nb.w, nb.h,
+            )
+            return self._norm(cx, cy)
+
+        # --- Priority 2: CV-based green/blue button detection in bottom bar.
+        cv_target = self._detect_next_button_by_color()
+        if cv_target is not None:
+            return cv_target
+
+        # --- Priority 3: OCR word search for "next" anywhere on screen.
         next_words: list[OCRWord] = []
         for w in self.words:
             txt = re.sub(r"[^a-zA-Z]", "", w.text).lower()
@@ -187,9 +207,73 @@ class OCRLayoutResult:
                 next_words.append(w)
         if not next_words:
             return None
-        # Prefer bottom-right NEXT if multiple are found.
         best = sorted(next_words, key=lambda w: (w.y + w.x, w.conf), reverse=True)[0]
-        return self._norm(best.cx, best.cy)
+        target_y = best.cy + int(best.h * 0.25)
+        return self._norm(best.cx, target_y)
+
+    def _detect_next_button_by_color(self) -> Optional[tuple[float, float]]:
+        """Find the NEXT button by detecting colored button shapes in the bottom bar.
+
+        The exam UI has distinctive blue/green buttons ("Prev", "Next") in
+        the bottom-right corner.  We scan the bottom 10% of the image for
+        saturated blue/green rectangles and pick the rightmost one.
+        """
+        if self.image_path is None:
+            return None
+        try:
+            import cv2
+            img = cv2.imread(str(self.image_path))
+            if img is None:
+                return None
+            h, w = img.shape[:2]
+
+            # Bottom bar region: bottom 10% of image, right 60%.
+            bar_y1 = int(h * 0.88)
+            bar_x1 = int(w * 0.40)
+            bar = img[bar_y1:h, bar_x1:w]
+            hsv = cv2.cvtColor(bar, cv2.COLOR_BGR2HSV)
+
+            # Detect blue buttons (H: 90-130, S: 50+, V: 50+)
+            blue_mask = cv2.inRange(hsv, (90, 50, 50), (130, 255, 255))
+            # Detect green buttons (H: 35-85, S: 50+, V: 50+)
+            green_mask = cv2.inRange(hsv, (35, 50, 50), (85, 255, 255))
+            combined = cv2.bitwise_or(blue_mask, green_mask)
+
+            # Morphological close to merge fragmented button regions.
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 8))
+            combined = cv2.morphologyEx(combined, cv2.MORPH_CLOSE, kernel)
+
+            contours, _ = cv2.findContours(combined, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            if not contours:
+                return None
+
+            # Filter by minimum button size.
+            min_area = int((w * 0.03) * (h * 0.02))
+            candidates = []
+            for c in contours:
+                bx, by, bw, bh = cv2.boundingRect(c)
+                if bw * bh < min_area:
+                    continue
+                if bh < 10 or bw < 20:
+                    continue
+                # Convert to absolute image coordinates.
+                abs_cx = bar_x1 + bx + bw // 2
+                abs_cy = bar_y1 + by + bh // 2
+                candidates.append((abs_cx, abs_cy, bw * bh))
+
+            if not candidates:
+                return None
+
+            # The rightmost candidate is most likely "Next" (Prev is to its left).
+            rightmost = max(candidates, key=lambda c: c[0])
+            logger.debug(
+                "NEXT button detected by color: center=(%d,%d) area=%d",
+                rightmost[0], rightmost[1], rightmost[2],
+            )
+            return self._norm(rightmost[0], rightmost[1])
+
+        except Exception:
+            return None
 
 
 class OCRLayoutAnalyzer:

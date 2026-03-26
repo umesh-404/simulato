@@ -190,7 +190,7 @@ class ExamLayoutDetector:
         bottom_bar_h = int(h * self.BOTTOM_BAR_HEIGHT_FRAC)
         bottom_bar_y = h - bottom_bar_h
         layout.bottom_bar = Rect(0, bottom_bar_y, w, bottom_bar_h)
-        self._detect_bottom_buttons(gray, layout, bottom_bar_y, h, w)
+        self._detect_bottom_buttons(gray, layout, bottom_bar_y, h, w, color_img=img)
 
         # Step 3: Detect navigation sidebar
         nav_w = int(w * self.NAV_SIDEBAR_WIDTH_FRAC)
@@ -343,11 +343,12 @@ class ExamLayoutDetector:
         bar_top: int,
         img_h: int,
         img_w: int,
+        color_img: Optional[np.ndarray] = None,
     ) -> None:
         """
         Locate Clear, Prev, and Next buttons in the bottom bar using OCR.
 
-        Falls back to fixed positions if OCR is unavailable or fails.
+        Falls back to color-based detection, then fixed positions.
         """
         try:
             import pytesseract
@@ -388,9 +389,12 @@ class ExamLayoutDetector:
         except Exception as e:
             logger.debug("Bottom button OCR failed, using fallback: %s", e)
 
-        # Fallback positions if OCR missed buttons (from observed screenshots)
+        # Color-based button detection fallback before geometric guess.
+        if layout.next_button is None and color_img is not None:
+            self._detect_next_button_by_color(color_img, layout, bar_top, img_h, img_w)
+
+        # Geometric fallback if all else failed.
         if layout.next_button is None:
-            # Next button: bottom-right corner
             btn_w, btn_h = int(img_w * 0.05), int(img_h * 0.04)
             layout.next_button = Rect(
                 img_w - btn_w - int(img_w * 0.02),
@@ -398,7 +402,7 @@ class ExamLayoutDetector:
                 btn_w,
                 btn_h,
             )
-            logger.debug("Next button fallback: %s", layout.next_button)
+            logger.debug("Next button geometric fallback: %s", layout.next_button)
 
         if layout.prev_button is None:
             # Prev button: just left of Next
@@ -421,3 +425,62 @@ class ExamLayoutDetector:
                 btn_w,
                 btn_h,
             )
+
+    def _detect_next_button_by_color(
+        self,
+        color_img: np.ndarray,
+        layout: ExamLayout,
+        bar_top: int,
+        img_h: int,
+        img_w: int,
+    ) -> None:
+        """Detect the NEXT button by finding blue/green colored rectangles
+        in the bottom bar.  Assigns to layout.next_button / prev_button
+        if successful.
+        """
+        try:
+            import cv2
+
+            bar_x1 = int(img_w * 0.50)
+            bar_region = color_img[bar_top:img_h, bar_x1:img_w]
+            if bar_region.size == 0:
+                return
+            hsv = cv2.cvtColor(bar_region, cv2.COLOR_BGR2HSV)
+
+            blue_mask = cv2.inRange(hsv, np.array([90, 50, 50]), np.array([130, 255, 255]))
+            green_mask = cv2.inRange(hsv, np.array([35, 50, 50]), np.array([85, 255, 255]))
+            combined = cv2.bitwise_or(blue_mask, green_mask)
+
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (12, 6))
+            combined = cv2.morphologyEx(combined, cv2.MORPH_CLOSE, kernel)
+
+            contours, _ = cv2.findContours(combined, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            if not contours:
+                return
+
+            min_area = max(200, int(img_w * 0.02) * int(img_h * 0.015))
+            buttons = []
+            for c in contours:
+                bx, by, bw, bh = cv2.boundingRect(c)
+                if bw * bh < min_area or bh < 8 or bw < 15:
+                    continue
+                abs_x = bar_x1 + bx
+                abs_y = bar_top + by
+                buttons.append((abs_x, abs_y, bw, bh))
+
+            if not buttons:
+                return
+
+            # Sort by X descending — rightmost is "Next", second is "Prev".
+            buttons.sort(key=lambda b: b[0], reverse=True)
+            nx, ny, nw, nh = buttons[0]
+            layout.next_button = Rect(nx, ny, nw, nh)
+            logger.debug("NEXT button via color detection: %s", layout.next_button)
+
+            if len(buttons) >= 2 and layout.prev_button is None:
+                px, py, pw, ph = buttons[1]
+                layout.prev_button = Rect(px, py, pw, ph)
+                logger.debug("PREV button via color detection: %s", layout.prev_button)
+
+        except Exception as e:
+            logger.debug("Color-based button detection failed: %s", e)
