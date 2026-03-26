@@ -55,8 +55,6 @@ def _load_grid_map_from_file() -> None:
             converted[name] = (ax, ay)
         load_grid_map(converted)
         print(f"[Pi] Loaded fallback grid map with {len(converted)} positions")
-        if len(converted) < 8:
-            print("[Pi] Warning: local grid_map.json appears incomplete/outdated (expected >= 8 incl. E).")
     except Exception as e:
         print(f"[Pi] Failed to load local grid map: {e}")
 
@@ -154,7 +152,15 @@ def _process_message(message: dict, hid: HIDController) -> dict:
     if coords is None:
         coords = _command_to_coords(command)
     if coords is None:
-        return {"type": "PI_RESPONSE", "payload": {"command": command, "status": "error", "detail": "Unknown command or no coordinates"}}
+        detail = "Unknown command or no coordinates"
+        # If controller didn't provide coords, we fall back to local grid_map.json.
+        # If that fallback is missing a key (often E), report it explicitly.
+        if command in ("CLICK_A", "CLICK_B", "CLICK_C", "CLICK_D", "CLICK_E", "CLICK_NEXT", "SCROLL_LEFT", "SCROLL_RIGHT"):
+            detail = (
+                "No coords provided by controller and local grid_map.json has no entry for this command "
+                "(grid map may be outdated/incomplete)."
+            )
+        return {"type": "PI_RESPONSE", "payload": {"command": command, "status": "error", "detail": detail}}
 
     try:
         hid.click_at(coords[0], coords[1])
