@@ -35,12 +35,12 @@ class ClickDispatcher:
 
     @staticmethod
     def _pixel_to_absolute(pixel_x: int, pixel_y: int, width: int, height: int) -> tuple[int, int]:
-        """Convert pixel coordinates to HID absolute range (0..32767)."""
+        """Convert pixel coordinates to HID absolute range (0..65535)."""
         if width <= 1 or height <= 1:
             return (0, 0)
-        abs_x = int(round(pixel_x * 32767 / (width - 1)))
-        abs_y = int(round(pixel_y * 32767 / (height - 1)))
-        return (max(0, min(32767, abs_x)), max(0, min(32767, abs_y)))
+        abs_x = int(round(pixel_x * 65535 / (width - 1)))
+        abs_y = int(round(pixel_y * 65535 / (height - 1)))
+        return (max(0, min(65535, abs_x)), max(0, min(65535, abs_y)))
 
     def _coords_for(self, key: str) -> tuple[int, int] | None:
         """Load latest controller calibration and return absolute HID coords for key."""

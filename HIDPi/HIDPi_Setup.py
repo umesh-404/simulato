@@ -169,7 +169,7 @@ def setup_hid_gadget():
             b"\x95\x03\x75\x01\x81\x02"              # Report Count (3), Report Size (1 bit), Input (Data, Variable, Absolute) - 3 button bits
             b"\x95\x01\x75\x05\x81\x03"              # Report Count (1), Report Size (5 bits), Input (Constant) - 5 padding bits
             b"\x05\x01\x09\x30\x09\x31"              # Usage Page (Generic Desktop), Usage (X), Usage (Y)
-            b"\x15\x00\x26\xff\x7f"                   # Logical Min (0), Logical Max (32767)
+            b"\x15\x00\x26\xff\xff"                   # Logical Min (0), Logical Max (65535)
             b"\x75\x10\x95\x02\x81\x02"              # Report Size (16 bits), Report Count (2), Input (Data, Variable, Absolute) - X and Y
             b"\x09\x38"                                # Usage (Wheel)
             b"\x15\x81\x25\x7f"                        # Logical Min (-127), Logical Max (127)

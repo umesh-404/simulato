@@ -893,40 +893,54 @@ class WorkflowEngine:
         """
         Execute a click and verify it (Hardware Input Transaction — Canonical Law 5).
 
-        Retry with deterministic nearby radio-row fallbacks, then alert.
+        Follows a safe transaction flow:
+        send click → wait 1.5s → verify → if fail: passive re-check (1.5s) → alert.
+        NO redundant retry clicks are performed to avoid toggling/deselection.
         """
         if self._sm.state != SystemState.RUNNING:
             logger.info("Skipping click execution for %s — state is %s", letter, self._sm.state.value)
             return
-        logger.info("Click attempt 1 for intended option %s", letter)
+
+        logger.info("Executing transaction for option %s", letter)
         dispatched_letter = self._click_option_best_target(letter)
         self._last_dispatched_click_letter = dispatched_letter
-        time.sleep(1.0)
+
+        # Allow time for highlight to render on the exam laptop screen.
+        time.sleep(1.5)
+
         verified = self._verify_option_click(dispatched_letter)
         if verified:
             logger.info("Click verified for option %s (dispatched=%s)", letter, dispatched_letter)
             return
+
         if self._last_verification_timed_out:
             logger.warning(
-                "Verification capture timed out while checking option %s; stopping retries",
+                "Verification capture timed out while checking option %s; stopping transaction",
                 letter,
             )
             return
 
-        logger.warning("Click verification failed for %s — retrying same option", letter)
-        dispatched_letter = self._click_option_best_target(letter)
-        self._last_dispatched_click_letter = dispatched_letter
-        time.sleep(1.0)
+        # Passive re-check only (no second click).
+        # A second click on an already-selected radio button would deselect it.
+        # If the first click worked but the highlight was slow to render or
+        # the camera capture was noisy, a wait + re-check on a fresh frame
+        # is the safest way to confirm state.
+        logger.warning("Click verification borderline for %s — performing passive re-check", letter)
+        time.sleep(1.5)
+
         verified = self._verify_option_click(dispatched_letter)
         if verified:
-            logger.info("Retry click verified for option %s (dispatched=%s)", letter, dispatched_letter)
+            logger.info("Passive re-check PASSED for option %s (dispatched=%s)", letter, dispatched_letter)
             return
 
-        logger.error("Click verification FAILED after retry for option %s", letter)
+        # Both checks failed: the click likely truly missed or the UI is stuck.
+        # Raise alert and PAUSE execution for operator review (Canonical Law 8, 9).
+        logger.error("Click verification FAILED after re-check for option %s", letter)
         self._sm.force_error(f"Input verification failed for option {letter}")
         self._alerts.raise_alert(
             AlertType.VERIFICATION_FAILURE,
-            f"Click verification failed for option {letter} after retry",
+            f"Click verification failed for option {letter} after passive re-check. "
+            "Operator intervention required to verify selection.",
         )
 
     def _candidate_option_click_sequence(self, intended_letter: str) -> list[str]:

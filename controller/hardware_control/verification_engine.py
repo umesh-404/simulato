@@ -41,7 +41,7 @@ class VerificationEngine:
     a post-click screenshot for visual highlight changes.
     """
 
-    HIGHLIGHT_SATURATION_THRESHOLD = 14
+    HIGHLIGHT_SATURATION_THRESHOLD = 12
     HIGHLIGHT_VALUE_DIFF_THRESHOLD = 15
     HIGHLIGHT_BLUE_RATIO_THRESHOLD = 0.005
     OPTION_CROP_PADDING = 40
@@ -190,7 +190,7 @@ class VerificationEngine:
         # Tight crop around the radio button. Use a wider horizontal
         # band to tolerate slight click offset and capture the full
         # highlight row (selected options often get a full-width blue bar).
-        tight_rx = 60
+        tight_rx = 80
         tight_ry = 35
         tx1 = max(0, cx - tight_rx)
         ty1 = max(0, cy - tight_ry)

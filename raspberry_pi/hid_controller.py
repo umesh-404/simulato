@@ -8,7 +8,7 @@ HIDPi configures the Pi as a USB HID gadget with:
     - /dev/hidg0 = Keyboard (8-byte reports)
     - /dev/hidg1 = Mouse (6-byte absolute reports: buttons + X:u16 + Y:u16 + wheel:i8)
 
-Coordinates use absolute positioning (0–32767 range).
+Coordinates use absolute positioning (0–65535 range).
 """
 
 import time
@@ -40,15 +40,15 @@ class HIDController:
 
     @staticmethod
     def _clamp_abs(value: int) -> int:
-        return max(0, min(32767, int(value)))
+        return max(0, min(65535, int(value)))
 
     def move_to_absolute(self, x: int, y: int) -> None:
         """
-        Move mouse to absolute coordinates (0–32767 range).
+        Move mouse to absolute coordinates (0–65535 range).
 
         Args:
-            x: Absolute X position (0 = left edge, 32767 = right edge).
-            y: Absolute Y position (0 = top edge, 32767 = bottom edge).
+            x: Absolute X position (0 = left edge, 65535 = right edge).
+            y: Absolute Y position (0 = top edge, 65535 = bottom edge).
         """
         x = self._clamp_abs(x)
         y = self._clamp_abs(y)
@@ -87,13 +87,13 @@ class HIDController:
 
         Format (little-endian):
             byte 0:    buttons bitmap (bit0=left, bit1=right, bit2=middle)
-            bytes 1-2: X position (uint16, 0-32767)
-            bytes 3-4: Y position (uint16, 0-32767)
+            bytes 1-2: X position (uint16, 0-65535)
+            bytes 3-4: Y position (uint16, 0-65535)
             byte 5:    wheel (int8, -127 to 127)
         """
         import struct
-        x = max(0, min(32767, int(x)))
-        y = max(0, min(32767, int(y)))
+        x = max(0, min(65535, int(x)))
+        y = max(0, min(65535, int(y)))
         wheel = max(-127, min(127, int(wheel)))
         report = struct.pack("<BHHb", buttons, x, y, wheel)
         self._write_report(report)
