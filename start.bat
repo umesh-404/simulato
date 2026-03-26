@@ -135,6 +135,22 @@ if exist ".venv\Scripts\activate.bat" (
     echo [*] No .venv found - using system Python
 )
 
+echo [*] Checking OCR Python package (pytesseract)...
+python -c "import pytesseract" >nul 2>&1
+if errorlevel 1 (
+    echo     -> pytesseract not found. Installing into current Python environment...
+    python -m pip install pytesseract
+    if errorlevel 1 (
+        echo [WARNING] Failed to install pytesseract automatically.
+        echo          OCR text extraction may be limited. Install manually:
+        echo          python -m pip install pytesseract
+    ) else (
+        echo     -> pytesseract installed.
+    )
+) else (
+    echo     -> pytesseract already installed.
+)
+
 :: Verify .env has API keys
 if exist ".env" (
     findstr /i "GROK_API_KEY" .env > nul 2>&1

@@ -100,7 +100,35 @@ class OCRLayoutResult:
             self._option_map_cache = OptionDetector().detect(self.image_path, self.layout)
         opt = self._option_map_cache.get(letter)
         if opt is None:
-            return None
+            # Geometric fallback: if an exact label is missing due partial detection,
+            # extrapolate row center from detected radio-row sequence instead of
+            # falling back to stale calibration grid coordinates.
+            options = list(self._option_map_cache.options)
+            if len(options) < 2:
+                return None
+            options = sorted(options, key=lambda o: o.circle_y)
+            ys = [int(o.circle_y) for o in options]
+            xs = [int(o.circle_x) for o in options]
+            # Median row step between detected radio rows.
+            diffs = [ys[i + 1] - ys[i] for i in range(len(ys) - 1)]
+            diffs = [d for d in diffs if d > 0]
+            if not diffs:
+                return None
+            step = int(round(float(sorted(diffs)[len(diffs) // 2])))
+            if step < 12 or step > 500:
+                return None
+
+            req_idx = {"A": 0, "B": 1, "C": 2, "D": 3, "E": 4}[letter]
+            base_idx = min(req_idx, len(ys) - 1)
+            y = ys[base_idx]
+            if req_idx > len(ys) - 1:
+                y = ys[-1] + step * (req_idx - (len(ys) - 1))
+            x = int(round(sum(xs) / max(1, len(xs))))
+
+            if self.answer_panel is not None:
+                x = max(self.answer_panel.x, min(self.answer_panel.x2 - 1, x))
+                y = max(self.answer_panel.y, min(self.answer_panel.y2 - 1, y))
+            return self._norm(int(x), int(y))
         return self._norm(int(opt.click_x), int(opt.click_y))
 
     def locate_next_target(self) -> Optional[tuple[float, float]]:

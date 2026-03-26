@@ -509,7 +509,7 @@ class WorkflowEngine:
         self._click_next_best_target()
         self._log_event("click_next", {"after_question": self._question_number})
 
-        result = self._verify.verify_click("NEXT")
+        result = self._verify_next_click()
         if result.verified:
             logger.info("NEXT click verified")
             self._expecting_next_change = True
@@ -518,7 +518,7 @@ class WorkflowEngine:
 
         logger.warning("NEXT click verification failed — retrying")
         self._click_next_best_target()
-        result = self._verify.verify_click("NEXT")
+        result = self._verify_next_click()
 
         if result.verified:
             logger.info("NEXT retry click verified")
@@ -532,6 +532,23 @@ class WorkflowEngine:
             AlertType.VERIFICATION_FAILURE,
             "NEXT button click verification failed after retry",
         )
+
+    def _verify_next_click(self):
+        """
+        Verify NEXT click using a fresh dedicated post-click frame.
+        """
+        self._verification_frame_event.clear()
+        self._verification_frame_data = None
+        self._is_waiting_verification_flag = True
+        if self._request_capture_callback:
+            self._request_capture_callback()
+        arrived = self._verification_frame_event.wait(timeout=VERIFY_FRAME_TIMEOUT)
+        self._is_waiting_verification_flag = False
+        if not arrived or self._verification_frame_data is None:
+            logger.warning("NEXT verification capture timed out after %ds", VERIFY_FRAME_TIMEOUT)
+            return self._verify.verify_click("NEXT")
+        verify_path = self._receiver.receive_image(self._verification_frame_data)
+        return self._verify.verify_click_on_image("NEXT", verify_path)
 
     def _click_next_best_target(self) -> None:
         """Click NEXT using OCR/Qwen-assisted targeting with calibrated fallback."""
