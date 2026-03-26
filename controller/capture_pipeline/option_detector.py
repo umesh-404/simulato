@@ -190,8 +190,13 @@ class OptionDetector:
         best_search_y2 = ap.y2
         best_score = float("-inf")
 
-        search_y1 = ap.y + int(ap.h * self.SEARCH_TOP_MARGIN_FRAC)
-        search_y2 = ap.y2 - int(ap.h * self.SEARCH_BOTTOM_MARGIN_FRAC)
+        # Margin to skip "Answer here" header. Use fraction of panel
+        # height but cap to an absolute max to prevent over-cutting on
+        # tall stitched images.
+        top_margin = min(int(ap.h * self.SEARCH_TOP_MARGIN_FRAC), 500)
+        bottom_margin = min(int(ap.h * self.SEARCH_BOTTOM_MARGIN_FRAC), 300)
+        search_y1 = ap.y + top_margin
+        search_y2 = ap.y2 - bottom_margin
         search_y1 = max(ap.y, min(search_y1, ap.y2 - 1))
         search_y2 = max(search_y1 + 1, min(search_y2, ap.y2))
 
@@ -236,9 +241,10 @@ class OptionDetector:
         # text, watermark artefacts, etc.) before A..E labeling.
         original_clusters = list(clusters)
         # The "Answer here" header plus its vertical padding typically
-        # occupies the top ~18 % of the answer panel.
-        min_row_y = ap.y + int(ap.h * 0.18)
-        max_row_y = ap.y + int(ap.h * 0.97)
+        # occupies the top ~18 % of a single-frame panel.  Cap the
+        # absolute margin to avoid over-cutting on tall stitched images.
+        min_row_y = ap.y + min(int(ap.h * 0.18), 500)
+        max_row_y = ap.y + ap.h - min(int(ap.h * 0.03), 150)
         filtered_clusters = [
             c for c in clusters
             if min_row_y <= int(c.get("center_y", ap.y)) <= max_row_y
@@ -499,11 +505,15 @@ class OptionDetector:
         if gap_penalty > 0:
             return -1e6
         score += 250.0 if self.MIN_EXPECTED_OPTIONS <= k <= self.MAX_EXPECTED_OPTIONS else -200.0
-        score += (k * 26.0)
+        # Strongly prefer more rows — each extra row is very valuable
+        # because missing a real option is far worse than including
+        # one with slight X jitter.
+        score += (k * 55.0)
         score += (mean_count * 6.0)
-        # X-alignment is the strongest signal: real radio buttons share a
-        # nearly identical X coordinate (std < ~15 px).  Penalise heavily.
-        score -= (x_std * 3.5)
+        # X-alignment: penalise but with a soft floor — real radio
+        # buttons can have x_std up to ~25 px due to camera angle.
+        effective_x_std = max(0.0, x_std - 10.0)
+        score -= (effective_x_std * 2.0)
         score -= (y_std * 0.7)
         score -= (r_std * 6.0)
         score -= (gap_penalty * 120.0)

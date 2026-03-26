@@ -174,54 +174,76 @@ class VerificationEngine:
     def _verify_with_grid(
         self, img: np.ndarray, pixel_coords: tuple[int, int], letter: str
     ) -> VerificationResult:
-        """Verify by analyzing the color of the region around the expected option."""
+        """Verify by analyzing the color of the region around the expected option.
+
+        Uses two concentric crops:
+        - A tight crop (~30px radius) centred on the radio button itself,
+          where any fill/highlight colour will be concentrated.
+        - A wider crop (~120x80 px) for the before/after diff check.
+        """
         import cv2
 
         h, w = img.shape[:2]
         cx, cy = pixel_coords
         pad = self.OPTION_CROP_PADDING
 
+        # Tight crop: captures just the radio button circle area.
+        tight_r = 30
+        tx1 = max(0, cx - tight_r)
+        ty1 = max(0, cy - tight_r)
+        tx2 = min(w, cx + tight_r)
+        ty2 = min(h, cy + tight_r)
+
+        # Wide crop for before/after diff.
         x1 = max(0, cx - pad * 3)
         y1 = max(0, cy - pad)
         x2 = min(w, cx + pad * 3)
         y2 = min(h, cy + pad)
 
-        if x2 <= x1 or y2 <= y1:
+        if tx2 <= tx1 or ty2 <= ty1:
             logger.warning("Invalid crop region for option %s", letter)
             return VerificationResult(verified=False, details="invalid_crop")
 
-        region = img[y1:y2, x1:x2]
-        hsv = cv2.cvtColor(region, cv2.COLOR_BGR2HSV)
+        tight_region = img[ty1:ty2, tx1:tx2]
+        tight_hsv = cv2.cvtColor(tight_region, cv2.COLOR_BGR2HSV)
 
-        mean_s = float(np.mean(hsv[:, :, 1]))
-        mean_v = float(np.mean(hsv[:, :, 2]))
+        mean_s = float(np.mean(tight_hsv[:, :, 1]))
 
-        blue_mask = cv2.inRange(hsv, np.array([100, 40, 40]), np.array([130, 255, 255]))
+        # Detect filled radio button: dark blue/teal fill or any saturated colour.
+        blue_mask = cv2.inRange(tight_hsv, np.array([90, 30, 30]), np.array([140, 255, 255]))
         blue_ratio = float(np.count_nonzero(blue_mask)) / max(blue_mask.size, 1)
 
-        green_mask = cv2.inRange(hsv, np.array([35, 40, 40]), np.array([85, 255, 255]))
+        green_mask = cv2.inRange(tight_hsv, np.array([35, 30, 30]), np.array([85, 255, 255]))
         green_ratio = float(np.count_nonzero(green_mask)) / max(green_mask.size, 1)
+
+        # Any saturated colour at all (covers blue, green, orange highlights).
+        sat_mask = tight_hsv[:, :, 1] > 25
+        sat_ratio = float(np.count_nonzero(sat_mask)) / max(sat_mask.size, 1)
 
         highlight_detected = (
             mean_s > self.HIGHLIGHT_SATURATION_THRESHOLD
             or blue_ratio > self.HIGHLIGHT_BLUE_RATIO_THRESHOLD
             or green_ratio > self.HIGHLIGHT_BLUE_RATIO_THRESHOLD
+            or sat_ratio > 0.05
         )
 
         confidence = max(
             mean_s / 100.0,
-            blue_ratio / self.HIGHLIGHT_BLUE_RATIO_THRESHOLD,
-            green_ratio / self.HIGHLIGHT_BLUE_RATIO_THRESHOLD,
+            blue_ratio / max(self.HIGHLIGHT_BLUE_RATIO_THRESHOLD, 1e-9),
+            green_ratio / max(self.HIGHLIGHT_BLUE_RATIO_THRESHOLD, 1e-9),
+            sat_ratio / 0.10,
         )
         confidence = min(confidence, 1.0)
 
-        if self._pre_click_screenshot is not None:
+        if self._pre_click_screenshot is not None and x2 > x1 and y2 > y1:
             pre_img = cv2.imread(str(self._pre_click_screenshot))
             if pre_img is not None and pre_img.shape == img.shape:
                 pre_region = pre_img[y1:y2, x1:x2]
-                pre_hsv = cv2.cvtColor(pre_region, cv2.COLOR_BGR2HSV)
+                post_region = img[y1:y2, x1:x2]
+                pre_hsv_wide = cv2.cvtColor(pre_region, cv2.COLOR_BGR2HSV)
+                post_hsv_wide = cv2.cvtColor(post_region, cv2.COLOR_BGR2HSV)
                 diff = float(np.mean(np.abs(
-                    hsv.astype(np.float32) - pre_hsv.astype(np.float32)
+                    post_hsv_wide.astype(np.float32) - pre_hsv_wide.astype(np.float32)
                 )))
                 if diff > self.HIGHLIGHT_VALUE_DIFF_THRESHOLD:
                     highlight_detected = True
@@ -232,14 +254,14 @@ class VerificationEngine:
 
         if highlight_detected:
             logger.info(
-                "Verification PASSED for %s (confidence=%.2f, saturation=%.1f, blue=%.3f)",
-                letter, confidence, mean_s, blue_ratio,
+                "Verification PASSED for %s (confidence=%.2f, saturation=%.1f, blue=%.3f, sat_ratio=%.3f)",
+                letter, confidence, mean_s, blue_ratio, sat_ratio,
             )
             return VerificationResult(verified=True, details="highlight_detected", confidence=confidence)
 
         logger.warning(
-            "Verification FAILED for %s (saturation=%.1f, blue=%.3f, green=%.3f)",
-            letter, mean_s, blue_ratio, green_ratio,
+            "Verification FAILED for %s (saturation=%.1f, blue=%.3f, green=%.3f, sat_ratio=%.3f)",
+            letter, mean_s, blue_ratio, green_ratio, sat_ratio,
         )
         return VerificationResult(verified=False, details="no_highlight", confidence=confidence)
 
