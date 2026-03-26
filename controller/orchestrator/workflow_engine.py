@@ -64,6 +64,8 @@ from controller.capture_pipeline.scroll_detector import ScrollDetector
 from controller.capture_pipeline.screen_validator import ScreenValidator
 from controller.capture_pipeline.image_preprocessor import ImagePreprocessor
 from controller.capture_pipeline.ocr_layout_analyzer import OCRLayoutAnalyzer, OCRLayoutResult
+from controller.capture_pipeline.exam_layout import ExamLayoutDetector
+from controller.capture_pipeline.option_detector import OptionDetector
 from controller.hardware_control.click_dispatcher import ClickDispatcher
 from controller.hardware_control.verification_engine import VerificationEngine
 from controller.orchestrator.state_machine import StateMachine, SystemState
@@ -320,13 +322,21 @@ class WorkflowEngine:
             else:
                 validation = self._screen_validator.validate(image_path)
                 if not validation.valid:
-                    self._sm.force_error(f"Screen validation failed: {validation.issues}")
-                    self._alerts.raise_alert(
-                        AlertType.UNEXPECTED_SCREEN,
-                        f"Unexpected screen detected: {validation.issues}",
-                    )
-                    self._log_event("screen_validation_failed", {"issues": validation.issues})
-                    return None
+                    # False-negative guard: some valid exam screens with light themes
+                    # can fail low edge-density checks. If layout + options are found,
+                    # proceed deterministically instead of forcing ERROR.
+                    if self._is_exam_screen_despite_low_density(image_path, validation):
+                        logger.warning(
+                            "Bypassing low-density screen validation failure because exam layout/options were detected"
+                        )
+                    else:
+                        self._sm.force_error(f"Screen validation failed: {validation.issues}")
+                        self._alerts.raise_alert(
+                            AlertType.UNEXPECTED_SCREEN,
+                            f"Unexpected screen detected: {validation.issues}",
+                        )
+                        self._log_event("screen_validation_failed", {"issues": validation.issues})
+                        return None
 
             # Step 3: Detect scrolling and capture additional frames
             # Use Local AI for scroll check if enabled
@@ -1173,3 +1183,25 @@ class WorkflowEngine:
             )
         except Exception:
             return None
+
+    def _is_exam_screen_despite_low_density(self, image_path: Path, validation) -> bool:
+        """
+        Allow valid exam screens that fail only low-density heuristics.
+        """
+        try:
+            issues = list(getattr(validation, "issues", []) or [])
+            if not issues:
+                return False
+            low_density_only = all(
+                ("Very low text/content density" in str(i)) or ("Content in only" in str(i))
+                for i in issues
+            )
+            if not low_density_only:
+                return False
+            layout = ExamLayoutDetector().detect(image_path)
+            if layout is None or layout.answer_panel is None:
+                return False
+            option_map = OptionDetector().detect(image_path, layout)
+            return option_map.count >= 3
+        except Exception:
+            return False
