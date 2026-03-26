@@ -103,8 +103,8 @@ class OptionDetector:
     SEARCH_STRIP_MAX_WIDTH = 220
     SEARCH_STRIP_WIDTH_FRAC = 0.13
     SEARCH_MAX_RIGHT_FRAC = 0.20
-    SEARCH_TOP_MARGIN_FRAC = 0.08
-    SEARCH_BOTTOM_MARGIN_FRAC = 0.12
+    SEARCH_TOP_MARGIN_FRAC = 0.02
+    SEARCH_BOTTOM_MARGIN_FRAC = 0.06
 
     # HoughCircles parameters (kept loose — we filter with clustering afterwards)
     HOUGH_DP = 1.2
@@ -445,7 +445,8 @@ class OptionDetector:
         if gap_penalty > 0:
             return -1e6
         score += 250.0 if self.MIN_EXPECTED_OPTIONS <= k <= self.MAX_EXPECTED_OPTIONS else -200.0
-        score += (k * 12.0)
+        # Strongly prefer fuller 5-row sequences when available.
+        score += (k * 26.0)
         score += (mean_count * 6.0)
         score -= (x_std * 0.9)
         score -= (y_std * 0.7)

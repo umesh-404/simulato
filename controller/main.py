@@ -102,6 +102,7 @@ def main() -> None:
             host=CONTROLLER_HOST,
             port=CONTROLLER_PORT,
             log_level="info",
+            access_log=False,
         )
     except KeyboardInterrupt:
         logger.info("Keyboard interrupt received")

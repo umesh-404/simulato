@@ -66,6 +66,11 @@ class SystemController:
         # Latest streamed JPEG bytes per device_id (in-memory only).
         self._latest_stream_frames: dict[str, bytes] = {}
         self._latest_stream_seq: dict[str, int | None] = {}
+        # Primary-frame processing runs on a worker thread so verification/scroll
+        # uploads can still be routed while a question is being processed.
+        self._processing_lock = threading.Lock()
+        self._processing_active: bool = False
+        self._pending_primary_frame: Optional[tuple[bytes, str]] = None
 
     @property
     def state(self) -> SystemState:
@@ -321,17 +326,54 @@ class SystemController:
             self._workflow.receive_verification_frame(image_data)
             return
 
+        self._enqueue_primary_frame(image_data, device_id)
+
+    def _enqueue_primary_frame(self, image_data: bytes, device_id: str) -> None:
+        """Queue a primary question frame for background processing."""
+        with self._processing_lock:
+            if self._processing_active:
+                # Keep only the latest pending frame while busy.
+                self._pending_primary_frame = (image_data, device_id)
+                logger.debug("Primary frame queued as pending while processor busy")
+                return
+            self._processing_active = True
+
+        t = threading.Thread(
+            target=self._process_primary_frame_async,
+            args=(image_data, device_id),
+            daemon=True,
+            name="primary-frame-processor",
+        )
+        t.start()
+
+    def _process_primary_frame_async(self, image_data: bytes, device_id: str) -> None:
+        """Run heavy workflow processing off the API thread."""
         try:
+            if self._workflow is None:
+                logger.error("Workflow engine not initialized")
+                return
+
             decision = self._workflow.process_question(image_data)
+
+            if decision and decision.outcome.value == "conflict":
+                self._last_conflict_decision = {
+                    "click_letter": decision.click_letter,
+                    "match_result": decision.match_result,
+                    "conflict": decision.conflict,
+                }
+
+            if decision and decision.outcome.value == "click":
+                self._workflow.advance_to_next()
+                # Trigger the next capture after a brief delay for the screen to settle
+                self._schedule_timer(1.5, self._request_capture)
+
         except PiConnectionError as e:
-            # Never crash the upload path; pause+alert for operator intervention.
             logger.error("Pi connection error during processing: %s", e)
             self._sm.force_error(f"pi_not_connected:{e}")
             self._alert_mgr.raise_alert(
                 AlertType.INPUT_FAILURE,
                 f"Pi not connected during click: {e}. Start Pi listener and press CONTINUE.",
             )
-            return
         except PiCommandError as e:
             logger.error("Pi command failed during processing: %s", e)
             self._sm.force_error(f"pi_command_failed:{e}")
@@ -339,19 +381,17 @@ class SystemController:
                 AlertType.INPUT_FAILURE,
                 f"Pi command failed: {e}. Check USB cable and Pi HID, then press CONTINUE.",
             )
-            return
-
-        if decision and decision.outcome.value == "conflict":
-            self._last_conflict_decision = {
-                "click_letter": decision.click_letter,
-                "match_result": decision.match_result,
-                "conflict": decision.conflict,
-            }
-
-        if decision and decision.outcome.value == "click":
-            self._workflow.advance_to_next()
-            # Trigger the next capture after a brief delay for the screen to settle
-            self._schedule_timer(1.5, self._request_capture)
+        finally:
+            next_item: Optional[tuple[bytes, str]] = None
+            with self._processing_lock:
+                if self._pending_primary_frame is not None:
+                    next_item = self._pending_primary_frame
+                    self._pending_primary_frame = None
+                    self._processing_active = True
+                else:
+                    self._processing_active = False
+            if next_item is not None:
+                self._process_primary_frame_async(next_item[0], next_item[1])
 
     def on_stream_frame_received(self, image_data: bytes, device_id: str = "", seq: int | None = None) -> None:
         """
