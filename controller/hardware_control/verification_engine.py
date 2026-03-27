@@ -212,37 +212,48 @@ class VerificationEngine:
 
         mean_s = float(np.mean(tight_hsv[:, :, 1]))
 
-        # Detect filled radio button: dark blue/teal fill or any saturated colour.
-        blue_mask = cv2.inRange(tight_hsv, np.array([90, 30, 30]), np.array([140, 255, 255]))
-        blue_ratio = float(np.count_nonzero(blue_mask)) / max(blue_mask.size, 1)
+        # Detect filled radio button or row highlight.
+        # "Strong" blue: Saturation >= 80 AND Value < 200 (dark/vivid blue like
+        # a filled radio circle, header bar, Submit button — not the pale
+        # blue answer-panel background that has S=20-60, V=220+).
+        strong_blue_mask = cv2.inRange(
+            tight_hsv, np.array([90, 80, 30]), np.array([140, 255, 200]),
+        )
+        strong_blue_ratio = float(np.count_nonzero(strong_blue_mask)) / max(strong_blue_mask.size, 1)
+
+        # "Any" blue (including the pale answer-panel tint).
+        any_blue_mask = cv2.inRange(tight_hsv, np.array([90, 30, 30]), np.array([140, 255, 255]))
+        blue_ratio = float(np.count_nonzero(any_blue_mask)) / max(any_blue_mask.size, 1)
 
         green_mask = cv2.inRange(tight_hsv, np.array([35, 30, 30]), np.array([85, 255, 255]))
         green_ratio = float(np.count_nonzero(green_mask)) / max(green_mask.size, 1)
 
-        # Any saturated colour at all (covers blue, green, orange highlights).
-        sat_mask = tight_hsv[:, :, 1] > 20
+        # Saturated colour with meaningful saturation (> 50) to exclude the
+        # pale blue answer-panel background (S ≈ 20-40).
+        sat_mask = tight_hsv[:, :, 1] > 50
         sat_ratio = float(np.count_nonzero(sat_mask)) / max(sat_mask.size, 1)
 
-        # If the crop is almost entirely saturated blue (> 85%), we are
-        # likely on a solid blue UI chrome element (header bar, Submit
-        # button), not a real radio-button highlight.  Reject as false.
-        on_ui_chrome = blue_ratio > 0.85 and sat_ratio > 0.85
+        # UI chrome (header bar, Submit button) is dark saturated blue
+        # covering the entire crop.  Distinguish from answer-panel highlight
+        # by checking mean Value: chrome has V < 180, panel has V > 200.
+        mean_v = float(np.mean(tight_hsv[:, :, 2]))
+        on_ui_chrome = strong_blue_ratio > 0.80 and mean_v < 180
 
         highlight_detected = (
             not on_ui_chrome
             and (
                 mean_s > self.HIGHLIGHT_SATURATION_THRESHOLD
-                or blue_ratio > self.HIGHLIGHT_BLUE_RATIO_THRESHOLD
+                or strong_blue_ratio > 0.02
                 or green_ratio > self.HIGHLIGHT_BLUE_RATIO_THRESHOLD
-                or sat_ratio > 0.008
+                or sat_ratio > 0.03
             )
         )
 
         confidence = max(
             mean_s / 100.0,
-            blue_ratio / max(self.HIGHLIGHT_BLUE_RATIO_THRESHOLD, 1e-9),
+            strong_blue_ratio / 0.10,
             green_ratio / max(self.HIGHLIGHT_BLUE_RATIO_THRESHOLD, 1e-9),
-            sat_ratio / 0.05,
+            sat_ratio / 0.10,
         )
         confidence = min(confidence, 1.0)
 
@@ -277,21 +288,23 @@ class VerificationEngine:
 
         if on_ui_chrome:
             logger.warning(
-                "Verification REJECTED for %s — crop appears to be UI chrome, not radio button "
-                "(blue=%.3f, sat_ratio=%.3f, crop=%dx%d@(%d,%d))",
-                letter, blue_ratio, sat_ratio, tx2 - tx1, ty2 - ty1, cx, cy,
+                "Verification REJECTED for %s — crop appears to be UI chrome "
+                "(strong_blue=%.3f, mean_v=%.0f, crop=%dx%d@(%d,%d))",
+                letter, strong_blue_ratio, mean_v, tx2 - tx1, ty2 - ty1, cx, cy,
             )
 
         if highlight_detected:
             logger.info(
-                "Verification PASSED for %s (confidence=%.2f, saturation=%.1f, blue=%.3f, sat_ratio=%.3f)",
-                letter, confidence, mean_s, blue_ratio, sat_ratio,
+                "Verification PASSED for %s (confidence=%.2f, mean_s=%.1f, strong_blue=%.3f, "
+                "sat_ratio=%.3f, mean_v=%.0f)",
+                letter, confidence, mean_s, strong_blue_ratio, sat_ratio, mean_v,
             )
             return VerificationResult(verified=True, details="highlight_detected", confidence=confidence)
 
         logger.warning(
-            "Verification FAILED for %s (saturation=%.1f, blue=%.3f, green=%.3f, sat_ratio=%.3f, crop=%dx%d@(%d,%d))",
-            letter, mean_s, blue_ratio, green_ratio, sat_ratio,
+            "Verification FAILED for %s (mean_s=%.1f, strong_blue=%.3f, green=%.3f, "
+            "sat_ratio=%.3f, mean_v=%.0f, crop=%dx%d@(%d,%d))",
+            letter, mean_s, strong_blue_ratio, green_ratio, sat_ratio, mean_v,
             tx2 - tx1, ty2 - ty1, cx, cy,
         )
         return VerificationResult(verified=False, details="no_highlight", confidence=confidence)

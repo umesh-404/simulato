@@ -828,12 +828,41 @@ class OptionDetector:
 
         return (row_top, row_bottom)
 
+    @staticmethod
+    def _remove_color_watermark(bgr: np.ndarray) -> np.ndarray:
+        """Remove colored watermark text (red/pink/orange) from an option crop.
+
+        Watermarks on this exam UI are red/pink diagonal numbers.  We
+        detect pixels in the red/pink hue range with moderate-to-high
+        saturation and replace them with white, leaving black option
+        text untouched.
+        """
+        import cv2
+
+        hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+        # Red wraps around hue 0 and 180 in OpenCV's 0-180 range.
+        red_lo1 = cv2.inRange(hsv, np.array([0, 40, 80]), np.array([15, 255, 255]))
+        red_lo2 = cv2.inRange(hsv, np.array([160, 40, 80]), np.array([180, 255, 255]))
+        # Pink/magenta range.
+        pink = cv2.inRange(hsv, np.array([140, 30, 80]), np.array([170, 255, 255]))
+        # Orange range (some watermarks can be orange-tinted).
+        orange = cv2.inRange(hsv, np.array([10, 50, 80]), np.array([25, 255, 255]))
+
+        watermark_mask = red_lo1 | red_lo2 | pink | orange
+
+        # Dilate slightly so we erase edges of watermark glyphs too.
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        watermark_mask = cv2.dilate(watermark_mask, kernel, iterations=1)
+
+        cleaned = bgr.copy()
+        cleaned[watermark_mask > 0] = (255, 255, 255)
+        return cleaned
+
     def _ocr_text(self, text_region: np.ndarray) -> tuple[str, float]:
         """Run OCR on a cropped text region. Returns (text, confidence).
 
-        Tries multiple preprocessing strategies (adaptive threshold,
-        Otsu, raw grayscale) across PSM modes 6/7 and returns the
-        highest-confidence result.
+        Applies watermark removal (color-based), then tries multiple
+        preprocessing strategies across PSM modes and returns the best.
         """
         if text_region.size == 0:
             return ("", 0.0)
@@ -846,12 +875,14 @@ class OptionDetector:
             if TESSERACT_CMD.strip():
                 pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD.strip()
 
-            if len(text_region.shape) == 3:
+            # Step 1: Remove colored watermarks if we have a colour image.
+            if len(text_region.shape) == 3 and text_region.shape[2] == 3:
+                cleaned_bgr = self._remove_color_watermark(text_region)
+                gray = cv2.cvtColor(cleaned_bgr, cv2.COLOR_BGR2GRAY)
+            elif len(text_region.shape) == 3:
                 gray = cv2.cvtColor(text_region, cv2.COLOR_BGR2GRAY)
             else:
                 gray = text_region
-
-            h_orig, w_orig = gray.shape[:2]
 
             def _upscale(img: np.ndarray) -> np.ndarray:
                 ih, iw = img.shape[:2]
@@ -860,22 +891,20 @@ class OptionDetector:
                     return cv2.resize(img, (iw * s, ih * s), interpolation=cv2.INTER_CUBIC)
                 return img
 
-            # Multiple preprocessing variants to handle watermarks,
-            # low contrast, and varying background conditions.
             variants: list[np.ndarray] = []
 
-            # Variant 1: Adaptive threshold (original)
+            # Variant 1: Adaptive threshold.
             cleaned1 = cv2.adaptiveThreshold(
                 gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                 cv2.THRESH_BINARY, 31, 15,
             )
             variants.append(_upscale(cleaned1))
 
-            # Variant 2: Otsu threshold — better for high-contrast text.
+            # Variant 2: Otsu threshold.
             _, cleaned2 = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
             variants.append(_upscale(cleaned2))
 
-            # Variant 3: Raw grayscale (let Tesseract handle thresholding).
+            # Variant 3: Raw grayscale.
             variants.append(_upscale(gray))
 
             best_text = ""
