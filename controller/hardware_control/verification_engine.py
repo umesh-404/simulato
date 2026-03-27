@@ -223,11 +223,19 @@ class VerificationEngine:
         sat_mask = tight_hsv[:, :, 1] > 20
         sat_ratio = float(np.count_nonzero(sat_mask)) / max(sat_mask.size, 1)
 
+        # If the crop is almost entirely saturated blue (> 85%), we are
+        # likely on a solid blue UI chrome element (header bar, Submit
+        # button), not a real radio-button highlight.  Reject as false.
+        on_ui_chrome = blue_ratio > 0.85 and sat_ratio > 0.85
+
         highlight_detected = (
-            mean_s > self.HIGHLIGHT_SATURATION_THRESHOLD
-            or blue_ratio > self.HIGHLIGHT_BLUE_RATIO_THRESHOLD
-            or green_ratio > self.HIGHLIGHT_BLUE_RATIO_THRESHOLD
-            or sat_ratio > 0.008
+            not on_ui_chrome
+            and (
+                mean_s > self.HIGHLIGHT_SATURATION_THRESHOLD
+                or blue_ratio > self.HIGHLIGHT_BLUE_RATIO_THRESHOLD
+                or green_ratio > self.HIGHLIGHT_BLUE_RATIO_THRESHOLD
+                or sat_ratio > 0.008
+            )
         )
 
         confidence = max(
@@ -266,6 +274,13 @@ class VerificationEngine:
             )
         except Exception:
             pass
+
+        if on_ui_chrome:
+            logger.warning(
+                "Verification REJECTED for %s — crop appears to be UI chrome, not radio button "
+                "(blue=%.3f, sat_ratio=%.3f, crop=%dx%d@(%d,%d))",
+                letter, blue_ratio, sat_ratio, tx2 - tx1, ty2 - ty1, cx, cy,
+            )
 
         if highlight_detected:
             logger.info(

@@ -300,13 +300,16 @@ class OptionDetector:
             row_top_abs = ap.y + row_top
             row_bottom_abs = ap.y + row_bottom
 
-            # OCR text region: from right of circle, limited width to avoid
-            # picking up background watermark noise.  Cap at 60% of panel
-            # width (option text rarely exceeds that).
+            # OCR text region: from right of circle to near the panel edge.
+            # Use 80% of panel width to capture full option text.  Pad
+            # the row vertically by 10px each side for better OCR accuracy.
             text_x = cx + cr + self.TEXT_OFFSET_X_PX
-            max_text_w = int(ap.w * 0.60)
+            max_text_w = int(ap.w * 0.80)
             text_x2 = min(text_x + max_text_w, ap.x2)
-            text_region = img[row_top_abs:row_bottom_abs, text_x:text_x2]
+            pad_y = 10
+            crop_y1 = max(0, row_top_abs - pad_y)
+            crop_y2 = min(img.shape[0], row_bottom_abs + pad_y)
+            text_region = img[crop_y1:crop_y2, text_x:text_x2]
 
             text, text_conf = self._ocr_text(text_region)
 
@@ -388,16 +391,38 @@ class OptionDetector:
         image_w: int,
         image_h: int,
     ) -> dict[int, str]:
-        """Match detected cluster rows to calibrated A-E positions.
+        """Assign A-E labels to detected cluster rows.
 
-        Loads the saved grid map, converts calibrated screen-space Y for
-        each option back to approximate capture-space Y, then greedily
-        assigns the nearest calibrated label to each cluster.
+        Strategy:
+        - When exactly 5 clusters are found AND 5 calibrated positions
+          exist, use greedy Y-proximity matching to handle minor
+          detection jitter.
+        - When fewer than 5 clusters are found, use simple sequential
+          labeling (A, B, C, D).  The spacing-outlier filter has already
+          removed phantom rows, so the remaining rows are the actual
+          options in top-to-bottom order.
 
-        Returns a dict mapping cluster index → label string.  If
-        calibration data is unavailable or inconsistent, falls back to
-        simple sequential labeling.
+        Returns a dict mapping cluster index → label string.  Empty dict
+        falls back to default OPTION_LABELS[i] in the caller.
         """
+        if not clusters:
+            return {}
+
+        n = len(clusters)
+
+        # For fewer than 5 detected options, sequential labeling is the
+        # safest approach.  Calibration anchors from a 5-option screen
+        # cause systematic off-by-one when applied to 3-4 option screens.
+        if n < 5:
+            assignment = {i: OPTION_LABELS[i] for i in range(min(n, len(OPTION_LABELS)))}
+            labels = [assignment[i] for i in range(len(assignment))]
+            logger.info(
+                "Sequential labels (n=%d < 5): %s",
+                n, labels,
+            )
+            return assignment
+
+        # Exactly 5 clusters: try calibration-anchored matching.
         try:
             from calibration.grid_mapper import GridMap
             gm = GridMap.load()
@@ -409,7 +434,6 @@ class OptionDetector:
 
         cap_h = gm.capture_resolution[1] if gm.capture_resolution[1] > 0 else image_h
         scale_y = gm.transform.get("scale_y", 1.0)
-        offset_y = gm.transform.get("offset_y", 0.0)
 
         if abs(scale_y) < 1e-9:
             return {}
@@ -422,18 +446,17 @@ class OptionDetector:
             grid_col, grid_row = pos
             cell_h = float(gm.resolution[1]) / float(max(1, gm.grid_size[1]))
             screen_y = (grid_row + 0.5) * cell_h
+            offset_y = float(gm.transform.get("offset_y", 0.0))
             capture_y = (screen_y - offset_y) / scale_y
             capture_y_for_image = capture_y * image_h / max(1, cap_h)
             calib_ys[letter] = capture_y_for_image
 
-        if len(calib_ys) < self.MIN_EXPECTED_OPTIONS:
-            return {}
+        if len(calib_ys) < 5:
+            assignment = {i: OPTION_LABELS[i] for i in range(min(n, len(OPTION_LABELS)))}
+            labels = [assignment[i] for i in range(len(assignment))]
+            logger.info("Sequential labels (only %d calibrated): %s", len(calib_ys), labels)
+            return assignment
 
-        if not clusters:
-            return {}
-
-        # Greedy assignment: for each cluster (sorted by Y), find the
-        # nearest unassigned calibrated label.
         available = dict(calib_ys)
         assignment: dict[int, str] = {}
         for i, cluster in enumerate(clusters):
@@ -451,16 +474,19 @@ class OptionDetector:
             else:
                 break
 
-        if len(assignment) != len(clusters):
-            return {}
+        if len(assignment) != n:
+            assignment = {i: OPTION_LABELS[i] for i in range(min(n, len(OPTION_LABELS)))}
+            labels = [assignment[i] for i in range(len(assignment))]
+            logger.info("Calibration anchor mismatch; sequential labels: %s", labels)
+            return assignment
 
-        labels_in_order = [assignment[i] for i in range(len(clusters))]
+        labels_in_order = [assignment[i] for i in range(n)]
         if labels_in_order != sorted(labels_in_order):
             logger.warning(
                 "Calibration anchor labels not monotonic (%s); falling back to sequential",
                 labels_in_order,
             )
-            return {}
+            return {i: OPTION_LABELS[i] for i in range(min(n, len(OPTION_LABELS)))}
 
         logger.info(
             "Calibration-anchored labels: %s (from %d calibrated positions)",
@@ -805,9 +831,9 @@ class OptionDetector:
     def _ocr_text(self, text_region: np.ndarray) -> tuple[str, float]:
         """Run OCR on a cropped text region. Returns (text, confidence).
 
-        Applies adaptive thresholding to suppress background watermarks,
-        runs two PSM modes (7=line, 8=word) and picks the higher-confidence
-        result.
+        Tries multiple preprocessing strategies (adaptive threshold,
+        Otsu, raw grayscale) across PSM modes 6/7 and returns the
+        highest-confidence result.
         """
         if text_region.size == 0:
             return ("", 0.0)
@@ -825,48 +851,67 @@ class OptionDetector:
             else:
                 gray = text_region
 
-            # Adaptive threshold suppresses light watermarks while keeping
-            # dark option text.
-            cleaned = cv2.adaptiveThreshold(
+            h_orig, w_orig = gray.shape[:2]
+
+            def _upscale(img: np.ndarray) -> np.ndarray:
+                ih, iw = img.shape[:2]
+                if ih < 50:
+                    s = max(2, 80 // max(ih, 1))
+                    return cv2.resize(img, (iw * s, ih * s), interpolation=cv2.INTER_CUBIC)
+                return img
+
+            # Multiple preprocessing variants to handle watermarks,
+            # low contrast, and varying background conditions.
+            variants: list[np.ndarray] = []
+
+            # Variant 1: Adaptive threshold (original)
+            cleaned1 = cv2.adaptiveThreshold(
                 gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                 cv2.THRESH_BINARY, 31, 15,
             )
+            variants.append(_upscale(cleaned1))
 
-            h, w = cleaned.shape[:2]
-            if h < 40:
-                scale = max(2, 80 // max(h, 1))
-                cleaned = cv2.resize(cleaned, (w * scale, h * scale),
-                                     interpolation=cv2.INTER_CUBIC)
+            # Variant 2: Otsu threshold — better for high-contrast text.
+            _, cleaned2 = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            variants.append(_upscale(cleaned2))
+
+            # Variant 3: Raw grayscale (let Tesseract handle thresholding).
+            variants.append(_upscale(gray))
 
             best_text = ""
             best_conf = 0.0
-            # Try two page-segmentation modes: line then single word.
-            for psm in (7, 8):
-                cfg = f"--oem 3 --psm {psm} -c tessedit_char_whitelist=0123456789/.-+abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ "
-                data = pytesseract.image_to_data(
-                    cleaned,
-                    output_type=pytesseract.Output.DICT,
-                    config=cfg,
-                    timeout=OCR_TIMEOUT_SECONDS,
-                )
-                words = []
-                confidences = []
-                for i in range(len(data.get("text", []))):
-                    txt = str(data["text"][i]).strip()
-                    if not txt:
-                        continue
+            whitelist = "0123456789/.-+%()^abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ ,"
+
+            for variant in variants:
+                for psm in (6, 7):
+                    cfg = f"--oem 3 --psm {psm} -c tessedit_char_whitelist={whitelist}"
                     try:
-                        conf = float(data["conf"][i])
-                    except (ValueError, TypeError):
-                        conf = -1.0
-                    if conf >= 0:
-                        words.append(txt)
-                        confidences.append(conf)
-                text = " ".join(words)
-                avg = (sum(confidences) / len(confidences)) if confidences else 0.0
-                if avg > best_conf:
-                    best_conf = avg
-                    best_text = text
+                        data = pytesseract.image_to_data(
+                            variant,
+                            output_type=pytesseract.Output.DICT,
+                            config=cfg,
+                            timeout=OCR_TIMEOUT_SECONDS,
+                        )
+                    except Exception:
+                        continue
+                    words = []
+                    confidences = []
+                    for i in range(len(data.get("text", []))):
+                        txt = str(data["text"][i]).strip()
+                        if not txt:
+                            continue
+                        try:
+                            conf = float(data["conf"][i])
+                        except (ValueError, TypeError):
+                            conf = -1.0
+                        if conf >= 0:
+                            words.append(txt)
+                            confidences.append(conf)
+                    text = " ".join(words)
+                    avg = (sum(confidences) / len(confidences)) if confidences else 0.0
+                    if len(text) > len(best_text) or (len(text) == len(best_text) and avg > best_conf):
+                        best_conf = avg
+                        best_text = text
 
             return (best_text, best_conf)
 

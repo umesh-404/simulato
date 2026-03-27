@@ -290,7 +290,7 @@ class WorkflowEngine:
                 hamming = sum(
                     a != b for a, b in zip(raw_phash, self._last_raw_phash)
                 )
-                same_screen = hamming <= 6
+                same_screen = hamming <= 3
                 if same_screen:
                     self._no_change_after_next_count += 1
                     logger.warning(
