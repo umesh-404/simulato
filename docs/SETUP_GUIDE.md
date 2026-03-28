@@ -258,8 +258,9 @@ When the AI gives a different answer than what's in the database:
 | `ConnectionResetError 10054` during cloud AI call | Transient internet/provider reset. Controller now wraps it as AI provider failure and auto-falls back to alternate provider once |
 | Cloud AI intermittently fails | Retries use exponential backoff (`AI_API_BACKOFF_BASE_SECONDS`: 1s, 2s, ...) before final failure |
 | Local AI not active / timing out early | `start.bat` now enforces Ollama readiness and warmup when `LOCAL_AI_ASSIST_ENABLED=True`; increase `OLLAMA_TIMEOUT_SECONDS` only if needed |
-| Click lands on wrong option | Keep full exam window in frame, rerun calibration, and verify `runs/calibration_benchmark_*/debug/*/answer_panel_detected_options.png` for correct A..E row mapping. Keep `LOCAL_AI_ASSIST_ENABLED=True`. |
-| Correct option clicked but system still says verification failed | Verification now checks around exact click target and retries same intended option once. If this still happens, inspect latest `capture_000*_preprocessed.jpg` verification frame for highlight visibility and reduce glare/blur. |
+| Click lands on wrong option | Keep full exam window in frame, rerun calibration. Calibration-anchored labels now use Y-proximity matching to prevent mislabeling when a radio button is missed. Verify `answer_panel_detected_options.png` debug image for correct A..E mapping. Keep `LOCAL_AI_ASSIST_ENABLED=True`. |
+| Correct option clicked but system still says verification failed | Verification checks the exact click target and falls back to a panel-wide highlight scan. On failure it retries the same option once with fresh detection. If this persists, inspect the verification debug crop for highlight visibility and reduce glare/blur. |
+| NEXT click skips a question | NEXT verification uses multi-tier thresholds (q-panel diff + pHash + combined signals). Fixed in v1.4.0 — if it recurs, check logs for `NEXT verify` threshold values. |
 | Local AI responses are slow | Normal for first query (~5s). Subsequent queries are faster |
 | Cloud AI fails | Check API keys in `.env` for both Gemini and Grok. Controller now auto-falls back to alternate cloud provider once before alerting |
 

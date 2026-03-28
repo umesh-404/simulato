@@ -20,6 +20,7 @@ try:
     _HIDPI_AVAILABLE = True
 except ImportError:
     _HIDPI_AVAILABLE = False
+    LEFT = 1  # standard HID left-button bitmask for raw report fallback
 
 from raspberry_pi.device_config import HID_MOUSE_DEVICE
 

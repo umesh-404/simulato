@@ -580,11 +580,12 @@ class SystemController:
             return
 
         logger.info("Operator decision: %s", decision.value)
-        self._alert_mgr.resolve_alert(decision)
 
         if self._sm.state != SystemState.ERROR:
             logger.warning("Operator decision received but state is %s, not ERROR", self._sm.state.value)
             return
+
+        self._alert_mgr.resolve_alert(decision)
 
         self._sm.transition_to(SystemState.PAUSED, reason="error_resolved")
         self._sm.transition_to(SystemState.RUNNING, reason=f"operator_{decision.value}")

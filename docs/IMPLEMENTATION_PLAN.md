@@ -2,9 +2,9 @@
 
 ## AI‑Assisted Exam Simulation System
 
-Version: 1.2\
+Version: 1.3\
 Document Type: Implementation Plan\
-Status: Final (Updated 2026-03-26)
+Status: Final (Updated 2026-03-28)
 
 > **Note:** The phase descriptions (Sections 5–22) use the original design
 > naming conventions (e.g. `state_manager.py`, `alarm_system.py`). The

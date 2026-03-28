@@ -43,6 +43,11 @@ class DatabaseManager:
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA foreign_keys=ON")
 
+            if not _SCHEMA_PATH.exists():
+                raise FileNotFoundError(
+                    f"Database schema file not found: {_SCHEMA_PATH}. "
+                    "Ensure the config/ directory contains schema.sql."
+                )
             schema_sql = _SCHEMA_PATH.read_text(encoding="utf-8")
             self._conn.executescript(schema_sql)
             self._conn.commit()
@@ -337,7 +342,7 @@ class DatabaseManager:
         with self._lock:
             rows = self._conn.execute(
                 """
-                SELECT q.*, s.image_phash, s.created_at
+                SELECT q.*, s.image_phash, s.created_at AS snapshot_created_at
                 FROM questions q
                 JOIN question_snapshots s ON s.question_id = q.question_id
                 WHERE q.test_id = ? AND s.image_phash IS NOT NULL

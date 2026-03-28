@@ -2,7 +2,7 @@
 
 Use this checklist before every exam session to verify all components are ready.
 
-> Current checkmarks reflect latest validated project/session behavior as of 2026-03-26. Re-verify before each live exam.
+> Current checkmarks reflect latest validated project/session behavior as of 2026-03-28. Re-verify before each live exam.
 
 ---
 
@@ -91,9 +91,9 @@ curl http://localhost:8000/api/status
 - [x] Controller log shows: `Calibration successful: N positions mapped`
 - [x] `config/grid_map.json` saved and loaded
 - [x] Capture Phone shows "Calibration successful" toast
-- [ ] Test click on each visible option row verified (3-5 rows, virtual letters A..E)
-- [ ] NEXT button click verified
-- [ ] NEXT does not double-click after successful navigation (passive re-check confirms change before retry)
+- [x] Test click on each visible option row verified (3-5 rows, virtual letters A..E)
+- [x] NEXT button click verified
+- [x] NEXT does not double-click after successful navigation (passive re-check + combined-signal verification confirms change before retry)
 - [x] Scroll action verified (if applicable)
 
 Optional CV pipeline calibration (validates scroll/option detection across 30-image dataset):
@@ -120,7 +120,7 @@ python scripts/calibrate_scroll.py
 - [x] Send START command → state transitions to RUNNING
 - [x] First question captured and processed successfully
 - [x] Question number (`N / total`) appears in status/logs when visible in capture header
-- [ ] Send PAUSE command → state transitions to PAUSED
+- [x] Send PAUSE command → state transitions to PAUSED
 - [x] Send STOP command → state transitions to STOPPED
 
 ## 10. Logging

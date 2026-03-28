@@ -63,8 +63,10 @@ def check_ai_db_conflict(
     """
     from controller.utils.text_normalizer import normalize_for_matching
 
-    norm_ai = normalize_for_matching(ai_answer_content)
-    norm_db = normalize_for_matching(db_answer_content)
+    ai_str = ai_answer_content or ""
+    db_str = db_answer_content or ""
+    norm_ai = normalize_for_matching(ai_str)
+    norm_db = normalize_for_matching(db_str)
 
     if norm_ai == norm_db:
         logger.debug("AI/DB answers agree for question_id=%d", question_id)
@@ -72,14 +74,14 @@ def check_ai_db_conflict(
 
     logger.warning(
         "AI/DB CONFLICT for question_id=%d: ai='%s' vs db='%s'",
-        question_id, ai_answer_content[:60], db_answer_content[:60],
+        question_id, ai_str[:60], db_str[:60],
     )
     return Conflict(
         conflict_type=ConflictType.AI_DB_MISMATCH,
         message=(
             f"AI answer conflicts with database answer for question {question_id}. "
-            f"AI says: '{ai_answer_content[:80]}'. "
-            f"Database says: '{db_answer_content[:80]}'."
+            f"AI says: '{ai_str[:80]}'. "
+            f"Database says: '{db_str[:80]}'."
         ),
         ai_answer=ai_answer_content,
         db_answer=db_answer_content,

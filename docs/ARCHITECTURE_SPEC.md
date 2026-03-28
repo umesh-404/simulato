@@ -2,9 +2,9 @@
 
 ## Project: Simulato
 
-Version: 1.3.2\
+Version: 1.4.0\
 Status: Authoritative Architecture Specification\
-Last Updated: 2026-03-27
+Last Updated: 2026-03-28
 
 ------------------------------------------------------------------------
 
@@ -311,6 +311,30 @@ C = (15,12)
 D = (15,14)
 NEXT = (18,19)
 
+The grid map also stores **exact screen-space pixel coordinates**
+(`pixel_positions`) for all detected option and NEXT positions.
+These are preferred over grid-quantized positions for verification
+coordinate lookups, avoiding rounding drift.
+
+### 5.2 Option Detection (HoughCircles)
+
+Radio button detection uses adaptive multi-strip HoughCircles scanning
+across the answer panel:
+
+-   Search strips span the leftmost 16% of the panel width at 2%
+    increments (8 strips total), covering the actual radio-button column
+    reliably.
+-   A calibration-guided minimum Y filter rejects "Answer here" header
+    phantoms using the calibrated option-A position as a floor.
+-   Post-detection spacing outlier removal handles any remaining phantom
+    rows above or below real options.
+-   Labels are assigned via calibration-anchored Y-proximity matching
+    (works for 3–5 detected circles), ensuring correct A–E mapping even
+    when one or more circles are missed.
+-   A recovery pass (targeted narrow-band HoughCircles) is retained as a
+    last-resort fallback but rarely triggers with the corrected search
+    range.
+
 ------------------------------------------------------------------------
 
 # 6. QUESTION CAPTURE PIPELINE
@@ -462,11 +486,31 @@ action successful
 
 If highlight missing:
 
-retry same intended option once
+retry same intended option once (with fresh option detection on the latest frame)
 
 If retry fails:
 
 trigger alert pause execution await operator decision
+
+### 10.1 NEXT Click Verification
+
+NEXT click success is verified using a multi-tier signal approach
+comparing a pre-click reference frame against a post-click capture:
+
+1.  **Tier 1 — Strong single signal:** question-panel diff > 4.5, OR
+    full-frame diff > 5.5, OR pHash hamming distance ≥ 6.
+2.  **Tier 2 — Combined weak signals:** question-panel diff > 3.5 AND
+    pHash hamming ≥ 4 (catches borderline transitions missed by individual
+    thresholds).
+3.  If neither tier passes, a passive re-check is performed (1.5 s wait,
+    new capture, same comparison) before concluding the click missed.
+4.  Only after the re-check confirms no change does the system retry the
+    NEXT click once.
+
+These thresholds are calibrated to strongly avoid **false negatives**
+(which cause destructive NEXT retries that skip questions) while accepting
+the lower risk of false positives (which are caught by the pHash
+same-screen guard on the next processing cycle).
 
 ------------------------------------------------------------------------
 
@@ -477,6 +521,7 @@ System alerts occur when:
 -   AI answer conflicts with database
 -   input verification fails
 -   unexpected screen detected
+-   answer option cannot be matched to on-screen options (NO_OPTION_MATCH)
 
 Alert process:
 

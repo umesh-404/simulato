@@ -1,0 +1,12 @@
+{
+  "question_id": 28,
+  "canonical_text": "how many 4-digit even numbers can be formed with repetition from the digits 2345678||1372|5040|720|840",
+  "option_a": "840",
+  "option_b": "5040",
+  "option_c": "720",
+  "option_d": "1372",
+  "option_e": "",
+  "correct_answer": "1372",
+  "answer_letter": "D",
+  "version": 1
+}

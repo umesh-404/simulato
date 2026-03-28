@@ -33,6 +33,7 @@ class GridMap:
         self.capture_resolution: tuple[int, int] = (1920, 1080)
         self.grid_size: tuple[int, int] = (20, 20)
         self.positions: dict[str, tuple[int, int]] = {}
+        self.pixel_positions: dict[str, tuple[int, int]] = {}
         self.transform: dict[str, float] = {
             "scale_x": 1.0,
             "scale_y": 1.0,
@@ -42,11 +43,11 @@ class GridMap:
 
     @property
     def cell_width(self) -> float:
-        return self.resolution[0] / self.grid_size[0]
+        return self.resolution[0] / max(1, self.grid_size[0])
 
     @property
     def cell_height(self) -> float:
-        return self.resolution[1] / self.grid_size[1]
+        return self.resolution[1] / max(1, self.grid_size[1])
 
     def grid_to_pixel(self, grid_col: int, grid_row: int) -> tuple[int, int]:
         """Convert grid coordinates to pixel coordinates (center of cell)."""
@@ -55,7 +56,14 @@ class GridMap:
         return (px, py)
 
     def get_pixel_for(self, position_name: str) -> Optional[tuple[int, int]]:
-        """Get pixel coordinates for a named position (e.g. 'A', 'NEXT')."""
+        """Get pixel coordinates for a named position (e.g. 'A', 'NEXT').
+
+        Prefers exact pixel coordinates stored during calibration over
+        grid-quantized positions to avoid rounding drift.
+        """
+        exact = self.pixel_positions.get(position_name)
+        if exact is not None:
+            return exact
         grid_pos = self.positions.get(position_name)
         if grid_pos is None:
             return None
@@ -84,6 +92,7 @@ class GridMap:
             "capture_resolution": list(self.capture_resolution),
             "grid_size": list(self.grid_size),
             "positions": {k: list(v) for k, v in self.positions.items()},
+            "pixel_positions": {k: list(v) for k, v in self.pixel_positions.items()},
             "transform": self.transform,
         }
         path.write_text(json.dumps(data, indent=2), encoding="utf-8")
@@ -102,6 +111,7 @@ class GridMap:
         gm.capture_resolution = tuple(capture_resolution)
         gm.grid_size = tuple(data["grid_size"])
         gm.positions = {k: tuple(v) for k, v in data["positions"].items()}
+        gm.pixel_positions = {k: tuple(v) for k, v in data.get("pixel_positions", {}).items()}
         transform = data.get("transform", {})
         gm.transform = {
             "scale_x": float(transform.get("scale_x", 1.0)),

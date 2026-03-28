@@ -138,4 +138,6 @@ def query_grok(image_path: Path) -> GrokResponse:
             logger.info("Grok retry backoff: %.2fs", backoff)
             time.sleep(backoff)
 
-    raise last_error
+    if last_error is not None:
+        raise last_error
+    raise GrokAPIError("No API attempts made (MAX_RETRIES=0?)")

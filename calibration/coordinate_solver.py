@@ -198,6 +198,7 @@ def calibrate_from_screenshot(image_path: Path, resolution: tuple[int, int] = (1
                     screen_h=resolution[1],
                 )
                 gm.positions[opt.label] = (gc, gr)
+                gm.pixel_positions[opt.label] = (sx, sy)
                 logger.info("Detected %s: pixel=(%d,%d) → grid=(%d,%d)", opt.label, sx, sy, gc, gr)
 
             # Deterministically extrapolate missing rows (if any) so we avoid
@@ -208,11 +209,15 @@ def calibrate_from_screenshot(image_path: Path, resolution: tuple[int, int] = (1
             else:
                 step = 0
             if 20 <= step <= 600:
+                label_index = {"A": 0, "B": 1, "C": 2, "D": 3, "E": 4}
+                first_label = ordered[0].label
+                first_label_idx = label_index.get(first_label, 0)
                 base_y = ys[0]
                 for idx, letter in enumerate(("A", "B", "C", "D", "E")):
                     if letter in gm.positions:
                         continue
-                    est_y = int(base_y + idx * step)
+                    offset = idx - first_label_idx
+                    est_y = int(base_y + offset * step)
                     est_y = max(0, min(h - 1, est_y))
                     _sx, _sy, egc, egr = _pixel_to_grid(
                         gm,
@@ -224,6 +229,7 @@ def calibrate_from_screenshot(image_path: Path, resolution: tuple[int, int] = (1
                         screen_h=resolution[1],
                     )
                     gm.positions[letter] = (egc, egr)
+                    gm.pixel_positions[letter] = (_sx, _sy)
                     logger.info("Estimated %s: pixel=(%d,%d) → grid=(%d,%d)", letter, _sx, _sy, egc, egr)
 
             if layout.next_button is not None:
@@ -245,6 +251,7 @@ def calibrate_from_screenshot(image_path: Path, resolution: tuple[int, int] = (1
                 screen_h=resolution[1],
             )
             gm.positions["NEXT"] = (gc, gr)
+            gm.pixel_positions["NEXT"] = (sx, sy)
             logger.info("Detected NEXT: pixel=(%d,%d) → grid=(%d,%d)", sx, sy, gc, gr)
 
             gm.positions.setdefault("SCROLL_LEFT", (0, 10))
@@ -277,6 +284,7 @@ def calibrate_from_screenshot(image_path: Path, resolution: tuple[int, int] = (1
         grid_row = int(scaled_y / (resolution[1] / gm.grid_size[1]))
 
         gm.positions[letter] = (grid_col, grid_row)
+        gm.pixel_positions[letter] = (scaled_x, scaled_y)
         logger.info("Detected %s: pixel=(%d,%d) → grid=(%d,%d)", letter, scaled_x, scaled_y, grid_col, grid_row)
 
     button_candidates = []
@@ -304,6 +312,7 @@ def calibrate_from_screenshot(image_path: Path, resolution: tuple[int, int] = (1
     grid_col = int(scaled_x / (resolution[0] / gm.grid_size[0]))
     grid_row = int(scaled_y / (resolution[1] / gm.grid_size[1]))
     gm.positions["NEXT"] = (grid_col, grid_row)
+    gm.pixel_positions["NEXT"] = (scaled_x, scaled_y)
     logger.info("Detected NEXT: pixel=(%d,%d) → grid=(%d,%d)", scaled_x, scaled_y, grid_col, grid_row)
 
     gm.positions.setdefault("SCROLL_LEFT", (0, 10))

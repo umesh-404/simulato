@@ -137,4 +137,6 @@ def query_gemini(image_path: Path) -> GrokResponse:
             logger.info("Gemini retry backoff: %.2fs", backoff)
             time.sleep(backoff)
 
-    raise last_error
+    if last_error is not None:
+        raise last_error
+    raise GeminiAPIError("No API attempts made (MAX_RETRIES=0?)")

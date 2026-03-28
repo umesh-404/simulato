@@ -1,0 +1,12 @@
+{
+  "question_id": 32,
+  "canonical_text": "2 trainers are chosen at random to form a committee. these 2 persons were selected from a group of 5 male trainers and 2 female trainers. find the probability that at least one female trainer is selected.||1/21|1/22|11/21|21/11",
+  "option_a": "11/21",
+  "option_b": "1/21",
+  "option_c": "21/11",
+  "option_d": "1/22",
+  "option_e": "",
+  "correct_answer": "11/21",
+  "answer_letter": "A",
+  "version": 1
+}

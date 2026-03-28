@@ -141,6 +141,9 @@ class ReplayEngine:
 
         for event in decision_events:
             qnum = event.get("question_number")
+            if qnum is None:
+                logger.warning("Skipping replay event with missing question_number: %s", event)
+                continue
             original_letter = event.get("click_letter")
             original_source = event.get("source")
             test_name = event.get("test_name")

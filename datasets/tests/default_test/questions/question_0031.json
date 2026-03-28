@@ -1,0 +1,12 @@
+{
+  "question_id": 31,
+  "canonical_text": "find the chance of drawing 2 blue balls in succession from a bag containing 5 red and 7 blue balls if the balls are not being replaced.||21/61|21/64|3/13|7/22",
+  "option_a": "3/13",
+  "option_b": "21/61",
+  "option_c": "21/64",
+  "option_d": "7/22",
+  "option_e": "",
+  "correct_answer": "7/22",
+  "answer_letter": "D",
+  "version": 1
+}

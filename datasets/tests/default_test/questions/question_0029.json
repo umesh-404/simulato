@@ -1,0 +1,12 @@
+{
+  "question_id": 29,
+  "canonical_text": "in how many ways 4 boys and 3 girls be seated in a row so that they are alternate||12|144|256|288",
+  "option_a": "12",
+  "option_b": "288",
+  "option_c": "256",
+  "option_d": "144",
+  "option_e": "",
+  "correct_answer": "144",
+  "answer_letter": "D",
+  "version": 1
+}

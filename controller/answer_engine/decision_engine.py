@@ -125,7 +125,7 @@ def decide_answer(
                 outcome=DecisionOutcome.CONFLICT,
                 conflict=Conflict(
                     conflict_type=ConflictType.NO_OPTION_MATCH,
-                    message=f"Stored answer '{db_answer[:60]}' doesn't match any current option",
+                    message=f"Stored answer '{(db_answer or '')[:60]}' doesn't match any current option",
                     db_answer=db_answer,
                     question_id=match.question_record["question_id"],
                 ),

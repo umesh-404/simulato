@@ -691,11 +691,7 @@ class WorkflowEngine:
             self._no_change_after_next_count = 0
             return
 
-        # Passive re-check only (NO retry click).
-        # A second NEXT click is far more dangerous (skips a question)
-        # than a false "didn't navigate" verdict. If the first click
-        # actually worked but verification was noisy, the next cycle's
-        # pHash same-screen guard (L289-310) will catch the true state.
+        # Passive re-check: wait a bit and compare again.
         logger.warning("NEXT click verification borderline — passive re-check")
         time.sleep(1.5)
         recheck = self._verify_next_click_by_change(pre_next_path)
@@ -705,16 +701,28 @@ class WorkflowEngine:
             self._no_change_after_next_count = 0
             return
 
-        # Optimistic pass: assume NEXT worked.
-        # The next process_question() call will compare pHash of the
-        # incoming frame against _last_raw_phash. If the screen truly
-        # didn't change, _no_change_after_next_count increments and
-        # triggers the end-of-test/stuck alert after 2 consecutive hits.
+        # Re-check confirmed the screen did NOT change — the click missed.
+        # Retry the NEXT click once. This is safe because we've verified
+        # that we're still on the same screen (the option is still selected).
+        logger.warning("NEXT click missed (re-check confirmed no change) — retrying NEXT click")
+        self._click_next_best_target()
+        time.sleep(2.5)
+        retry_result = self._verify_next_click_by_change(pre_next_path)
+        if retry_result.verified:
+            logger.info("NEXT retry click verified (screen changed)")
+            self._expecting_next_change = True
+            self._no_change_after_next_count = 0
+            return
+
+        # Even the retry failed. Let the pHash guard handle it on the
+        # next cycle — but reset the counter so the first observation
+        # of same-screen doesn't immediately trigger TEST_COMPLETE.
         logger.warning(
-            "NEXT verification inconclusive after re-check — proceeding "
-            "optimistically. Next cycle pHash guard will catch true failures."
+            "NEXT retry also inconclusive — proceeding. "
+            "Next cycle pHash guard will catch true failures."
         )
         self._expecting_next_change = True
+        self._no_change_after_next_count = 0
 
     def _capture_single_frame_for_ref(self) -> Optional[Path]:
         """Capture a single frame for before/after comparison. Returns path or None."""
@@ -774,52 +782,71 @@ class WorkflowEngine:
             full_diff = cv2.absdiff(pre_img, post_img)
             full_mean = float(full_diff.mean())
 
+            pre_hash = self._compute_image_phash(pre_next_path)
+            post_hash = self._compute_image_phash(post_path)
+            hamming = 0
+            if pre_hash and post_hash:
+                hamming = sum(a != b for a, b in zip(pre_hash, post_hash))
+
             if q_diff is not None:
                 logger.info(
                     "NEXT verify: question_panel_diff=%.1f, full_diff=%.1f",
                     q_diff, full_mean,
                 )
-                # Question panel changes dramatically on navigation.
-                # Camera noise on the same screen produces q_panel diffs
-                # of 2-4; real page changes produce 5.5+.
-                if q_diff > 5.0:
-                    return VerificationResult(
-                        verified=True,
-                        details="question_panel_changed",
-                        confidence=min(q_diff / 20.0, 1.0),
-                    )
             else:
                 logger.info("NEXT verify: full_diff=%.1f (no q-panel region)", full_mean)
+            logger.info("NEXT verify: pHash hamming distance=%d", hamming)
 
-            # Fallback to full-image diff with a higher threshold to
-            # avoid false positives from camera noise (2-4 is normal noise).
-            if full_mean > 6.0:
+            # --- Tier 1: strong single-signal evidence ---
+            # Camera noise between captures of the *same* screen: q_panel 2-3,
+            # full 2-4, pHash 0-3.  Real navigation: q_panel 5+, full 5+,
+            # pHash 6+.  The borderline zone (q_panel 3.5-5, pHash 4-7) is
+            # where false negatives cause destructive NEXT retries that skip
+            # questions — a far worse outcome than a false positive (which is
+            # caught by the pHash same-screen guard on the next cycle).
+            if q_diff is not None and q_diff > 4.5:
+                return VerificationResult(
+                    verified=True,
+                    details="question_panel_changed",
+                    confidence=min(q_diff / 20.0, 1.0),
+                )
+            if full_mean > 5.5:
                 logger.info("NEXT verified: full mean pixel diff = %.1f", full_mean)
                 return VerificationResult(
                     verified=True,
                     details="screen_changed",
                     confidence=min(full_mean / 15.0, 1.0),
                 )
+            if hamming >= 6:
+                return VerificationResult(
+                    verified=True,
+                    details="phash_changed",
+                    confidence=min(hamming / 32.0, 1.0),
+                )
 
-            # Additional fallback: perceptual hash distance.
-            # This helps when global brightness shifts keep mean diff low,
-            # but the page content has actually changed.
-            pre_hash = self._compute_image_phash(pre_next_path)
-            post_hash = self._compute_image_phash(post_path)
-            if pre_hash and post_hash:
-                hamming = sum(a != b for a, b in zip(pre_hash, post_hash))
-                logger.info("NEXT verify: pHash hamming distance=%d", hamming)
-                if hamming >= 8:
-                    return VerificationResult(
-                        verified=True,
-                        details="phash_changed",
-                        confidence=min(hamming / 32.0, 1.0),
-                    )
+            # --- Tier 2: combined weak signals ---
+            # When no single metric crosses its threshold, a combination of
+            # moderate signals still indicates a real change.
+            combined = (
+                (q_diff is not None and q_diff > 3.5)
+                and (hamming >= 4)
+            )
+            if combined:
+                logger.info(
+                    "NEXT verified via combined signals (q_panel=%.1f + hamming=%d)",
+                    q_diff, hamming,
+                )
+                return VerificationResult(
+                    verified=True,
+                    details="combined_signal_changed",
+                    confidence=min((q_diff or 0) / 20.0 + hamming / 32.0, 1.0),
+                )
 
             logger.warning(
-                "NEXT verification: screen did NOT change (full=%.1f, q_panel=%s)",
+                "NEXT verification: screen did NOT change (full=%.1f, q_panel=%s, hamming=%d)",
                 full_mean,
                 f"{q_diff:.1f}" if q_diff is not None else "N/A",
+                hamming,
             )
             return VerificationResult(verified=False, details="no_screen_change", confidence=0.0)
         except Exception as e:
@@ -944,6 +971,20 @@ class WorkflowEngine:
             return
 
         logger.info("Pre-retry check: option %s NOT yet selected — proceeding with retry click", letter)
+
+        # Force fresh option detection on the latest frame before retrying.
+        # The first click may have used stale/wrong coordinates from a cached
+        # detection; re-detecting gives us a chance to correct them.
+        try:
+            latest_img = self._latest_preprocessed_image_path
+            if latest_img is not None:
+                fresh_ocr = OCRLayoutAnalyzer().analyze(latest_img)
+                if fresh_ocr is not None:
+                    self._latest_interaction_ocr_layout = fresh_ocr
+                    logger.info("Refreshed option detection on latest frame before retry")
+        except Exception as e:
+            logger.warning("Failed to refresh option detection before retry: %s", e)
+
         dispatched_letter = self._click_option_best_target(letter)
         self._last_dispatched_click_letter = dispatched_letter
         time.sleep(1.0)

@@ -2,9 +2,9 @@
 
 ## Project: Simulato
 
-Version: 1.3.2
+Version: 1.4.0
 Status: Full Implementation Complete
-Last Updated: 2026-03-27
+Last Updated: 2026-03-28
 
 ---
 
@@ -82,6 +82,8 @@ All implementation follows:
 - [x] `database/schema.sql` — tests, questions, question_snapshots tables
 - [x] `database/db_manager.py` — DatabaseManager class
 - [x] SQLite with WAL journal mode and foreign keys enabled
+- [x] Schema file existence guard with clear error message on missing `schema.sql`
+- [x] Near-hash query uses `snapshot_created_at` alias to avoid ambiguous column name from JOIN
 - [x] `create_test()`, `get_test_by_name()`, `get_or_create_test()`
 - [x] `store_question()` with immutable versioning (Canonical Law 7)
 - [x] `answer_letter` column for storing the letter (A/B/C/D/E) alongside answer text
@@ -126,6 +128,7 @@ All implementation follows:
 - [x] **Structured Outputs (`response_format`)** with strict JSON Schema (Zero-parse-failure design)
 - [x] **Primary Solver Role:** Exclusively responsible for question OCR and reasoning
 - [x] Retry with exponential backoff (`AI_API_BACKOFF_BASE_SECONDS` * 2^attempt)
+- [x] Safe error raise when `MAX_RETRIES=0` (no `raise None` crash)
 - [x] API key from environment variable
 
 ### 3.6b Cloud AI Integration — Gemini Vision
@@ -136,6 +139,7 @@ All implementation follows:
 - [x] Shares prompt builder and response parser with Grok client
 - [x] **Default Primary Solver:** Selectable at runtime via `SET_AI_PROVIDER` command
 - [x] Retry with exponential backoff (matches Grok retries)
+- [x] Safe error raise when `MAX_RETRIES=0` (no `raise None` crash)
 - [x] API key from environment variable
 
 ### 3.6c Local AI Integration — Ollama/Qwen (Auxiliary)
@@ -167,8 +171,10 @@ All implementation follows:
 - [x] Matches by text content, never by letter position (Canonical Law 8)
 - [x] `controller/answer_engine/conflict_handler.py`
 - [x] AI vs DB conflict detection via normalized comparison (Canonical Law 9)
+- [x] None-safe input handling for AI/DB answer strings
 - [x] Conflict payload with both answers and question ID
 - [x] `controller/answer_engine/decision_engine.py`
+- [x] None-safe `db_answer` slicing in conflict messages
 - [x] **DB-first path:** DB answer → conflict check → option match → click (no Grok/Gemini call when a DB match exists)
 - [x] **Image-hash fast path:** pHash match → use cached answer letter directly (no AI call at all)
 - [x] New question path: AI answer → store question → click
@@ -198,6 +204,8 @@ All implementation follows:
 - [x] Post-click screenshot capture via callback
 - [x] HSV color space highlight detection with grid-based region cropping
 - [x] Before/after screenshot comparison for highlight change detection
+- [x] Panel-scan fallback (`_scan_panel_for_highlight`): scans a broad vertical strip of the answer panel for any saturated highlight band when the targeted crop misses (e.g., synthesized coordinates)
+- [x] Tightened HSV thresholds to distinguish real green/blue highlights from light-blue exam background
 - [x] Fallback full-image blue-ratio analysis
 - [x] Exact-target verification path for normalized click coordinates (`verify_click_at_normalized_on_image`)
 
@@ -246,6 +254,7 @@ All implementation follows:
 - [x] `OCRLayoutResult.detect_question_number()` — extracts `N / M` from top header OCR for status/logging
 - [x] Removed dependency on visible OCR option letters (exam UI may not show A/B/C/D/E labels)
 - [x] Option targeting now relies on deterministic radio-row mapping from `OptionDetector`
+- [x] Label-aware geometric extrapolation for missing options (uses actual labels of detected options, not assumed A-first)
 - [x] Primary click-targeting method used before falling back to Local AI or calibrated grid
 
 ### 3.10c Exam Layout Detector (NEW)
@@ -262,9 +271,15 @@ All implementation follows:
 
 - [x] `controller/capture_pipeline/option_detector.py`
 - [x] Y-clustering approach for radio button detection
-- [x] Adaptive strip search across answer panel (deterministic multi-strip scan)
+- [x] Adaptive strip search across answer panel (deterministic multi-strip scan, 8 strips at 0–14% of panel width)
+- [x] Search strips cover up to 16% of panel width (`SEARCH_MAX_RIGHT_FRAC=0.16`), ensuring the actual radio-button column is reached
+- [x] Calibration-guided minimum Y filter (`_calibrated_min_row_y`) replaces fixed 25% top cut — uses calibrated option-A position to reject "Answer here" header phantoms without killing real options
 - [x] Y-coordinate clustering + coherent row-sequence scoring to reject noise/watermark circles
+- [x] Spacing outlier filter removes phantom header/trailing rows with abnormal inter-row gaps
 - [x] Supports 3–5 options (A through E)
+- [x] Calibration-anchored label assignment via Y-proximity matching for any cluster count ≥3 (not just 5)
+- [x] Upward bias correction (`CLICK_Y_UPWARD_BIAS_PX=8`) compensates for camera perspective on detected circle centers
+- [x] Recovery pass (narrow-band HoughCircles) retained as last-resort fallback, rarely triggers with corrected search range
 - [x] Per-option OCR text extraction with upscaling for small regions
 - [x] `DetectedOption` dataclass with label, text, circle coordinates, click coordinates, bounds, confidence
 - [x] `OptionMap` with `get(label)`, normalized coordinate conversion, and debug metadata for chosen strip/score
@@ -272,7 +287,7 @@ All implementation follows:
 ## 3.11 Alert System (Phase 11)
 
 - [x] `controller/alerts/alert_manager.py`
-- [x] AlertType enum: AI_CONFLICT, INPUT_FAILURE, UNEXPECTED_SCREEN, DEVICE_DISCONNECTED, AI_PARSE_FAILURE, VERIFICATION_FAILURE, CALIBRATION_REQUIRED, CALIBRATION_FAILED, CALIBRATION_COMPLETE, TEST_COMPLETE
+- [x] AlertType enum: AI_CONFLICT, INPUT_FAILURE, UNEXPECTED_SCREEN, DEVICE_DISCONNECTED, AI_PARSE_FAILURE, VERIFICATION_FAILURE, CALIBRATION_REQUIRED, CALIBRATION_FAILED, CALIBRATION_COMPLETE, TEST_COMPLETE, NO_OPTION_MATCH
 - [x] OperatorDecision enum: REQUERY_AI, SKIP_QUESTION, USE_DATABASE_ANSWER, USE_AI_ANSWER
 - [x] Sound callback wired to `play_alarm()`
 - [x] Notify callback wired to `queue_alert_for_broadcast()` (WebSocket relay)
@@ -307,6 +322,7 @@ All implementation follows:
 - [x] `ReplayEngine.replay_run()` loads events, replays each answer_decision
 - [x] Per-question re-execution: loads stored AI JSON → re-runs decide_answer() → compares
 - [x] `ReplayReport` with match/mismatch/error tracking and summary generation
+- [x] Graceful skip for events with missing `question_number` (prevents `TypeError` crash on corrupted logs)
 - [x] `run_loader.py` — `list_runs()`, `load_run()`, `RunMetadata` with completeness check
 
 ## 3.14 Orchestrator — System Controller & Workflow (Phase 1 continued)
@@ -317,6 +333,8 @@ All implementation follows:
 - [x] Image routing to workflow engine
 - [x] Operator decision handling with conflict resolution
 - [x] USE_DATABASE_ANSWER / USE_AI_ANSWER execute the actual click
+- [x] NO_OPTION_MATCH alert raised when post-conflict resolution cannot map answer to clickable option
+- [x] Alert resolution gated behind ERROR state check (prevents clearing alerts from non-ERROR states)
 - [x] SKIP_QUESTION advances to next
 - [x] REQUERY_AI logs intent (awaits next capture)
 - [x] Device disconnection handler triggers ERROR + alert
@@ -343,9 +361,11 @@ All implementation follows:
 - [x] Retry policy tightened to retry the same intended option once (no cross-option fallback chain)
 - [x] Strict local-AI verification enforces selected option letter must match the clicked letter (not just "any option selected")
 - [x] NEXT click with verification + retry + alert (Canonical Law 5)
-- [x] NEXT verification hardened:
-      - question-panel diff + full-frame diff + pHash fallback
-      - passive re-check before issuing second NEXT click (prevents duplicate NEXT when first click already worked)
+- [x] NEXT verification hardened with multi-tier thresholds:
+      - Tier 1: q-panel diff > 4.5, OR full diff > 5.5, OR pHash hamming ≥ 6
+      - Tier 2: combined weak signals (q-panel > 3.5 AND hamming ≥ 4)
+      - Passive re-check before issuing second NEXT click (prevents duplicate NEXT when first click already worked)
+      - Thresholds calibrated to avoid false-negative retries that skip questions
 - [x] End-of-test detection (`TEST_COMPLETE`) when screen does not change after NEXT
 - [x] **Autonomous capture loop** — automatically trigger next capture after NEXT click
 - [x] Full snapshot storage per question with image_phash (Canonical Law 10)
@@ -354,19 +374,21 @@ All implementation follows:
 ## 3.15 Raspberry Pi Side
 
 - [x] `raspberry_pi/device_config.py` — `hidg0`=keyboard, `hidg1`=mouse (matches HIDPi)
-- [x] `raspberry_pi/hid_controller.py` — HIDPi library import + 6-byte absolute mouse fallback
+- [x] `raspberry_pi/hid_controller.py` — HIDPi library import + 6-byte absolute mouse fallback; `LEFT` button constant defined as fallback when HIDPi is not installed
 - [x] `raspberry_pi/command_listener.py` — TCP server, JSON protocol, command → HID execution
 
 ## 3.16 Calibration
 
 - [x] `calibration/grid_mapper.py` — GridMap class with resolution, grid size, positions
-- [x] Grid-to-pixel coordinate conversion
-- [x] JSON save/load for `grid_map.json`
+- [x] Grid-to-pixel coordinate conversion (with zero-guard on `grid_size` to prevent division by zero)
+- [x] JSON save/load for `grid_map.json` (includes `pixel_positions` for exact screen-space coordinates)
+- [x] `get_pixel_for()` prefers exact `pixel_positions` over grid-quantized positions to avoid rounding drift
 - [x] Default positions template (A, B, C, D, E, NEXT, SCROLL_LEFT, SCROLL_RIGHT)
 - [x] `calibration/coordinate_solver.py` — automated calibration from screenshot
 - [x] Contour-based option region detection with aspect ratio filtering
 - [x] Bottom-right NEXT button detection
 - [x] Pixel-to-grid coordinate mapping with resolution scaling
+- [x] Extrapolation uses label-relative offset (correctly handles cases where the first detected option is not A)
 - [x] **End-to-end calibration workflow** — Capture Phone button → PC command routing → CAPTURE_IMAGE WS command → image upload → OpenCV detection → `grid_map.json` save → `CALIBRATION_RESULT` broadcast to phone
 
 ## 3.17 Entry Point
@@ -444,6 +466,23 @@ All implementation follows:
 - [x] Added 7 calibration/debug scripts to `scripts/`
 - [x] Added 30-image calibration reference dataset in `datasets/calibration/`
 - [x] Added `install-and-run.bat` and `simulato.keystore` to mobile app
+
+## 6.1 Bug Fixes Applied (v1.4.0)
+
+- [x] **Critical:** Added `AlertType.NO_OPTION_MATCH` to enum (was crashing `system_controller` on conflict resolution failure)
+- [x] **Critical:** Added `LEFT=1` fallback constant in `hid_controller.py` when HIDPi import fails (was `NameError` on any click)
+- [x] **Critical:** Fixed `coordinate_solver.py` extrapolation to use label-relative offset instead of absolute index (was placing A on same Y as B when first detected option was not A)
+- [x] **Critical:** Fixed `option_detector.py` search strip range (`SEARCH_MAX_RIGHT_FRAC` 0.12→0.16) — radio buttons at 13.4% of panel width were outside the old 12% limit
+- [x] **Critical:** Replaced hardcoded 25% `min_row_y` filter with calibration-guided filter — old filter was killing option A which sits at 22% of panel height
+- [x] **Medium:** Fixed alert resolution ordering in `system_controller.py` — alert is now resolved only after confirming ERROR state
+- [x] **Medium:** Added None-safety guards in `decision_engine.py` and `conflict_handler.py` for missing DB/AI answer strings
+- [x] **Medium:** Fixed `raise None` crash in `grok_client.py` and `gemini_client.py` when `MAX_RETRIES=0`
+- [x] **Medium:** Fixed replay engine crash on events with missing `question_number`
+- [x] **Medium:** Added `schema.sql` existence guard in `db_manager.py`
+- [x] **Medium:** Fixed ambiguous `created_at` column in near-hash JOIN query in `db_manager.py`
+- [x] **Medium:** Lowered NEXT verification thresholds (q_panel 5.0→4.5, full 6.0→5.5, pHash 8→6) and added combined-signal tier to prevent false-negative retries that skip questions
+- [x] **Low:** Added zero-guard on `grid_size` division in `grid_mapper.py`
+- [x] **Low:** Fixed `clean_imports.py` and `restore_imports.py` to skip missing files and guard against duplicate inserts
 
 ---
 
@@ -526,7 +565,7 @@ All implementation follows:
 - [x] `scripts/measure_radio.py` — radio button measurement tool
 - [x] `scripts/measure_scroll.py` — scroll bar measurement tool
 - [x] `scripts/pipeline_diagnosis.py` — comprehensive CV pipeline diagnostic (runs layout + option + scroll detection against calibration dataset, generates annotated debug images and JSON report)
-- [x] `clean_imports.py` / `restore_imports.py` — import path management utilities
+- [x] `clean_imports.py` / `restore_imports.py` — import path management utilities (with file-existence guards and duplicate-insert protection)
 
 ## 7.6 Remaining (Hardware-Dependent)
 
