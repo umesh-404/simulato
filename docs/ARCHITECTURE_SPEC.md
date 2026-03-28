@@ -316,6 +316,18 @@ The grid map also stores **exact screen-space pixel coordinates**
 These are preferred over grid-quantized positions for verification
 coordinate lookups, avoiding rounding drift.
 
+**Capture → exam-screen transform (runtime clicks):** `grid_map.json`
+includes `capture_resolution` and a linear `transform` object
+(`scale_x`, `scale_y`, `offset_x`, `offset_y`). The controller
+converts normalized capture coordinates to capture pixels, then applies
+`capture_to_screen_pixel()` before HID mapping. A naive scale of
+`screen_resolution / capture_resolution` assumes an undistorted,
+front-on view; angled phone photography introduces perspective error
+that manifests as consistent vertical (or horizontal) targeting drift.
+Non-zero offsets and/or adjusted scales correct this; re-calibration
+reuses a non-naive transform already on disk when present so operators
+do not lose a verified mapping.
+
 ### 5.2 Option Detection (HoughCircles)
 
 Radio button detection uses adaptive multi-strip HoughCircles scanning

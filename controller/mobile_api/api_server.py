@@ -440,6 +440,10 @@ async def websocket_endpoint(websocket: WebSocket, device_id: str):
 
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected: %s", device_id)
+    except OSError as e:
+        # WinError 121 (semaphore timeout) is common on Windows when the
+        # connection idles.  Treat it as a normal disconnection.
+        logger.info("WebSocket OS-level disconnect for %s: %s", device_id, e)
     except Exception as e:
         logger.error("WebSocket error for %s: %s", device_id, e)
     finally:

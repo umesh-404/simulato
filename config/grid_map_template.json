@@ -1,5 +1,6 @@
 {
   "resolution": [1920, 1080],
+  "capture_resolution": [1920, 1080],
   "grid_size": [20, 20],
   "positions": {
     "A": [15, 8],
@@ -10,5 +11,12 @@
     "NEXT": [18, 19],
     "SCROLL_LEFT": [0, 10],
     "SCROLL_RIGHT": [19, 10]
+  },
+  "pixel_positions": {},
+  "transform": {
+    "scale_x": 1.0,
+    "scale_y": 1.0,
+    "offset_x": 0.0,
+    "offset_y": 0.0
   }
 }

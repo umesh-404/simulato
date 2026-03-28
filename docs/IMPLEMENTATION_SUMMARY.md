@@ -2,7 +2,7 @@
 
 ## Project: Simulato
 
-Version: 1.4.0
+Version: 1.4.1
 Status: Full Implementation Complete
 Last Updated: 2026-03-28
 
@@ -354,7 +354,7 @@ All implementation follows:
 - [x] **Cloud-provider failover:** if the selected primary provider fails (transport/parse), workflow retries once with the alternate provider before raising AI_PARSE_FAILURE
 - [x] **Runtime AI Provider Switching:** `SET_AI_PROVIDER` command from Remote Control phone dropdown
 - [x] **Local AI Task Suite:** Scroll verification (initial + each scroll frame), answer state checking using dedicated verification captures, NEXT button localization, screen classification (QUESTION/LOGIN/ERROR/OTHER) with timeout+cooldown safeguards
-- [x] **Click targeting hierarchy:** OCR (primary) → Local Qwen (secondary) → calibrated grid (fallback)
+- [x] **Click targeting hierarchy:** OCR layout (primary) → Local Qwen assist (secondary); **no** silent fallback to static calibrated pixels for options — if both fail, error + operator alert (`_click_option_best_target`)
 - [x] Dedicated post-AI mapping recapture before click dispatch to refresh live option/NEXT targets
 - [x] Answer decision engine integration
 - [x] Click execution with `_verify_option_click()` (Local AI or CV) + retry + alert (Law 5)
@@ -380,6 +380,7 @@ All implementation follows:
 ## 3.16 Calibration
 
 - [x] `calibration/grid_mapper.py` — GridMap class with resolution, grid size, positions
+- [x] **`capture_resolution` + `transform`** — `capture_to_screen_pixel()` maps capture-image pixels to exam-screen pixels via `screen = capture * scale + offset` (defaults: naive linear scale, zero offsets)
 - [x] Grid-to-pixel coordinate conversion (with zero-guard on `grid_size` to prevent division by zero)
 - [x] JSON save/load for `grid_map.json` (includes `pixel_positions` for exact screen-space coordinates)
 - [x] `get_pixel_for()` prefers exact `pixel_positions` over grid-quantized positions to avoid rounding drift
@@ -389,6 +390,7 @@ All implementation follows:
 - [x] Bottom-right NEXT button detection
 - [x] Pixel-to-grid coordinate mapping with resolution scaling
 - [x] Extrapolation uses label-relative offset (correctly handles cases where the first detected option is not A)
+- [x] **Transform reuse on re-calibration** — `_try_reuse_transform_from_disk()` preserves non-naive `transform` values (non-zero offsets or scale drift from `resolution/capture_resolution`) so perspective corrections survive repeated calibration runs
 - [x] **End-to-end calibration workflow** — Capture Phone button → PC command routing → CAPTURE_IMAGE WS command → image upload → OpenCV detection → `grid_map.json` save → `CALIBRATION_RESULT` broadcast to phone
 
 ## 3.17 Entry Point
@@ -466,6 +468,7 @@ All implementation follows:
 - [x] Added 7 calibration/debug scripts to `scripts/`
 - [x] Added 30-image calibration reference dataset in `datasets/calibration/`
 - [x] Added `install-and-run.bat` and `simulato.keystore` to mobile app
+- [x] **v1.4.1:** Documented `grid_map.json` capture→screen `transform`, calibration reuse, and troubleshooting — `README.md`, `docs/SETUP_GUIDE.md`, `docs/ARCHITECTURE_SPEC.md` (§5), `docs/DEPLOYMENT_CHECKLIST.md`, `docs/REPOSITORY_STRUCTURE.md`; expanded `config/grid_map_template.json` with `transform` / `capture_resolution` fields
 
 ## 6.1 Bug Fixes Applied (v1.4.0)
 
@@ -483,6 +486,12 @@ All implementation follows:
 - [x] **Medium:** Lowered NEXT verification thresholds (q_panel 5.0→4.5, full 6.0→5.5, pHash 8→6) and added combined-signal tier to prevent false-negative retries that skip questions
 - [x] **Low:** Added zero-guard on `grid_size` division in `grid_mapper.py`
 - [x] **Low:** Fixed `clean_imports.py` and `restore_imports.py` to skip missing files and guard against duplicate inserts
+
+## 6.2 Updates (v1.4.1) — capture-to-screen mapping
+
+- [x] **Critical:** Documented and shipped **perspective-aware `transform`** in `config/grid_map.json` — naive `scale_y = screen_h / capture_h` with zero offset caused systematic vertical mis-clicks (e.g. one option row low) when the capture phone views the laptop at an angle; `click_at_normalized` now benefits from tuned `scale_y` / `offset_y` (and matching `scale_x` where needed).
+- [x] **Medium:** `coordinate_solver.calibrate_from_screenshot` — replaced broad `except Exception` around transform reuse with `_try_reuse_transform_from_disk()`; reuse triggers on non-zero offsets **or** material scale drift from naive ratios (preserves scale-only corrections).
+- [x] **Low:** `workflow_engine._click_option_best_target` docstring aligned with behavior (no static calibration fallback for options).
 
 ---
 

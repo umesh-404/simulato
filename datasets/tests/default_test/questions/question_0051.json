@@ -1,0 +1,12 @@
+{
+  "question_id": 51,
+  "canonical_text": "the simplified form of (x^(7/2) / x^(5/2)) . y / y^(3/2) is||x|x/y|xy|y",
+  "option_a": "xy",
+  "option_b": "y",
+  "option_c": "x/y",
+  "option_d": "x",
+  "option_e": "",
+  "correct_answer": "x/y",
+  "answer_letter": "C",
+  "version": 1
+}

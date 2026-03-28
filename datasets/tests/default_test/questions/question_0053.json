@@ -1,0 +1,12 @@
+{
+  "question_id": 53,
+  "canonical_text": "multi choice type question if log 7  a then log (1/70)||(1+a)|-(1+a)|1/(10a)|a/10",
+  "option_a": "(1+a)⁻¹",
+  "option_b": "-(1+a)",
+  "option_c": "a/10",
+  "option_d": "1/(10a)",
+  "option_e": "",
+  "correct_answer": "-(1+a)",
+  "answer_letter": "B",
+  "version": 1
+}

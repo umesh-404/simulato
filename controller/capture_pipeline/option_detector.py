@@ -1,22 +1,18 @@
 """
-Option detector for exam answer panel (v2 — Y-clustering approach).
+Option detector for exam answer panel (v3 — crop-first approach).
 
 Given the answer panel sub-image (right pane of the exam screen),
 detects individual answer options by:
 
-    1. Extracting a narrow vertical strip on the left edge of the
-       answer panel where radio buttons live.
-    2. Running HoughCircles on that strip → many noisy candidates.
-    3. Clustering the candidates by Y-coordinate → each cluster = one
-       radio button row.
-    4. Picking the median X within each cluster = best circle center.
-    5. Sorting clusters top-to-bottom → assigning A, B, C, D, E.
+    1. Cropping the answer panel from the full image.
+    2. Removing the fixed "Answer here" header zone geometrically.
+    3. Running HoughCircles on a left-edge strip of the options zone.
+    4. Clustering circle candidates by Y → one cluster per radio row.
+    5. Sorting top-to-bottom → assigning A, B, C, D, E.
     6. OCR on the text region to the right of each radio button.
 
-This approach is robust to watermark circles, noise, and variable
-circle sizes because it leverages the fact that radio buttons are
-the only circles that appear at regular vertical intervals in a
-narrow left-edge strip.
+The header is removed by cropping, not by post-hoc filtering.
+If we detect N circles, we have N options. No recovery or synthesis.
 """
 
 from __future__ import annotations
@@ -32,7 +28,6 @@ from controller.utils.logger import get_logger
 
 logger = get_logger("option_detector")
 
-# Labels assigned by vertical position (top to bottom)
 OPTION_LABELS = ["A", "B", "C", "D", "E"]
 
 
@@ -43,26 +38,26 @@ OPTION_LABELS = ["A", "B", "C", "D", "E"]
 @dataclass(frozen=True)
 class DetectedOption:
     """A single detected answer option."""
-    label: str                          # A, B, C, D, or E
-    text: str                           # OCR-extracted option text
-    circle_x: int                       # Radio button center X (absolute px)
-    circle_y: int                       # Radio button center Y (absolute px)
-    circle_r: int                       # Radio button radius in pixels
-    click_x: int                        # Recommended click X (absolute px)
-    click_y: int                        # Recommended click Y (absolute px)
-    bounds: Rect                        # Full bounding rect of the option row
-    text_confidence: float = 0.0        # OCR confidence for the text
+    label: str
+    text: str
+    circle_x: int
+    circle_y: int
+    circle_r: int
+    click_x: int
+    click_y: int
+    bounds: Rect
+    text_confidence: float = 0.0
 
 
 @dataclass
 class OptionMap:
     """Complete map of all detected options on the answer panel."""
     options: list[DetectedOption]
-    panel_bounds: Optional[Rect] = None     # Answer panel region used
-    detection_method: str = ""              # "y-cluster" / "contour" / "none"
+    panel_bounds: Optional[Rect] = None
+    detection_method: str = ""
     image_w: int = 0
     image_h: int = 0
-    debug_meta: dict | None = None         # optional debug metadata (strip bounds etc.)
+    debug_meta: dict | None = None
 
     @property
     def count(self) -> int:
@@ -77,9 +72,15 @@ class OptionMap:
         return None
 
     def norm(self, x: int, y: int) -> tuple[float, float]:
-        """Convert absolute pixel coords to normalized [0, 1] coords."""
-        nx = max(0.0, min(1.0, x / max(1, self.image_w)))
-        ny = max(0.0, min(1.0, y / max(1, self.image_h)))
+        """Convert absolute pixel coords to normalized [0, 1] coords.
+
+        Uses (dimension - 1) as denominator to match the click pipeline:
+        OCRLayoutResult._norm and ClickDispatcher._absolute_for_normalized
+        both use this convention so pixel 0 maps to 0.0 and the last pixel
+        maps to 1.0.
+        """
+        nx = max(0.0, min(1.0, float(x) / float(max(1, self.image_w - 1))))
+        ny = max(0.0, min(1.0, float(y) / float(max(1, self.image_h - 1))))
         return (nx, ny)
 
 
@@ -91,49 +92,73 @@ class OptionDetector:
     """
     Detects answer options in the right panel of the exam screen.
 
-    Uses Y-clustering of HoughCircle candidates in a narrow left-edge
-    strip to find radio buttons reliably despite watermark noise.
+    Uses a crop-first strategy: isolate the options zone by removing the
+    header geometrically, then detect radio circles in the clean crop.
     """
 
-    # --- Tunable thresholds -------------------------------------------
+    # Header skip: fraction of answer panel height occupied by the
+    # "Answer here" header and the shared top bar (Internet Status,
+    # student name, etc.).  The answer panel Rect starts at the same
+    # Y as the question panel, so the top ~25% is all header/chrome.
+    HEADER_SKIP_FRAC = 0.28
+    HEADER_SKIP_MIN_FRAC = 0.15
+    HEADER_SKIP_MAX_FRAC = 0.38
 
-    # Width of each search strip (pixels from a candidate left anchor).
-    SEARCH_STRIP_WIDTH = 80
-    SEARCH_STRIP_MIN_WIDTH = 50
-    SEARCH_STRIP_MAX_WIDTH = 140
-    SEARCH_STRIP_WIDTH_FRAC = 0.06
-    SEARCH_MAX_RIGHT_FRAC = 0.16
-    SEARCH_TOP_MARGIN_FRAC = 0.10
-    SEARCH_BOTTOM_MARGIN_FRAC = 0.06
+    # Bottom margin: fraction of answer panel to skip (footer buttons).
+    BOTTOM_SKIP_FRAC = 0.06
 
-    # Small upward correction (in capture-image pixels) applied to click_y.
-    # Camera perspective causes a consistent ~5px downward bias in circle
-    # centre detection; this shifts the click target slightly upward to
-    # land on the radio button rather than just below it.
-    CLICK_Y_UPWARD_BIAS_PX = 8
+    # Radio strip: left portion of the answer panel where circles live.
+    # On wider panels (divider further left), the radio circles can be
+    # 150-200px from the panel edge. Use 300px max to cover all layouts.
+    # The X-column filter later discards text-circle noise from the
+    # wider area, keeping only the radio-button column.
+    RADIO_STRIP_WIDTH_FRAC = 0.25
+    RADIO_STRIP_MAX_PX = 300
 
-    # HoughCircles parameters (kept loose — we filter with clustering afterwards)
+    # Primary HoughCircles parameters.
     HOUGH_DP = 1.2
-    HOUGH_MIN_DIST = 20             # Pixels between circle centers
-    HOUGH_PARAM1 = 80               # Canny upper threshold
-    HOUGH_PARAM2 = 18               # Accumulator threshold (low → more circles)
+    HOUGH_MIN_DIST = 20
+    HOUGH_PARAM1 = 80
+    HOUGH_PARAM2 = 15
     HOUGH_MIN_RADIUS = 5
-    HOUGH_MAX_RADIUS = 25
+    HOUGH_MAX_RADIUS = 30
 
-    # Y-clustering: merge circles within this Y distance into one cluster
-    Y_CLUSTER_GAP = 60              # Pixels
-    MIN_ROW_GAP_PX = 28
-    MAX_ROW_GAP_PX = 320
+    # Fallback (relaxed) HoughCircles parameters.
+    HOUGH_FALLBACK_DP = 1.0
+    HOUGH_FALLBACK_MIN_DIST = 12
+    HOUGH_FALLBACK_PARAM1 = 50
+    HOUGH_FALLBACK_PARAM2 = 8
+    HOUGH_FALLBACK_MIN_RADIUS = 3
+    HOUGH_FALLBACK_MAX_RADIUS = 35
 
-    # Minimum cluster size to be considered a real radio button row
+    # Y-clustering gap: circles within this vertical distance are one row.
+    # Real radio buttons are typically 150-200px apart on a 3072px image.
+    # This gap must be large enough to merge noise near a real circle,
+    # but small enough to keep separate options distinct.
+    Y_CLUSTER_GAP = 75
+
+    # Min circles in a cluster to count as a real row.
     MIN_CLUSTER_SIZE = 1
 
-    # Expected number of options (used for validation, not hard-coded)
-    MIN_EXPECTED_OPTIONS = 3
     MAX_EXPECTED_OPTIONS = 5
 
-    # How far right of the circle to start the OCR text crop
-    TEXT_OFFSET_X_PX = 30           # Pixels right of the circle edge
+    # --- Post-detection validation thresholds ---
+
+    # Radius consistency: reject circles whose radius differs from the
+    # median by more than this factor (e.g. 2.0 means allow [median/2, median*2]).
+    RADIUS_TOLERANCE_FACTOR = 2.0
+
+    # X-alignment: reject clusters whose center_x differs from the
+    # median cluster X by more than this many pixels.
+    X_ALIGNMENT_MAX_DEVIATION_PX = 40
+
+    # Spacing regularity: reject outlier clusters where the gap to
+    # the nearest neighbour is < MIN_RATIO or > MAX_RATIO of the median gap.
+    SPACING_MIN_RATIO = 0.35
+    SPACING_MAX_RATIO = 2.2
+
+    # OCR text crop starts this many pixels right of the circle edge.
+    TEXT_OFFSET_X_PX = 20
 
     def detect(
         self,
@@ -144,206 +169,171 @@ class OptionDetector:
         """
         Detect option radio buttons and their text in the answer panel.
 
-        Parameters
-        ----------
-        image_path : Path
-            Path to the full exam screenshot.
-        layout : ExamLayout
-            Pre-detected layout with answer_panel bounds.
-
-        Returns
-        -------
-        OptionMap
-            All detected options with coordinates and OCR text.
+        Strategy: crop to the options zone (below the fixed header),
+        detect circles, cluster, label, OCR.
         """
         logger.info("Detecting options for: %s", image_path.name)
+
+        empty = lambda: OptionMap(
+            options=[], image_w=layout.image_w, image_h=layout.image_h
+        )
 
         try:
             import cv2
         except ImportError:
             logger.warning("OpenCV not available")
-            return OptionMap(options=[], image_w=layout.image_w, image_h=layout.image_h)
+            return empty()
 
         img = cv2.imread(str(image_path))
         if img is None:
             logger.warning("Could not read image: %s", image_path)
-            return OptionMap(options=[], image_w=layout.image_w, image_h=layout.image_h)
+            return empty()
 
         if layout.answer_panel is None:
             logger.warning("No answer panel in layout")
-            return OptionMap(options=[], image_w=layout.image_w, image_h=layout.image_h)
+            return empty()
 
         ap = layout.answer_panel
+        img_h, img_w = img.shape[:2]
 
-        #region agent log
-        from controller.utils.debug_ndjson import dbg as _dbg
-        _dbg(
-            location="controller/capture_pipeline/option_detector.py:detect",
-            message="option_detect start",
-            data={
-                "image": str(image_path),
-                "ap": {"x": ap.x, "y": ap.y, "w": ap.w, "h": ap.h},
-            },
-            hypothesisId="H2",
+        # ------------------------------------------------------------------
+        # Step 1: Determine the options zone by removing the header.
+        # ------------------------------------------------------------------
+        header_bottom_y = self._determine_header_bottom(img, ap)
+        footer_top_y = ap.y2 - max(1, int(ap.h * self.BOTTOM_SKIP_FRAC))
+
+        options_y1 = max(ap.y, min(header_bottom_y, footer_top_y - 1))
+        options_y2 = min(ap.y2, footer_top_y)
+
+        logger.info(
+            "Options zone: Y=[%d, %d] within panel Y=[%d, %d] (header_bottom=%d)",
+            options_y1, options_y2, ap.y, ap.y2, header_bottom_y,
         )
-        #endregion agent log
 
-        # Step 1: adaptive strip search across the left-to-mid answer panel.
-        candidate_strips = self._candidate_strips(ap)
-        best_clusters: list[dict] = []
-        best_abs_candidates: list[tuple[int, int, int]] = []
-        best_strip: tuple[int, int] | None = None
-        best_search_y1 = ap.y
-        best_search_y2 = ap.y2
-        best_score = float("-inf")
-
-        # Margin to skip "Answer here" header. Use fraction of panel
-        # height but cap to an absolute max to prevent over-cutting on
-        # tall stitched images.
-        top_margin = min(int(ap.h * self.SEARCH_TOP_MARGIN_FRAC), 500)
-        bottom_margin = min(int(ap.h * self.SEARCH_BOTTOM_MARGIN_FRAC), 300)
-        search_y1 = ap.y + top_margin
-        search_y2 = ap.y2 - bottom_margin
-        search_y1 = max(ap.y, min(search_y1, ap.y2 - 1))
-        search_y2 = max(search_y1 + 1, min(search_y2, ap.y2))
-
-        for strip_x1, strip_x2 in candidate_strips:
-            seq, seq_score, abs_candidates = self._detect_best_sequence_for_strip(
-                img,
-                strip_x1=strip_x1,
-                strip_x2=strip_x2,
-                strip_y1=search_y1,
-                strip_y2=search_y2,
-            )
-            if seq_score > best_score:
-                best_score = seq_score
-                best_clusters = seq
-                best_abs_candidates = abs_candidates
-                best_strip = (strip_x1, strip_x2)
-                best_search_y1 = search_y1
-                best_search_y2 = search_y2
-
-        clusters = best_clusters
-        abs_candidates = best_abs_candidates
-        if not clusters:
-            logger.warning("No reliable radio-row sequence detected in adaptive strips")
+        if options_y2 - options_y1 < 50:
+            logger.warning("Options zone too small (%d px)", options_y2 - options_y1)
             return OptionMap(
-                options=[],
-                panel_bounds=ap,
-                detection_method="none",
-                image_w=layout.image_w,
-                image_h=layout.image_h,
+                options=[], panel_bounds=ap, detection_method="none",
+                image_w=img_w, image_h=img_h,
+            )
+
+        # ------------------------------------------------------------------
+        # Step 2: Detect radio circles in a left strip of the options zone.
+        # ------------------------------------------------------------------
+        strip_w = max(
+            min(int(ap.w * self.RADIO_STRIP_WIDTH_FRAC), self.RADIO_STRIP_MAX_PX),
+            40,
+        )
+        # Ensure the strip covers at least 15% of the panel width,
+        # which is enough to capture the radio button column even
+        # on wider answer panels where buttons are further indented.
+        strip_w = max(strip_w, int(ap.w * 0.15))
+        strip_x1 = ap.x
+        strip_x2 = min(ap.x2, ap.x + strip_w)
+
+        strip_img = img[options_y1:options_y2, strip_x1:strip_x2]
+        if strip_img.size == 0:
+            logger.warning("Empty radio strip crop")
+            return OptionMap(
+                options=[], panel_bounds=ap, detection_method="none",
+                image_w=img_w, image_h=img_h,
+            )
+
+        gray = cv2.cvtColor(strip_img, cv2.COLOR_BGR2GRAY)
+        blurred = cv2.GaussianBlur(gray, (9, 9), 2)
+
+        circles = self._find_circles(cv2, blurred)
+
+        if circles is None or len(circles) == 0:
+            logger.warning("No radio circles detected in options zone")
+            return OptionMap(
+                options=[], panel_bounds=ap, detection_method="none",
+                image_w=img_w, image_h=img_h,
                 debug_meta={
-                    "adaptive": True,
-                    "best_strip_x1": None,
-                    "best_strip_x2": None,
-                    "search_y1": best_search_y1,
-                    "search_y2": best_search_y2,
-                    "best_score": best_score,
-                    "raw_candidates_count": 0,
+                    "strip_x1": strip_x1, "strip_x2": strip_x2,
+                    "options_y1": options_y1, "options_y2": options_y2,
+                    "raw_candidates": 0,
                 },
             )
 
-        # Remove obvious non-option rows (bottom-bar artefacts and header
-        # phantoms above the real option area).
-        #
-        # Strategy: use the calibrated option-A Y position (transformed to
-        # capture-image space) as the authoritative floor.  Any cluster
-        # whose Y is more than half an inter-option step above calibrated-A
-        # is almost certainly the "Answer here" header circle.  The bottom
-        # cutoff is a simple absolute cap.
-        original_clusters = list(clusters)
-        max_row_y = ap.y + ap.h - min(int(ap.h * 0.03), 150)
-        min_row_y = self._calibrated_min_row_y(img.shape[0])
-        filtered_clusters = [
-            c for c in clusters
-            if min_row_y <= int(c.get("center_y", ap.y)) <= max_row_y
+        raw_count = len(circles)
+
+        # Layer 1: Radius consistency — reject circles with outlier radii.
+        circles = self._filter_by_radius(circles)
+        after_radius = len(circles)
+
+        # Layer 1b: Edge quality — reject circles without clear radio-button edges.
+        circles = self._filter_by_edge_quality(circles, gray)
+        after_edge = len(circles)
+
+        # Layer 1c: X-column filter — identify the radio button column and
+        # discard circles that are too far from it. Radio buttons sit in a
+        # narrow vertical band. Watermark/text circles scatter across X.
+        circles = self._filter_by_x_column(circles, strip_w)
+        after_x_col = len(circles)
+
+        # Convert circle coords from strip-local to absolute image coords.
+        abs_circles = [
+            (strip_x1 + int(cx), options_y1 + int(cy), int(cr))
+            for cx, cy, cr in circles
         ]
-        if len(filtered_clusters) >= self.MIN_EXPECTED_OPTIONS:
-            clusters = filtered_clusters
-        else:
-            clusters = original_clusters
 
-        # Step 4: Build options from clusters
-        # Sort clusters by Y (top to bottom)
+        # Cluster by Y with the base gap (not adaptive — the X-column
+        # filter already removed the watermark chains that caused merging).
+        clusters = self._cluster_by_y(abs_circles, gap=self.Y_CLUSTER_GAP)
         clusters.sort(key=lambda c: c["center_y"])
+        cluster_count_raw = len(clusters)
 
-        # Trim to max expected options.
-        # If caller specified max_options (from AI response), use that;
-        # otherwise fall back to the class-level MAX_EXPECTED_OPTIONS.
+        # Layer 2: X-alignment — reject clusters misaligned horizontally.
+        clusters = self._filter_clusters_by_x_alignment(clusters)
+
+        # Layer 3: Spacing regularity — reject outlier phantom clusters.
+        clusters = self._filter_clusters_by_spacing(clusters)
+
+        # Cap to max options (final safety net).
         effective_max = max_options if max_options is not None else self.MAX_EXPECTED_OPTIONS
         if len(clusters) > effective_max:
-            clusters = self._trim_to_expected_count(clusters, effective_max, img.shape[0])
+            clusters = self._trim_to_count(clusters, effective_max)
 
-        # Spacing regularity filter: real radio buttons are roughly evenly
-        # spaced.  If the gap between the first and second row is more than
-        # 2× the median of other inter-row gaps, the first row is almost
-        # certainly a phantom header circle — drop it.
-        clusters = self._drop_spacing_outliers(clusters)
-
-        # Recovery pass: last-resort fallback when primary detection still
-        # misses circles (unusual framing, extreme camera angle, etc.).
-        # With the corrected search-strip range this should rarely trigger.
-        if 2 <= len(clusters) <= 3 and best_strip is not None:
-            pre_count = len(clusters)
-            clusters = self._recover_missing_rows(
-                img, clusters, best_strip, ap,
-            )
-            if len(clusters) > pre_count:
-                logger.warning(
-                    "Recovery pass activated (rare): %d → %d option rows. "
-                    "Primary HoughCircles missed %d circles.",
-                    pre_count, len(clusters), len(clusters) - pre_count,
-                )
-
-        options: list[DetectedOption] = []
-        # Radio buttons lie on a stable left column; derive a shared anchor X
-        # to avoid drifting into option-text circles (e.g., "o"/"e" glyph loops).
-        stable_radio_x = self._stable_radio_anchor_x(clusters, ap)
-
-        # Use calibration anchors to assign correct A-E labels even when
-        # fewer than 5 clusters are found (avoids label shifting).
-        label_assignment = self._assign_labels_from_calibration(
-            clusters, layout.image_w, layout.image_h,
+        logger.info(
+            "%d raw > %d radius > %d edge > %d x-col > %d clusters > "
+            "%d validated (cap %d)",
+            raw_count, after_radius, after_edge, after_x_col,
+            cluster_count_raw, len(clusters), effective_max,
         )
+
+        # ------------------------------------------------------------------
+        # Step 3: Build options — OCR text, assign labels, set click coords.
+        # ------------------------------------------------------------------
+        options: list[DetectedOption] = []
 
         for i, cluster in enumerate(clusters):
             if i >= len(OPTION_LABELS):
                 break
 
-            label = label_assignment.get(i, OPTION_LABELS[i])
+            label = OPTION_LABELS[i]
             cx = cluster["center_x"]
             cy = cluster["center_y"]
             cr = cluster["median_r"]
 
-            # Compute option row bounds for OCR
             row_top, row_bottom = self._compute_option_row(
-                i, clusters, ap.y2 - ap.y, cy - ap.y,
+                i, clusters, ap.h, cy - ap.y,
             )
-            # Convert back to absolute
             row_top_abs = ap.y + row_top
             row_bottom_abs = ap.y + row_bottom
 
-            # OCR text region: from right of circle to a focused area.
-            # Cap width to avoid sweeping across watermarks that dominate
-            # the wide answer panel.  Most option text sits within ~400px
-            # of the radio button, but on lower-res crops it may be
-            # narrower.  Use at most 40% of panel width or 500px.
-            text_x = cx + cr + self.TEXT_OFFSET_X_PX
-            max_text_w = min(int(ap.w * 0.40), 500)
-            text_x2 = min(text_x + max_text_w, ap.x2)
+            text_x1 = cx + cr + self.TEXT_OFFSET_X_PX
+            text_x2 = min(ap.x2, text_x1 + min(int(ap.w * 0.70), 600))
             pad_y = 10
             crop_y1 = max(0, row_top_abs - pad_y)
-            crop_y2 = min(img.shape[0], row_bottom_abs + pad_y)
-            text_region = img[crop_y1:crop_y2, text_x:text_x2]
+            crop_y2 = min(img_h, row_bottom_abs + pad_y)
+            text_region = img[crop_y1:crop_y2, text_x1:text_x2]
 
             text, text_conf = self._ocr_text(text_region)
 
             option_bounds = Rect(
-                x=ap.x,
-                y=row_top_abs,
-                w=ap.w,
-                h=row_bottom_abs - row_top_abs,
+                x=ap.x, y=row_top_abs,
+                w=ap.w, h=row_bottom_abs - row_top_abs,
             )
 
             options.append(DetectedOption(
@@ -352,669 +342,635 @@ class OptionDetector:
                 circle_x=cx,
                 circle_y=cy,
                 circle_r=cr,
-                click_x=stable_radio_x,
-                click_y=max(0, cy - self.CLICK_Y_UPWARD_BIAS_PX),
+                click_x=cx,
+                click_y=cy,
                 bounds=option_bounds,
                 text_confidence=text_conf,
             ))
 
             logger.info(
                 "Option %s: circle=(%d,%d) r=%d click=(%d,%d) text='%s' conf=%.1f",
-                label, cx, cy, cr, stable_radio_x, cy,
+                label, cx, cy, cr, cx, cy,
                 text[:60] if text else "", text_conf,
             )
 
-        # Post-OCR filter: drop any option whose text is clearly the
-        # "Answer here" header rather than real option content.
-        options, dropped_header = self._filter_answer_here_options(options)
-
-        # Post-filter recovery: if the "Answer here" drop (or other filters)
-        # left us with fewer than 4 options, try to recover the missing row
-        # by extrapolating from the remaining options' spacing.
-        if dropped_header and 2 <= len(options) <= 3 and best_strip is not None:
-            remaining_clusters = [
-                {"center_x": o.circle_x, "center_y": o.circle_y,
-                 "median_r": o.circle_r, "count": 1}
-                for o in options
-            ]
-            recovered = self._recover_missing_rows(
-                img, remaining_clusters, best_strip, ap,
-            )
-            if len(recovered) > len(options):
-                logger.info(
-                    "Post-filter recovery: %d → %d option rows",
-                    len(options), len(recovered),
-                )
-                # Rebuild options from recovered clusters.
-                recovered.sort(key=lambda c: c["center_y"])
-                stable_rx = self._stable_radio_anchor_x(recovered, ap)
-                new_options: list[DetectedOption] = []
-                for ri, rc in enumerate(recovered):
-                    if ri >= len(OPTION_LABELS):
-                        break
-                    rcx = rc["center_x"]
-                    rcy = rc["center_y"]
-                    rcr = rc["median_r"]
-                    row_top, row_bottom = self._compute_option_row(
-                        ri, recovered, ap.y2 - ap.y, rcy - ap.y,
-                    )
-                    row_top_abs = ap.y + row_top
-                    row_bottom_abs = ap.y + row_bottom
-                    max_text_w = min(int(ap.w * 0.40), 500)
-                    text_region = img[
-                        max(0, row_top_abs - 10) : min(img.shape[0], row_bottom_abs + 10),
-                        min(img.shape[1], rcx + rcr + 8) : min(img.shape[1], rcx + rcr + 8 + max_text_w),
-                    ]
-                    ocr_text, ocr_conf = self._ocr_text(text_region)
-                    click_x = stable_rx + max(10, rcr + 2)
-                    adjusted_click_y = max(0, rcy - self.CLICK_Y_UPWARD_BIAS_PX)
-                    new_options.append(DetectedOption(
-                        label=OPTION_LABELS[ri],
-                        text=ocr_text,
-                        circle_x=rcx,
-                        circle_y=rcy,
-                        circle_r=rcr,
-                        click_x=click_x,
-                        click_y=adjusted_click_y,
-                        bounds=(ap.x, row_top_abs, ap.w, row_bottom_abs - row_top_abs),
-                        text_confidence=ocr_conf,
-                    ))
-                    logger.info(
-                        "Option %s: circle=(%d,%d) r=%d click=(%d,%d) text=%r conf=%.1f",
-                        OPTION_LABELS[ri], rcx, rcy, rcr, click_x, adjusted_click_y,
-                        ocr_text[:40] if ocr_text else None, ocr_conf,
-                    )
-                options = new_options
-
-        method = "adaptive_y_cluster" if options else "none"
+        method = "crop_and_detect" if options else "none"
         logger.info("Detected %d options via %s (%d raw candidates)",
-                     len(options), method, len(abs_candidates))
+                     len(options), method, raw_count)
 
         return OptionMap(
             options=options,
             panel_bounds=ap,
             detection_method=method,
-            image_w=layout.image_w,
-            image_h=layout.image_h,
+            image_w=img_w,
+            image_h=img_h,
             debug_meta={
-                "adaptive": True,
-                "best_strip_x1": (best_strip[0] if best_strip else None),
-                "best_strip_x2": (best_strip[1] if best_strip else None),
-                "search_y1": best_search_y1,
-                "search_y2": best_search_y2,
-                "row_filter_min_y": ap.y,
-                "row_filter_max_y": max_row_y,
-                "clusters_before_filter": len(original_clusters),
-                "clusters_after_filter": len(filtered_clusters),
-                "best_score": best_score,
-                "raw_candidates_count": int(len(abs_candidates)),
+                "strip_x1": strip_x1,
+                "strip_x2": strip_x2,
+                "options_y1": options_y1,
+                "options_y2": options_y2,
+                "header_bottom": header_bottom_y,
+                "raw_candidates_count": raw_count,
+                "after_radius_filter": after_radius,
+                "after_edge_filter": after_edge,
+                "after_x_column_filter": after_x_col,
+                "clusters_before_validation": cluster_count_raw,
+                "cluster_count": len(clusters),
             },
         )
 
-    def _stable_radio_anchor_x(self, clusters: list[dict], ap: Rect) -> int:
+    # ------------------------------------------------------------------
+    # Header detection
+    # ------------------------------------------------------------------
+
+    def _determine_header_bottom(self, img: np.ndarray, ap: Rect) -> int:
+        """Find where the header ends and options begin.
+
+        Two-phase approach:
+          1. OCR scan for "Answer here" in the top 30% of the panel.
+             Accept only if the match is in the top 30% (reject false
+             positives from option text containing "answer").
+          2. Brightness-band detection: scan downward from the OCR
+             anchor (or from the fractional fallback) to find the
+             first option-band boundary — the point where alternating
+             white/gray option rows begin.
+          3. Clamp to [HEADER_SKIP_MIN_FRAC, HEADER_SKIP_MAX_FRAC].
         """
-        Derive a robust click X for radio buttons from cluster centers.
+        import cv2
 
-        We bias to the left-most consistent column so clicks stay on the
-        radio circles rather than drifting onto option text.
+        min_y = ap.y + int(ap.h * self.HEADER_SKIP_MIN_FRAC)
+        max_y = ap.y + int(ap.h * self.HEADER_SKIP_MAX_FRAC)
+
+        ocr_bottom = self._find_answer_here_bottom(img, ap)
+
+        if ocr_bottom is not None:
+            band_y = self._find_first_option_band(img, ap, ocr_bottom)
+            if band_y is not None:
+                result = band_y
+            else:
+                gap = max(int(ap.h * 0.02), 20)
+                result = ocr_bottom + gap
+            return max(min_y, min(max_y, result))
+
+        # Fallback: use fraction-based estimate, then refine with band detection
+        is_stitched = img.shape[0] >= img.shape[1] * 1.4
+        frac = 0.18 if is_stitched else self.HEADER_SKIP_FRAC
+        fallback_y = ap.y + int(ap.h * frac)
+
+        band_y = self._find_first_option_band(img, ap, fallback_y - 50)
+        if band_y is not None:
+            return max(min_y, min(max_y, band_y))
+
+        return max(min_y, min(max_y, fallback_y))
+
+    def _find_answer_here_bottom(self, img: np.ndarray, ap: Rect) -> int | None:
+        """Use OCR to locate the 'Answer here' header text.
+
+        Scans ONLY the top 30% of the answer panel. Accepts only matches
+        where both "answer" and "here" appear on the same text line,
+        and only if the matched text is within the top 30% of the panel
+        (to reject false positives from option text like "answer the question").
         """
-        if not clusters:
-            return ap.x + int(ap.w * 0.10)
+        try:
+            import cv2
+            import pytesseract
+            from controller.config import TESSERACT_CMD, OCR_TIMEOUT_SECONDS
 
-        xs = sorted(int(c.get("center_x", ap.x + int(ap.w * 0.10))) for c in clusters)
-        # Use median as the stable radio column anchor.
-        # (Previously lower-quartile, but that biased clicks LEFT of the
-        # true column center when HoughCircle centres have natural jitter.)
-        q_idx = max(0, min(len(xs) - 1, int(round((len(xs) - 1) * 0.50))))
-        x = xs[q_idx]
+            if TESSERACT_CMD.strip():
+                pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD.strip()
+        except Exception:
+            return None
 
-        # Keep inside a conservative left band of answer panel.
-        min_x = ap.x + int(ap.w * 0.03)
-        max_x = ap.x + int(ap.w * 0.28)
-        return max(min_x, min(max_x, x))
-
-    _ANSWER_HERE_KEYWORDS = {"answer", "here", "answerhere"}
-
-    def _filter_answer_here_options(
-        self, options: list["DetectedOption"],
-    ) -> tuple[list["DetectedOption"], bool]:
-        """Remove options whose OCR text matches the 'Answer here' header.
-
-        Only checks the first option (topmost row) because the header is
-        always above the real options.  If its text is short and matches
-        known header keywords, it is dropped and the remaining options are
-        re-labeled A, B, C... sequentially.
-
-        Returns (filtered_options, was_header_dropped).
-        """
-        if not options:
-            return options, False
-
-        first = options[0]
-        raw = (first.text or "").strip().lower()
-        # Remove punctuation / dashes
-        cleaned = "".join(c for c in raw if c.isalnum() or c == " ")
-        words = set(cleaned.split())
-
-        is_header = bool(words & self._ANSWER_HERE_KEYWORDS)
-
-        # Also flag if the first option text is short and contains "here" or
-        # "answer" as a substring (OCR sometimes partially reads it, e.g.
-        # "werhere", "here", "answerhere", "- Answer here", "re").
-        if not is_header and 0 < len(raw) <= 25:
-            if "answer" in raw or "here" in raw:
-                is_header = True
-            elif 1 <= len(raw) <= 4 and raw in "answerhere":
-                is_header = True
-
-        # When 5 options are detected and the first has very short/garbled
-        # text with low OCR confidence, it's almost certainly the "Answer here"
-        # header whose text was mangled by OCR (e.g. 'Tre', '- a ) .').
-        if not is_header and len(options) >= 5:
-            is_short_garbage = len(cleaned) <= 6 and first.text_confidence < 70.0
-            if is_short_garbage:
-                is_header = True
-
-        if not is_header:
-            return options, False
-
-        logger.info(
-            "Dropping 'Answer here' phantom option %s (text='%s', Y=%d)",
-            first.label, first.text[:40] if first.text else "", first.circle_y,
-        )
-
-        remaining = options[1:]
-        relabeled: list[DetectedOption] = []
-        for i, opt in enumerate(remaining):
-            new_label = OPTION_LABELS[i] if i < len(OPTION_LABELS) else opt.label
-            relabeled.append(DetectedOption(
-                label=new_label,
-                text=opt.text,
-                circle_x=opt.circle_x,
-                circle_y=opt.circle_y,
-                circle_r=opt.circle_r,
-                click_x=opt.click_x,
-                click_y=opt.click_y,
-                bounds=opt.bounds,
-                text_confidence=opt.text_confidence,
-            ))
-        return relabeled, True
-
-    def _assign_labels_from_calibration(
-        self,
-        clusters: list[dict],
-        image_w: int,
-        image_h: int,
-    ) -> dict[int, str]:
-        """Assign A-E labels to detected cluster rows using calibration
-        Y-proximity matching.
-
-        Uses exact pixel positions stored during calibration to convert
-        screen-space Y → capture-image Y, then greedily matches each
-        detected cluster to the nearest calibrated option position.
-
-        This correctly handles the common case where the topmost radio
-        button is missed by HoughCircles and the remaining 3 circles
-        are actually B-C-D rather than A-B-C.
-
-        Falls back to sequential labeling only when calibration data is
-        unavailable or the match is non-monotonic.
-        """
-        if not clusters:
-            return {}
-
-        n = len(clusters)
+        scan_frac = 0.30
+        scan_h = min(int(ap.h * scan_frac), 800)
+        crop = img[ap.y:ap.y + scan_h, ap.x:ap.x2]
+        if crop.size == 0:
+            return None
 
         try:
-            from calibration.grid_mapper import GridMap
-            gm = GridMap.load()
+            gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+            data = pytesseract.image_to_data(
+                gray,
+                output_type=pytesseract.Output.DICT,
+                config="--oem 3 --psm 6",
+                timeout=OCR_TIMEOUT_SECONDS,
+            )
         except Exception:
-            return self._sequential_labels(n, "no calibration data")
+            return None
 
-        if gm.resolution[1] <= 0 or image_h <= 0:
-            return self._sequential_labels(n, "invalid resolution")
+        n = len(data.get("text", []))
 
-        cap_h = gm.capture_resolution[1] if gm.capture_resolution[1] > 0 else image_h
-
-        calib_ys: dict[str, float] = {}
-        for letter in OPTION_LABELS:
-            exact = gm.pixel_positions.get(letter)
-            if exact is not None:
-                screen_y = float(exact[1])
-            else:
-                pos = gm.positions.get(letter)
-                if pos is None:
-                    continue
-                grid_col, grid_row = pos
-                cell_h = float(gm.resolution[1]) / float(max(1, gm.grid_size[1]))
-                screen_y = (grid_row + 0.5) * cell_h
-
-            scale_y = gm.transform.get("scale_y", 1.0)
-            offset_y = float(gm.transform.get("offset_y", 0.0))
-            if abs(scale_y) < 1e-9:
+        # Group words by line (block_num, par_num, line_num)
+        lines: dict[tuple, list[dict]] = {}
+        for i in range(n):
+            word = str(data["text"][i]).strip()
+            if not word:
                 continue
-            capture_y = (screen_y - offset_y) / scale_y
-            capture_y_for_image = capture_y * image_h / max(1, cap_h)
-            calib_ys[letter] = capture_y_for_image
+            key = (
+                int(data.get("block_num", [0])[i]),
+                int(data.get("par_num", [0])[i]),
+                int(data.get("line_num", [0])[i]),
+            )
+            lines.setdefault(key, []).append({
+                "text": word.lower(),
+                "top": int(data["top"][i]),
+                "height": int(data["height"][i]),
+            })
 
-        if len(calib_ys) < 3:
-            return self._sequential_labels(n, f"only {len(calib_ys)} calibrated")
+        # Find a line containing both "answer" and "here"
+        for key in sorted(lines.keys()):
+            words = lines[key]
+            line_text = " ".join(w["text"] for w in words)
+            cleaned = "".join(c for c in line_text if c.isalpha() or c == " ")
 
-        available = dict(calib_ys)
-        assignment: dict[int, str] = {}
-        for i, cluster in enumerate(clusters):
-            cy = float(cluster.get("center_y", 0))
-            best_label = None
-            best_dist = float("inf")
-            for label, cal_y in available.items():
-                dist = abs(cy - cal_y)
-                if dist < best_dist:
-                    best_dist = dist
-                    best_label = label
-            if best_label is not None and best_dist < 300:
-                assignment[i] = best_label
-                del available[best_label]
+            has_answer = "answer" in cleaned
+            has_here = "here" in cleaned
+
+            if has_answer and has_here:
+                bottom = max(w["top"] + w["height"] for w in words)
+                abs_bottom = ap.y + bottom
+                # Sanity check: must be in the top 30% of the panel
+                local_frac = bottom / max(1, ap.h)
+                if local_frac < scan_frac:
+                    logger.debug(
+                        "Found 'Answer here' at local Y=%d (abs %d, %.1f%% of panel)",
+                        bottom, abs_bottom, local_frac * 100,
+                    )
+                    return abs_bottom
+
+        # Fallback: accept a single "answer" or "here" if it's very near the top
+        for key in sorted(lines.keys()):
+            words = lines[key]
+            line_text = " ".join(w["text"] for w in words)
+            cleaned = "".join(c for c in line_text if c.isalpha())
+
+            if cleaned in ("answer", "here", "answerhere"):
+                bottom = max(w["top"] + w["height"] for w in words)
+                local_frac = bottom / max(1, ap.h)
+                if local_frac < 0.15:
+                    return ap.y + bottom
+
+        return None
+
+    def _find_first_option_band(
+        self, img: np.ndarray, ap: Rect, search_from_y: int,
+    ) -> int | None:
+        """Find where the first option band starts below search_from_y.
+
+        The exam options area has alternating white (~248-255) and light
+        gray (~235-245) horizontal bands. Each band corresponds to one
+        option row. We scan downward from the given Y to find the first
+        transition into these bands.
+
+        Returns the absolute Y where the first option band begins, or None.
+        """
+        import cv2
+
+        # Work on a single column strip near the center of the answer panel
+        # to avoid edge effects
+        strip_x1 = ap.x + int(ap.w * 0.3)
+        strip_x2 = ap.x + int(ap.w * 0.7)
+
+        local_start = max(0, search_from_y - ap.y)
+        local_end = min(ap.h, local_start + int(ap.h * 0.25))
+
+        if local_end - local_start < 30:
+            return None
+
+        crop = img[ap.y + local_start:ap.y + local_end, strip_x1:strip_x2]
+        if crop.size == 0:
+            return None
+
+        gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+        row_means = np.mean(gray, axis=1)
+
+        # Option bands have brightness > 230. The header/separator area
+        # may be different (colored bar, thin line, etc).
+        # Find the first row where brightness consistently stays > 230
+        # for at least 20 consecutive rows (one option band is typically
+        # 50-120px tall on a 3072px image).
+        MIN_BAND_LEN = 15
+        run_start = None
+        run_len = 0
+
+        for y_local in range(len(row_means)):
+            if row_means[y_local] > 230:
+                if run_start is None:
+                    run_start = y_local
+                run_len += 1
             else:
+                if run_len >= MIN_BAND_LEN and run_start is not None:
+                    abs_y = ap.y + local_start + run_start
+                    # Only accept if it's above the max header boundary
+                    if abs_y <= ap.y + int(ap.h * self.HEADER_SKIP_MAX_FRAC):
+                        return abs_y
+                run_start = None
+                run_len = 0
+
+        if run_len >= MIN_BAND_LEN and run_start is not None:
+            abs_y = ap.y + local_start + run_start
+            if abs_y <= ap.y + int(ap.h * self.HEADER_SKIP_MAX_FRAC):
+                return abs_y
+
+        return None
+
+    # ------------------------------------------------------------------
+    # Circle detection
+    # ------------------------------------------------------------------
+
+    def _find_circles(self, cv2, blurred: np.ndarray) -> list[tuple[int, int, int]]:
+        """Run HoughCircles: primary pass, then fallback if needed."""
+        raw = cv2.HoughCircles(
+            blurred, cv2.HOUGH_GRADIENT,
+            dp=self.HOUGH_DP,
+            minDist=self.HOUGH_MIN_DIST,
+            param1=self.HOUGH_PARAM1,
+            param2=self.HOUGH_PARAM2,
+            minRadius=self.HOUGH_MIN_RADIUS,
+            maxRadius=self.HOUGH_MAX_RADIUS,
+        )
+
+        if raw is not None:
+            result = np.round(raw[0]).astype(int).tolist()
+            logger.debug("Primary HoughCircles: %d circles", len(result))
+            return result
+
+        logger.debug("Primary HoughCircles found nothing — trying fallback")
+        raw = cv2.HoughCircles(
+            blurred, cv2.HOUGH_GRADIENT,
+            dp=self.HOUGH_FALLBACK_DP,
+            minDist=self.HOUGH_FALLBACK_MIN_DIST,
+            param1=self.HOUGH_FALLBACK_PARAM1,
+            param2=self.HOUGH_FALLBACK_PARAM2,
+            minRadius=self.HOUGH_FALLBACK_MIN_RADIUS,
+            maxRadius=self.HOUGH_FALLBACK_MAX_RADIUS,
+        )
+
+        if raw is not None:
+            result = np.round(raw[0]).astype(int).tolist()
+            logger.debug("Fallback HoughCircles: %d circles", len(result))
+            return result
+
+        return []
+
+    # ------------------------------------------------------------------
+    # Circle validation filters
+    # ------------------------------------------------------------------
+
+    def _filter_by_x_column(
+        self,
+        circles: list[tuple[int, int, int]],
+        strip_width: int,
+    ) -> list[tuple[int, int, int]]:
+        """Identify the radio-button X column and discard circles outside it.
+
+        Radio buttons form a vertical column at a consistent X position.
+        Watermark/text circles are scattered across the strip width.
+        We find the dominant X band by histogramming circle X positions
+        and keeping only circles near the densest bin.
+        """
+        if len(circles) < 4:
+            return circles
+
+        xs = np.array([c[0] for c in circles])
+
+        # Create histogram bins of 30px width across the strip
+        bin_width = 30
+        n_bins = max(1, strip_width // bin_width)
+        hist, bin_edges = np.histogram(xs, bins=n_bins, range=(0, strip_width))
+
+        # Find the bin with the most circles
+        peak_bin = int(np.argmax(hist))
+        peak_center = (bin_edges[peak_bin] + bin_edges[peak_bin + 1]) / 2
+
+        # Accept circles within 50px of the peak center
+        # (radio buttons have some X variation but stay in a band)
+        tolerance = 50
+        kept = [c for c in circles if abs(c[0] - peak_center) <= tolerance]
+
+        if len(kept) < 3:
+            return circles
+
+        removed = len(circles) - len(kept)
+        if removed:
+            logger.debug(
+                "X-column filter: kept %d/%d (peak_x=%.0f, tolerance=%d, "
+                "strip_w=%d)",
+                len(kept), len(circles), peak_center, tolerance, strip_width,
+            )
+        return kept
+
+    def _filter_by_radius(
+        self, circles: list[tuple[int, int, int]],
+    ) -> list[tuple[int, int, int]]:
+        """Reject circles whose radius deviates too far from the median.
+
+        Real radio buttons on the exam have consistent radii. Noise and
+        watermark artifacts produce circles with wildly different sizes.
+        """
+        if len(circles) < 3:
+            return circles
+
+        radii = [c[2] for c in circles]
+        median_r = float(np.median(radii))
+        if median_r < 1:
+            return circles
+
+        lo = median_r / self.RADIUS_TOLERANCE_FACTOR
+        hi = median_r * self.RADIUS_TOLERANCE_FACTOR
+        kept = [c for c in circles if lo <= c[2] <= hi]
+
+        if len(kept) < 2:
+            return circles
+
+        removed = len(circles) - len(kept)
+        if removed:
+            logger.debug(
+                "Radius filter: kept %d/%d (median_r=%.1f, range=[%.1f, %.1f])",
+                len(kept), len(circles), median_r, lo, hi,
+            )
+        return kept
+
+    def _filter_by_edge_quality(
+        self,
+        circles: list[tuple[int, int, int]],
+        gray: np.ndarray,
+    ) -> list[tuple[int, int, int]]:
+        """Reject circles that don't look like real radio button outlines.
+
+        Real radio buttons have high contrast between the circle edge
+        (dark) and both the interior and exterior (light background).
+        We sample pixels along the circle perimeter and inside and
+        compute the contrast ratio. Low-contrast circles are likely
+        watermark artifacts or noise.
+        """
+        import cv2
+
+        if len(circles) < 3:
+            return circles
+
+        h, w = gray.shape[:2]
+        scores = []
+
+        for cx, cy, cr in circles:
+            if cr < 3 or cx - cr - 2 < 0 or cy - cr - 2 < 0:
+                scores.append(0.0)
+                continue
+            if cx + cr + 2 >= w or cy + cr + 2 >= h:
+                scores.append(0.0)
+                continue
+
+            # Sample perimeter pixels (12 points around the circle)
+            angles = np.linspace(0, 2 * np.pi, 12, endpoint=False)
+            edge_vals = []
+            for a in angles:
+                px = int(round(cx + cr * np.cos(a)))
+                py = int(round(cy + cr * np.sin(a)))
+                if 0 <= px < w and 0 <= py < h:
+                    edge_vals.append(float(gray[py, px]))
+
+            # Sample interior pixels (center region, ~50% radius)
+            inner_vals = []
+            inner_r = max(1, cr // 2)
+            for a in angles[:6]:
+                px = int(round(cx + inner_r * np.cos(a)))
+                py = int(round(cy + inner_r * np.sin(a)))
+                if 0 <= px < w and 0 <= py < h:
+                    inner_vals.append(float(gray[py, px]))
+            inner_vals.append(float(gray[min(cy, h - 1), min(cx, w - 1)]))
+
+            if not edge_vals or not inner_vals:
+                scores.append(0.0)
+                continue
+
+            mean_edge = np.mean(edge_vals)
+            mean_inner = np.mean(inner_vals)
+            contrast = abs(mean_inner - mean_edge)
+            scores.append(contrast)
+
+        if not scores or max(scores) < 5:
+            return circles
+
+        median_score = float(np.median(scores))
+        threshold = max(median_score * 0.2, 5.0)
+
+        kept = [c for c, s in zip(circles, scores) if s >= threshold]
+
+        if len(kept) < 2:
+            return circles
+
+        removed = len(circles) - len(kept)
+        if removed:
+            all_scores = [f"{s:.0f}" for s in scores]
+            logger.debug(
+                "Edge quality filter: kept %d/%d (median_score=%.1f, "
+                "threshold=%.1f, scores=%s)",
+                len(kept), len(circles), median_score, threshold,
+                all_scores,
+            )
+        return kept
+
+    def _filter_clusters_by_x_alignment(
+        self, clusters: list[dict],
+    ) -> list[dict]:
+        """Reject clusters whose X-position is too far from the median.
+
+        Radio buttons are vertically aligned. Watermark artifacts or
+        noise circles often appear at different horizontal positions.
+        """
+        if len(clusters) < 3:
+            return clusters
+
+        xs = [c["center_x"] for c in clusters]
+        median_x = float(np.median(xs))
+        threshold = self.X_ALIGNMENT_MAX_DEVIATION_PX
+
+        kept = [c for c in clusters if abs(c["center_x"] - median_x) <= threshold]
+
+        if len(kept) < 2:
+            return clusters
+
+        removed = len(clusters) - len(kept)
+        if removed:
+            logger.debug(
+                "X-alignment filter: kept %d/%d (median_x=%.0f, threshold=%d)",
+                len(kept), len(clusters), median_x, threshold,
+            )
+        return kept
+
+    def _filter_clusters_by_spacing(
+        self, clusters: list[dict],
+    ) -> list[dict]:
+        """Reject outlier clusters that break the regular spacing pattern.
+
+        Two-phase approach:
+          Phase 1 (ratio-based): reject clusters whose gap to neighbours
+                  deviates too far from the median gap.
+          Phase 2 (leave-one-out): if we still have more clusters than
+                  expected and removing one cluster dramatically improves
+                  regularity, remove it.
+        """
+        if len(clusters) < 3:
+            return clusters
+
+        working = sorted(clusters, key=lambda c: c["center_y"])
+
+        # --- Phase 1: Ratio-based outlier rejection ---
+        MAX_ITERATIONS = 3
+        for iteration in range(MAX_ITERATIONS):
+            if len(working) < 3:
                 break
 
-        if len(assignment) != n:
-            return self._sequential_labels(n, "calibration anchor mismatch")
+            ys = [c["center_y"] for c in working]
+            gaps = [ys[i + 1] - ys[i] for i in range(len(ys) - 1)]
+            median_gap = float(np.median(gaps))
 
-        labels_in_order = [assignment[i] for i in range(n)]
-        if labels_in_order != sorted(labels_in_order):
-            logger.warning(
-                "Calibration anchor labels not monotonic (%s); falling back to sequential",
-                labels_in_order,
-            )
-            return self._sequential_labels(n, "non-monotonic match")
+            if median_gap < 10:
+                break
 
-        logger.info(
-            "Calibration-anchored labels: %s (from %d calibrated positions)",
-            labels_in_order, len(calib_ys),
-        )
-        return assignment
+            lo = median_gap * self.SPACING_MIN_RATIO
+            hi = median_gap * self.SPACING_MAX_RATIO
 
-    @staticmethod
-    def _sequential_labels(n: int, reason: str) -> dict[int, str]:
-        assignment = {i: OPTION_LABELS[i] for i in range(min(n, len(OPTION_LABELS)))}
-        labels = [assignment[i] for i in range(len(assignment))]
-        logger.info("Sequential labels (n=%d, reason=%s): %s", n, reason, labels)
-        return assignment
+            all_regular = all(lo <= g <= hi for g in gaps)
+            if all_regular:
+                break
 
-    def _recover_missing_rows(
-        self,
-        img: np.ndarray,
-        clusters: list[dict],
-        strip: tuple[int, int],
-        ap: "Rect",
-    ) -> list[dict]:
-        """Try to find missing option rows when only 2-3 were detected.
-
-        Extrapolates expected Y positions from the detected row spacing,
-        then runs a very relaxed HoughCircles search in narrow Y bands
-        around each expected position.  Any confirmed circle creates a
-        new cluster entry.
-        """
-        import cv2
-
-        ordered = sorted(clusters, key=lambda c: c["center_y"])
-        ys = [c["center_y"] for c in ordered]
-        diffs = [ys[i + 1] - ys[i] for i in range(len(ys) - 1)]
-        if not diffs or all(d <= 0 for d in diffs):
-            return clusters
-
-        step = int(round(float(np.median([d for d in diffs if d > 0]))))
-        if step < 30 or step > 500:
-            return clusters
-
-        median_x = int(np.median([c["center_x"] for c in ordered]))
-        median_r = int(np.median([c["median_r"] for c in ordered]))
-
-        expected_ys: list[int] = []
-        for idx in range(len(ys)):
-            expected_ys.append(ys[0] + idx * step)
-        # Extend one step beyond the last detected row (downward).
-        next_y = ys[-1] + step
-        if next_y <= ap.y2:
-            expected_ys.append(next_y)
-        # Extend one step above the first detected row (upward).
-        # This catches a missed top option whose circle was too faint for
-        # HoughCircles while still staying within the answer panel bounds.
-        prev_y = ys[0] - step
-        if prev_y >= ap.y:
-            expected_ys.append(prev_y)
-
-        # Identify missing positions: expected Ys that have no detected cluster nearby.
-        margin = step // 3
-        missing_ys: list[int] = []
-        for ey in expected_ys:
-            if ey < ap.y or ey > ap.y2:
-                continue
-            if not any(abs(ey - dy) < margin for dy in ys):
-                missing_ys.append(ey)
-
-        if not missing_ys:
-            return clusters
-
-        # Targeted HoughCircles in narrow bands around each missing Y.
-        strip_x1, strip_x2 = strip
-        band_half = max(30, step // 4)
-        new_clusters = list(clusters)
-
-        for target_y in missing_ys:
-            band_y1 = max(0, target_y - band_half)
-            band_y2 = min(img.shape[0], target_y + band_half)
-            band_x1 = max(0, strip_x1 - 30)
-            band_x2 = min(img.shape[1], strip_x2 + 30)
-            band = img[band_y1:band_y2, band_x1:band_x2]
-            if band.size == 0:
-                continue
-            gray_band = cv2.cvtColor(band, cv2.COLOR_BGR2GRAY)
-            blurred = cv2.GaussianBlur(gray_band, (9, 9), 2)
-
-            # Very relaxed parameters to catch faint circles.
-            raw = cv2.HoughCircles(
-                blurred,
-                cv2.HOUGH_GRADIENT,
-                dp=1.0,
-                minDist=10,
-                param1=50,
-                param2=8,
-                minRadius=3,
-                maxRadius=35,
-            )
-            if raw is not None:
-                cand = np.round(raw[0]).astype(int)
-                # Pick the candidate closest to expected X.
-                best_cx, best_cy, best_cr = None, None, None
-                best_dx = float("inf")
-                for cx_local, cy_local, cr in cand:
-                    cx_abs = band_x1 + int(cx_local)
-                    cy_abs = band_y1 + int(cy_local)
-                    dx = abs(cx_abs - median_x)
-                    if dx < best_dx:
-                        best_dx = dx
-                        best_cx, best_cy, best_cr = cx_abs, cy_abs, int(cr)
-
-                if best_cx is not None and best_dx < step * 0.5:
-                    new_cluster = {
-                        "center_x": best_cx,
-                        "center_y": best_cy,
-                        "median_r": best_cr,
-                        "count": 1,
-                    }
-                    new_clusters.append(new_cluster)
-                    logger.info(
-                        "Recovered missing row at Y=%d (expected=%d, dx=%d)",
-                        best_cy, target_y, int(best_dx),
-                    )
+            worst_idx = None
+            worst_deviation = 0.0
+            for i, g in enumerate(gaps):
+                if g < lo:
+                    dev = lo - g
+                elif g > hi:
+                    dev = g - hi
+                else:
                     continue
+                if dev > worst_deviation:
+                    worst_deviation = dev
+                    worst_idx = i
 
-            # If HoughCircles fails, synthesize at the expected position only
-            # if it falls within 1 step beyond the furthest detected row.
-            furthest_detected = max(ys)
-            if target_y <= furthest_detected + step * 1.2:
-                synth = {
-                    "center_x": median_x,
-                    "center_y": target_y,
-                    "median_r": median_r,
-                    "count": 0,
-                }
-                new_clusters.append(synth)
-                logger.info(
-                    "Synthesized missing row at Y=%d (no circle found, using median X=%d)",
-                    target_y, median_x,
-                )
+            if worst_idx is None:
+                break
 
-        new_clusters.sort(key=lambda c: c["center_y"])
-        # Cap to 5 max.
-        if len(new_clusters) > self.MAX_EXPECTED_OPTIONS:
-            new_clusters = new_clusters[:self.MAX_EXPECTED_OPTIONS]
-        return new_clusters
+            c_left = working[worst_idx]
+            c_right = working[worst_idx + 1]
 
-    def _candidate_strips(self, ap: Rect) -> list[tuple[int, int]]:
-        """Generate deterministic candidate strip ranges inside answer panel."""
-        width = max(
-            self.SEARCH_STRIP_MIN_WIDTH,
-            min(self.SEARCH_STRIP_MAX_WIDTH, int(ap.w * self.SEARCH_STRIP_WIDTH_FRAC)),
-        )
-        right_limit = ap.x + int(ap.w * self.SEARCH_MAX_RIGHT_FRAC)
-        if right_limit <= ap.x + width:
-            right_limit = min(ap.x2, ap.x + width + 10)
+            xs = [c["center_x"] for c in working]
+            median_x = float(np.median(xs))
+            dev_left = abs(c_left["center_x"] - median_x)
+            dev_right = abs(c_right["center_x"] - median_x)
 
-        # Deterministic offsets from panel left. Finer steps for better
-        # isolation of the narrow radio-button column.
-        rel_starts = [0.00, 0.02, 0.04, 0.06, 0.08, 0.10, 0.12, 0.14]
-        strips: list[tuple[int, int]] = []
-        for rel in rel_starts:
-            sx1 = ap.x + int(ap.w * rel)
-            sx2 = min(ap.x2, sx1 + width)
-            if sx2 - sx1 < 40:
-                continue
-            if sx1 >= right_limit:
-                continue
-            strips.append((sx1, sx2))
-
-        if not strips:
-            strips.append((ap.x, min(ap.x2, ap.x + width)))
-
-        # De-duplicate while preserving order.
-        dedup: list[tuple[int, int]] = []
-        seen: set[tuple[int, int]] = set()
-        for s in strips:
-            if s not in seen:
-                seen.add(s)
-                dedup.append(s)
-        return dedup
-
-    def _detect_best_sequence_for_strip(
-        self,
-        img: np.ndarray,
-        strip_x1: int,
-        strip_x2: int,
-        strip_y1: int,
-        strip_y2: int,
-    ) -> tuple[list[dict], float, list[tuple[int, int, int]]]:
-        """Run multi-pass Hough on one strip and return best coherent 3-5 row sequence."""
-        import cv2
-
-        strip_img = img[strip_y1:strip_y2, strip_x1:strip_x2]
-        if strip_img.size == 0:
-            return ([], float("-inf"), [])
-        gray_strip = cv2.cvtColor(strip_img, cv2.COLOR_BGR2GRAY)
-        blurred = cv2.GaussianBlur(gray_strip, (9, 9), 2)
-
-        param_sets = [
-            dict(dp=self.HOUGH_DP, minDist=self.HOUGH_MIN_DIST, param1=self.HOUGH_PARAM1, param2=self.HOUGH_PARAM2, minRadius=self.HOUGH_MIN_RADIUS, maxRadius=self.HOUGH_MAX_RADIUS),
-            dict(dp=1.0, minDist=15, param1=60, param2=12, minRadius=4, maxRadius=28),
-            dict(dp=1.0, minDist=12, param1=60, param2=9, minRadius=4, maxRadius=35),
-            dict(dp=1.0, minDist=10, param1=45, param2=7, minRadius=3, maxRadius=40),
-        ]
-
-        best_seq: list[dict] = []
-        best_score = float("-inf")
-        best_abs_candidates: list[tuple[int, int, int]] = []
-        for ps in param_sets:
-            raw = cv2.HoughCircles(
-                blurred,
-                cv2.HOUGH_GRADIENT,
-                dp=ps["dp"],
-                minDist=ps["minDist"],
-                param1=ps["param1"],
-                param2=ps["param2"],
-                minRadius=ps["minRadius"],
-                maxRadius=ps["maxRadius"],
-            )
-            if raw is None:
-                continue
-            cand = np.round(raw[0]).astype(int)
-            abs_candidates = [(strip_x1 + int(cx), strip_y1 + int(cy), int(cr)) for cx, cy, cr in cand]
-            clusters = self._cluster_by_y(abs_candidates)
-            seq, score = self._select_best_cluster_sequence(clusters)
-            logger.debug(
-                "HoughPass p2=%d: %d raw → %d clusters → best seq %d rows (score=%.0f) cluster_ys=%s",
-                ps["param2"], len(cand), len(clusters), len(seq), score,
-                [c["center_y"] for c in sorted(clusters, key=lambda c: c["center_y"])],
-            )
-            if score > best_score:
-                best_score = score
-                best_seq = seq
-                best_abs_candidates = abs_candidates
-        return (best_seq, best_score, best_abs_candidates)
-
-    def _select_best_cluster_sequence(self, clusters: list[dict]) -> tuple[list[dict], float]:
-        """Pick the best contiguous 3-5 row sequence from cluster candidates."""
-        if not clusters:
-            return ([], float("-inf"))
-        ordered = sorted(clusters, key=lambda c: c["center_y"])
-        n = len(ordered)
-        best_seq: list[dict] = []
-        best_score = float("-inf")
-
-        min_k = min(self.MIN_EXPECTED_OPTIONS, n)
-        max_k = min(self.MAX_EXPECTED_OPTIONS, n)
-        for k in range(max_k, min_k - 1, -1):
-            for i in range(0, n - k + 1):
-                seq = ordered[i : i + k]
-                score = self._score_cluster_sequence(seq)
-                if score > best_score:
-                    best_score = score
-                    best_seq = seq
-        return (best_seq, best_score)
-
-    def _score_cluster_sequence(self, seq: list[dict]) -> float:
-        """Score how much a sequence looks like real radio rows."""
-        if not seq:
-            return float("-inf")
-        k = len(seq)
-        if k < self.MIN_EXPECTED_OPTIONS:
-            return -1e6
-
-        xs = np.array([float(s["center_x"]) for s in seq], dtype=np.float64)
-        ys = np.array([float(s["center_y"]) for s in seq], dtype=np.float64)
-        rs = np.array([float(max(1, s["median_r"])) for s in seq], dtype=np.float64)
-        counts = np.array([float(max(1, s.get("count", 1))) for s in seq], dtype=np.float64)
-
-        if k > 1:
-            y_diffs = np.diff(ys)
-            gap_penalty = float(
-                np.sum((y_diffs < self.MIN_ROW_GAP_PX) | (y_diffs > self.MAX_ROW_GAP_PX))
-            )
-            y_std = float(np.std(y_diffs))
-        else:
-            gap_penalty = 5.0
-            y_std = 999.0
-
-        x_std = float(np.std(xs))
-        r_std = float(np.std(rs))
-        mean_count = float(np.mean(counts))
-        y_span = float(ys[-1] - ys[0]) if k > 1 else 0.0
-
-        # Higher is better.
-        score = 0.0
-        if gap_penalty > 0:
-            return -1e6
-        score += 250.0 if self.MIN_EXPECTED_OPTIONS <= k <= self.MAX_EXPECTED_OPTIONS else -200.0
-        # Strongly prefer more rows — each extra row is very valuable
-        # because missing a real option is far worse than including
-        # one with slight X jitter.
-        score += (k * 55.0)
-        score += (mean_count * 6.0)
-        # X-alignment: penalise but with a soft floor — real radio
-        # buttons can have x_std up to ~25 px due to camera angle.
-        effective_x_std = max(0.0, x_std - 10.0)
-        score -= (effective_x_std * 2.0)
-        score -= (y_std * 0.7)
-        score -= (r_std * 6.0)
-        score -= (gap_penalty * 120.0)
-        score -= (max(0.0, y_span - 1200.0) * 0.25)
-        return score
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
-    def _calibrated_min_row_y(self, image_h: int) -> int:
-        """Return the lowest allowed Y for an option cluster.
-
-        Uses the calibrated pixel position for option A to compute a
-        generous floor.  Any circle more than half a typical inter-option
-        step above calibrated-A is a phantom ("Answer here" header).
-
-        Falls back to 0 (no filtering) when calibration data is unavailable.
-        """
-        try:
-            from calibration.grid_mapper import GridMap
-            gm = GridMap.load()
-        except Exception:
-            return 0
-
-        cap_h = gm.capture_resolution[1] if gm.capture_resolution[1] > 0 else image_h
-
-        calib_ys: list[float] = []
-        for letter in OPTION_LABELS:
-            exact = gm.pixel_positions.get(letter)
-            if exact is not None:
-                screen_y = float(exact[1])
+            if dev_left > dev_right + 5:
+                to_remove = c_left
+            elif dev_right > dev_left + 5:
+                to_remove = c_right
+            elif worst_idx == 0:
+                to_remove = c_left
+            elif worst_idx == len(gaps) - 1:
+                to_remove = c_right
             else:
-                pos = gm.positions.get(letter)
-                if pos is None:
-                    continue
-                cell_h = float(gm.resolution[1]) / float(max(1, gm.grid_size[1]))
-                screen_y = (pos[1] + 0.5) * cell_h
+                to_remove = c_right
 
-            scale_y = gm.transform.get("scale_y", 1.0)
-            offset_y = float(gm.transform.get("offset_y", 0.0))
-            if abs(scale_y) < 1e-9:
-                continue
-            capture_y = (screen_y - offset_y) / scale_y
-            capture_y_for_image = capture_y * image_h / max(1, cap_h)
-            calib_ys.append(capture_y_for_image)
+            logger.debug(
+                "Spacing filter phase 1 iter %d: removing cluster Y=%d "
+                "(gap=%.0f, median_gap=%.0f, range=[%.0f, %.0f])",
+                iteration, to_remove["center_y"], gaps[worst_idx],
+                median_gap, lo, hi,
+            )
+            working = [c for c in working if c is not to_remove]
 
-        if len(calib_ys) < 2:
-            return 0
+        # --- Phase 2: Leave-one-out regularity improvement ---
+        # If we have 5+ clusters, check whether removing any single cluster
+        # produces dramatically more regular spacing.  This catches phantom
+        # options that happen to fall within the ratio thresholds but still
+        # degrade regularity.
+        working = self._leave_one_out_filter(working)
 
-        calib_ys.sort()
-        diffs = [calib_ys[i + 1] - calib_ys[i] for i in range(len(calib_ys) - 1)]
-        step = float(sorted(diffs)[len(diffs) // 2]) if diffs else 200.0
-        min_y = int(calib_ys[0] - step * 0.6)
-        logger.debug(
-            "Calibrated min_row_y=%d (calib_A_y=%.0f, step=%.0f)",
-            min_y, calib_ys[0], step,
-        )
-        return max(0, min_y)
+        removed = len(clusters) - len(working)
+        if removed:
+            logger.debug(
+                "Spacing filter: kept %d/%d clusters",
+                len(working), len(clusters),
+            )
+        return working
+
+    def _leave_one_out_filter(self, clusters: list[dict]) -> list[dict]:
+        """If removing one cluster dramatically improves spacing regularity,
+        remove it.  Only acts when there are 5+ clusters.
+        """
+        if len(clusters) < 5:
+            return clusters
+
+        ordered = sorted(clusters, key=lambda c: c["center_y"])
+
+        def _gap_cv(cs: list[dict]) -> float:
+            """Coefficient of variation of inter-cluster gaps."""
+            if len(cs) < 3:
+                return 0.0
+            ys = [c["center_y"] for c in cs]
+            gaps = [ys[i + 1] - ys[i] for i in range(len(ys) - 1)]
+            mean = float(np.mean(gaps))
+            if mean < 1:
+                return 999.0
+            return float(np.std(gaps)) / mean
+
+        full_cv = _gap_cv(ordered)
+        if full_cv < 0.15:
+            return clusters
+
+        best_removal_idx = None
+        best_cv = full_cv
+
+        for i in range(len(ordered)):
+            subset = ordered[:i] + ordered[i + 1:]
+            cv = _gap_cv(subset)
+            if cv < best_cv:
+                best_cv = cv
+                best_removal_idx = i
+
+        improvement_ratio = (full_cv - best_cv) / max(full_cv, 0.001)
+        if best_removal_idx is not None and improvement_ratio > 0.20:
+            removed = ordered[best_removal_idx]
+            logger.debug(
+                "Leave-one-out: removing cluster Y=%d (CV %.3f → %.3f, "
+                "improvement=%.0f%%)",
+                removed["center_y"], full_cv, best_cv,
+                improvement_ratio * 100,
+            )
+            ordered = ordered[:best_removal_idx] + ordered[best_removal_idx + 1:]
+            return self._leave_one_out_filter(ordered)
+
+        return clusters
+
+    # ------------------------------------------------------------------
+    # Clustering
+    # ------------------------------------------------------------------
 
     def _cluster_by_y(
         self,
         circles: list[tuple[int, int, int]],
+        gap: int | None = None,
     ) -> list[dict]:
-        """
-        Cluster circles by Y-coordinate proximity.
+        """Cluster circles by Y-coordinate proximity.
 
-        Returns list of cluster dicts, each with:
-            center_x: median X of the cluster
-            center_y: median Y of the cluster
-            median_r: median radius
-            count: number of circles in the cluster
+        Returns list of cluster dicts with center_x, center_y,
+        median_r, and count.
         """
         if not circles:
             return []
 
-        # Sort by Y
+        effective_gap = gap if gap is not None else self.Y_CLUSTER_GAP
         sorted_circles = sorted(circles, key=lambda c: c[1])
-
         clusters: list[list[tuple[int, int, int]]] = []
         current_cluster = [sorted_circles[0]]
 
         for i in range(1, len(sorted_circles)):
-            if sorted_circles[i][1] - sorted_circles[i - 1][1] <= self.Y_CLUSTER_GAP:
+            if sorted_circles[i][1] - sorted_circles[i - 1][1] <= effective_gap:
                 current_cluster.append(sorted_circles[i])
             else:
                 clusters.append(current_cluster)
                 current_cluster = [sorted_circles[i]]
         clusters.append(current_cluster)
 
-        # Summarize each cluster
         result = []
         for cluster in clusters:
             if len(cluster) < self.MIN_CLUSTER_SIZE:
@@ -1031,109 +987,17 @@ class OptionDetector:
 
         return result
 
-    def _drop_spacing_outliers(self, clusters: list[dict]) -> list[dict]:
-        """Remove leading/trailing phantom rows that break even spacing.
-
-        Real radio-button rows follow a roughly regular vertical rhythm.
-        A phantom "Answer here" header circle will create an abnormally
-        large first gap.  Similarly a phantom near the bottom can create
-        an abnormally large last gap.
-
-        Algorithm:
-            1. Compute all inter-row gaps.
-            2. If the first gap is > 1.8× the median of the *other* gaps,
-               drop the first cluster (it's a header phantom).
-            3. Repeat analogous check for the last gap.
-        """
-        if len(clusters) < 3:
-            return clusters
-
-        ys = [c["center_y"] for c in clusters]
-        gaps = [ys[i + 1] - ys[i] for i in range(len(ys) - 1)]
-
-        result = list(clusters)
-
-        # Check first row
-        if len(gaps) >= 2:
-            first_gap = gaps[0]
-            other_gaps = gaps[1:]
-            median_other = float(np.median(other_gaps))
-            if median_other > 0 and first_gap > median_other * 1.8:
-                logger.info(
-                    "Dropping phantom header row at Y=%d (first_gap=%d, median_other=%.0f)",
-                    result[0]["center_y"], first_gap, median_other,
-                )
-                result = result[1:]
-
-        # Recompute gaps for trailing check
-        if len(result) >= 3:
-            ys2 = [c["center_y"] for c in result]
-            gaps2 = [ys2[i + 1] - ys2[i] for i in range(len(ys2) - 1)]
-            if len(gaps2) >= 2:
-                last_gap = gaps2[-1]
-                other_gaps2 = gaps2[:-1]
-                median_other2 = float(np.median(other_gaps2))
-                if median_other2 > 0 and last_gap > median_other2 * 1.8:
-                    logger.info(
-                        "Dropping phantom trailing row at Y=%d (last_gap=%d, median_other=%.0f)",
-                        result[-1]["center_y"], last_gap, median_other2,
-                    )
-                    result = result[:-1]
-
-        if len(result) >= self.MIN_EXPECTED_OPTIONS:
-            return result
-        return clusters
-
-    def _trim_to_expected_count(
-        self, clusters: list[dict], target: int, image_h: int = 0,
-    ) -> list[dict]:
-        """Select the best `target`-sized subset of clusters.
-
-        Strategy:
-        1. If calibration data is available, score each contiguous subset
-           by how well it matches the calibrated A-E Y positions (lower
-           total distance = better).  This avoids dropping a real option
-           row just because the first gap is slightly larger.
-        2. Fall back to spacing regularity (lowest gap std) when
-           calibration is unavailable.
-        """
+    def _trim_to_count(self, clusters: list[dict], target: int) -> list[dict]:
+        """Select the best `target`-sized contiguous subset by spacing regularity."""
         if target <= 0 or len(clusters) <= target:
             return clusters
 
         ordered = sorted(clusters, key=lambda c: c["center_y"])
-
-        if image_h <= 0:
-            image_h = max(c["center_y"] for c in ordered) + 500
-
-        calib_ys = self._get_calibrated_option_ys(image_h=image_h)
-        if calib_ys and len(calib_ys) >= target:
-            sorted_cal = sorted(calib_ys.values())[:target]
-            best_subset = ordered[:target]
-            best_dist = float("inf")
-            for start in range(len(ordered) - target + 1):
-                subset = ordered[start : start + target]
-                sub_ys = [c["center_y"] for c in subset]
-                total = sum(
-                    min(abs(sy - cy) for cy in sorted_cal)
-                    for sy in sub_ys
-                )
-                if total < best_dist:
-                    best_dist = total
-                    best_subset = subset
-
-            dropped_ys = [c["center_y"] for c in ordered if c not in best_subset]
-            logger.info(
-                "Trimmed options from %d to %d (calibration-guided, dropped Y=%s, "
-                "total_dist=%.0f)",
-                len(clusters), target, dropped_ys, best_dist,
-            )
-            return best_subset
-
-        # Fallback: spacing regularity.
         best_subset = ordered[:target]
         best_std = float("inf")
+
         for start in range(len(ordered) - target + 1):
-            subset = ordered[start : start + target]
+            subset = ordered[start: start + target]
             ys = [c["center_y"] for c in subset]
             if len(ys) < 2:
                 return subset
@@ -1143,43 +1007,11 @@ class OptionDetector:
                 best_std = std
                 best_subset = subset
 
-        dropped_ys = [c["center_y"] for c in ordered if c not in best_subset]
-        logger.info(
-            "Trimmed options from %d to %d (spacing-based, dropped Y=%s, "
-            "best_spacing_std=%.1f)",
-            len(clusters), target, dropped_ys, best_std,
-        )
         return best_subset
 
-    def _get_calibrated_option_ys(self, image_h: int) -> dict[str, float]:
-        """Load calibrated A-E Y positions in capture-image space.
-
-        Returns dict mapping letter -> capture-space Y, or empty dict.
-        """
-        try:
-            from calibration.grid_mapper import GridMap
-            gm = GridMap.load()
-        except Exception:
-            return {}
-        if gm.resolution[1] <= 0 or image_h <= 0:
-            return {}
-        cap_h = gm.capture_resolution[1] if gm.capture_resolution[1] > 0 else image_h
-        scale_y = float(gm.transform.get("scale_y", 1.0))
-        if abs(scale_y) < 1e-9:
-            return {}
-        result: dict[str, float] = {}
-        for letter in OPTION_LABELS:
-            pos = gm.positions.get(letter)
-            if pos is None:
-                continue
-            _, grid_row = pos
-            cell_h = float(gm.resolution[1]) / float(max(1, gm.grid_size[1]))
-            screen_y = (grid_row + 0.5) * cell_h
-            offset_y = float(gm.transform.get("offset_y", 0.0))
-            capture_y = (screen_y - offset_y) / scale_y
-            capture_y_for_image = capture_y * image_h / max(1, cap_h)
-            result[letter] = capture_y_for_image
-        return result
+    # ------------------------------------------------------------------
+    # Row bounds
+    # ------------------------------------------------------------------
 
     def _compute_option_row(
         self,
@@ -1188,22 +1020,15 @@ class OptionDetector:
         panel_height: int,
         cy_local: int,
     ) -> tuple[int, int]:
-        """
-        Compute top and bottom Y for a row, returned as panel-relative.
+        """Compute top and bottom Y for a row, panel-relative.
 
         Uses midpoints between consecutive cluster centers as boundaries.
-        cy_local is the cluster center Y relative to the panel top.
         """
         n = len(clusters)
         if n <= 1:
             half = panel_height // 6
             return (max(0, cy_local - half), min(panel_height, cy_local + half))
 
-        # Work in panel-relative Y
-        # First compute all cluster Ys relative to the panel
-        # We approximate panel_top from the layout
-        # Since cy_local = clusters[index]["center_y"] - panel_y,
-        # we can derive panel_y:
         panel_y = clusters[index]["center_y"] - cy_local
 
         def to_local(abs_y: int) -> int:
@@ -1223,29 +1048,22 @@ class OptionDetector:
 
         return (row_top, row_bottom)
 
+    # ------------------------------------------------------------------
+    # OCR
+    # ------------------------------------------------------------------
+
     @staticmethod
     def _remove_color_watermark(bgr: np.ndarray) -> np.ndarray:
-        """Remove colored watermark text (red/pink/orange) from an option crop.
-
-        Watermarks on this exam UI are red/pink diagonal numbers.  We
-        detect pixels in the red/pink hue range with moderate-to-high
-        saturation and replace them with white, leaving black option
-        text untouched.
-        """
+        """Remove colored watermark text (red/pink/orange) from an option crop."""
         import cv2
 
         hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
-        # Red wraps around hue 0 and 180 in OpenCV's 0-180 range.
         red_lo1 = cv2.inRange(hsv, np.array([0, 40, 80]), np.array([15, 255, 255]))
         red_lo2 = cv2.inRange(hsv, np.array([160, 40, 80]), np.array([180, 255, 255]))
-        # Pink/magenta range.
         pink = cv2.inRange(hsv, np.array([140, 30, 80]), np.array([170, 255, 255]))
-        # Orange range (some watermarks can be orange-tinted).
         orange = cv2.inRange(hsv, np.array([10, 50, 80]), np.array([25, 255, 255]))
 
         watermark_mask = red_lo1 | red_lo2 | pink | orange
-
-        # Dilate slightly so we erase edges of watermark glyphs too.
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
         watermark_mask = cv2.dilate(watermark_mask, kernel, iterations=1)
 
@@ -1256,8 +1074,8 @@ class OptionDetector:
     def _ocr_text(self, text_region: np.ndarray) -> tuple[str, float]:
         """Run OCR on a cropped text region. Returns (text, confidence).
 
-        Applies watermark removal (color-based), then tries multiple
-        preprocessing strategies across PSM modes and returns the best.
+        Pipeline: watermark removal → grayscale → denoise → adaptive
+        threshold → upscale if small → tesseract PSM 6.
         """
         if text_region.size == 0:
             return ("", 0.0)
@@ -1270,7 +1088,7 @@ class OptionDetector:
             if TESSERACT_CMD.strip():
                 pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD.strip()
 
-            # Step 1: Remove colored watermarks if we have a colour image.
+            # Watermark removal on colour image.
             if len(text_region.shape) == 3 and text_region.shape[2] == 3:
                 cleaned_bgr = self._remove_color_watermark(text_region)
                 gray = cv2.cvtColor(cleaned_bgr, cv2.COLOR_BGR2GRAY)
@@ -1279,65 +1097,51 @@ class OptionDetector:
             else:
                 gray = text_region
 
-            def _upscale(img: np.ndarray) -> np.ndarray:
-                ih, iw = img.shape[:2]
-                if ih < 50:
-                    s = max(2, 80 // max(ih, 1))
-                    return cv2.resize(img, (iw * s, ih * s), interpolation=cv2.INTER_CUBIC)
-                return img
+            denoised = cv2.fastNlMeansDenoising(gray, h=10)
 
-            variants: list[np.ndarray] = []
-
-            # Variant 1: Adaptive threshold.
-            cleaned1 = cv2.adaptiveThreshold(
-                gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            thresh = cv2.adaptiveThreshold(
+                denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                 cv2.THRESH_BINARY, 31, 15,
             )
-            variants.append(_upscale(cleaned1))
 
-            # Variant 2: Otsu threshold.
-            _, cleaned2 = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-            variants.append(_upscale(cleaned2))
+            ih, iw = thresh.shape[:2]
+            if ih < 60:
+                scale = max(2, 80 // max(ih, 1))
+                thresh = cv2.resize(
+                    thresh, (iw * scale, ih * scale),
+                    interpolation=cv2.INTER_CUBIC,
+                )
 
-            # Variant 3: Raw grayscale.
-            variants.append(_upscale(gray))
+            thresh = cv2.copyMakeBorder(
+                thresh, 10, 10, 10, 10,
+                cv2.BORDER_CONSTANT, value=255,
+            )
 
-            best_text = ""
-            best_conf = 0.0
-            whitelist = "0123456789/.-+%()^abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ ,"
+            cfg = "--oem 3 --psm 6"
+            data = pytesseract.image_to_data(
+                thresh,
+                output_type=pytesseract.Output.DICT,
+                config=cfg,
+                timeout=OCR_TIMEOUT_SECONDS,
+            )
 
-            for variant in variants:
-                for psm in (6, 7):
-                    cfg = f"--oem 3 --psm {psm} -c tessedit_char_whitelist={whitelist}"
-                    try:
-                        data = pytesseract.image_to_data(
-                            variant,
-                            output_type=pytesseract.Output.DICT,
-                            config=cfg,
-                            timeout=OCR_TIMEOUT_SECONDS,
-                        )
-                    except Exception:
-                        continue
-                    words = []
-                    confidences = []
-                    for i in range(len(data.get("text", []))):
-                        txt = str(data["text"][i]).strip()
-                        if not txt:
-                            continue
-                        try:
-                            conf = float(data["conf"][i])
-                        except (ValueError, TypeError):
-                            conf = -1.0
-                        if conf >= 0:
-                            words.append(txt)
-                            confidences.append(conf)
-                    text = " ".join(words)
-                    avg = (sum(confidences) / len(confidences)) if confidences else 0.0
-                    if len(text) > len(best_text) or (len(text) == len(best_text) and avg > best_conf):
-                        best_conf = avg
-                        best_text = text
+            words = []
+            confidences = []
+            for i in range(len(data.get("text", []))):
+                txt = str(data["text"][i]).strip()
+                if not txt:
+                    continue
+                try:
+                    conf = float(data["conf"][i])
+                except (ValueError, TypeError):
+                    conf = -1.0
+                if conf >= 0:
+                    words.append(txt)
+                    confidences.append(conf)
 
-            return (best_text, best_conf)
+            text = " ".join(words)
+            avg_conf = (sum(confidences) / len(confidences)) if confidences else 0.0
+            return (text, avg_conf)
 
         except Exception as e:
             logger.debug("OCR failed: %s", e)

@@ -842,6 +842,23 @@ class WorkflowEngine:
                     confidence=min((q_diff or 0) / 20.0 + hamming / 32.0, 1.0),
                 )
 
+            # --- Tier 3: pHash-only moderate signal ---
+            # hamming=4 is above camera noise (0-3) and indicates content
+            # change.  False positives here are harmless: the pHash
+            # same-screen guard in the next process_question cycle catches
+            # them.  False negatives (skipping questions via destructive
+            # NEXT retry) are catastrophic and must be avoided.
+            if hamming >= 4:
+                logger.info(
+                    "NEXT verified via pHash-only moderate signal (hamming=%d)",
+                    hamming,
+                )
+                return VerificationResult(
+                    verified=True,
+                    details="phash_moderate_changed",
+                    confidence=min(hamming / 32.0, 1.0),
+                )
+
             logger.warning(
                 "NEXT verification: screen did NOT change (full=%.1f, q_panel=%s, hamming=%d)",
                 full_mean,
@@ -936,7 +953,7 @@ class WorkflowEngine:
         logger.info("Click attempt 1 for intended option %s", letter)
         dispatched_letter = self._click_option_best_target(letter)
         self._last_dispatched_click_letter = dispatched_letter
-        time.sleep(1.0)
+        time.sleep(1.8)
         verified = self._verify_option_click(dispatched_letter)
         if verified:
             logger.info("Click verified for option %s (dispatched=%s)", letter, dispatched_letter)
@@ -954,7 +971,7 @@ class WorkflowEngine:
         # If the option IS already selected (first click worked, verification
         # was a false negative due to timing/crop), re-clicking would TOGGLE
         # the selection OFF — a destructive outcome worse than a missed click.
-        time.sleep(0.5)
+        time.sleep(1.0)
         pre_retry_verified = self._verify_option_click(dispatched_letter)
         if pre_retry_verified:
             logger.info(
@@ -987,18 +1004,47 @@ class WorkflowEngine:
 
         dispatched_letter = self._click_option_best_target(letter)
         self._last_dispatched_click_letter = dispatched_letter
-        time.sleep(1.0)
+        time.sleep(1.8)
         verified = self._verify_option_click(dispatched_letter)
         if verified:
             logger.info("Retry click verified for option %s (dispatched=%s)", letter, dispatched_letter)
             return
 
         logger.error("Click verification FAILED after retry for option %s", letter)
+
+        alert_type = AlertType.VERIFICATION_FAILURE
+        alert_msg = f"Click verification failed for option {letter} after retry"
+
+        # Diagnostic: compare live click target against calibration as
+        # a drift indicator.  This is informational only — decisions are
+        # always based on live detection, never calibration.
+        if self._last_option_click_target_norm is not None:
+            try:
+                from calibration.grid_mapper import GridMap
+                gm = GridMap.load()
+                calib = gm.pixel_positions.get(letter.strip().upper())
+                if calib is not None:
+                    cap_w, cap_h = gm.capture_resolution
+                    _, norm_y = self._last_option_click_target_norm
+                    py = int(round(norm_y * max(1, cap_h - 1)))
+                    _, click_sy = gm.capture_to_screen_pixel(0, py)
+                    calib_sy = calib[1]
+                    drift = abs(click_sy - calib_sy)
+                    logger.info(
+                        "Drift diagnostic for %s: live_screen_y=%d, calibrated_y=%d, drift=%dpx",
+                        letter, click_sy, calib_sy, drift,
+                    )
+                    if drift > 80:
+                        alert_type = AlertType.CALIBRATION_REQUIRED
+                        alert_msg = (
+                            f"Click {letter} live target is {drift}px from calibration. "
+                            f"Consider recalibrating for optimal coordinate transforms."
+                        )
+            except Exception:
+                pass
+
         self._sm.force_error(f"Input verification failed for option {letter}")
-        self._alerts.raise_alert(
-            AlertType.VERIFICATION_FAILURE,
-            f"Click verification failed for option {letter} after retry",
-        )
+        self._alerts.raise_alert(alert_type, alert_msg)
 
     def _candidate_option_click_sequence(self, intended_letter: str) -> list[str]:
         """
@@ -1038,10 +1084,29 @@ class WorkflowEngine:
         # Keep attempts bounded for runtime predictability.
         return sequence[:4]
 
+    def _log_screen_coords_for_click(self, letter: str, norm_x: float, norm_y: float) -> None:
+        """Log the estimated screen-space pixel position for a click dispatch."""
+        try:
+            from calibration.grid_mapper import GridMap
+            gm = GridMap.load()
+            cap_w, cap_h = gm.capture_resolution
+            px = int(round(norm_x * max(1, cap_w - 1)))
+            py = int(round(norm_y * max(1, cap_h - 1)))
+            sx, sy = gm.capture_to_screen_pixel(px, py)
+            calib = gm.pixel_positions.get(letter)
+            calib_str = f"calibrated=({calib[0]},{calib[1]})" if calib else "no calibration"
+            logger.info(
+                "Click %s screen-space: (%d,%d) from capture(%d,%d), %s",
+                letter, sx, sy, px, py, calib_str,
+            )
+        except Exception:
+            pass
+
     def _click_option_best_target(self, letter: str) -> str:
         """
-        Click an option using precise local-AI target when available,
-        otherwise fallback to calibrated static option mapping.
+        Click an option using live detection only: OCR layout (primary),
+        then local vision assist. Does not fall back to static calibration
+        pixels — if all methods fail, the run errors so the operator can fix framing or detection.
         """
         target_letter = letter.strip().upper()
         if OCR_LAYOUT_PRIMARY_ENABLED and self._latest_interaction_ocr_layout is not None:
@@ -1059,6 +1124,7 @@ class WorkflowEngine:
                     )
                 logger.info("Using OCR-derived content-locked target for option %s", resolved_letter)
                 self._last_option_click_target_norm = (float(ocr_target[0]), float(ocr_target[1]))
+                self._log_screen_coords_for_click(resolved_letter, float(ocr_target[0]), float(ocr_target[1]))
                 self._click.click_at_normalized(
                     ocr_target[0],
                     ocr_target[1],
@@ -1070,6 +1136,7 @@ class WorkflowEngine:
             if ocr_target is not None:
                 logger.info("Using OCR-derived target for option %s", target_letter)
                 self._last_option_click_target_norm = (float(ocr_target[0]), float(ocr_target[1]))
+                self._log_screen_coords_for_click(target_letter, float(ocr_target[0]), float(ocr_target[1]))
                 #region agent log
                 from controller.utils.debug_ndjson import dbg as _dbg
                 _dbg(
@@ -1089,6 +1156,7 @@ class WorkflowEngine:
             target = locate_option_target(self._latest_preprocessed_image_path, target_letter)
             if target is not None:
                 self._last_option_click_target_norm = (float(target[0]), float(target[1]))
+                self._log_screen_coords_for_click(target_letter, float(target[0]), float(target[1]))
                 #region agent log
                 from controller.utils.debug_ndjson import dbg as _dbg
                 _dbg(
@@ -1100,17 +1168,23 @@ class WorkflowEngine:
                 #endregion agent log
                 self._click.click_at_normalized(target[0], target[1], command=f"CLICK_{target_letter}")
                 return target_letter
-        #region agent log
-        from controller.utils.debug_ndjson import dbg as _dbg
-        _dbg(
-            location="controller/orchestrator/workflow_engine.py:_click_option_best_target",
-            message="click option via calibrated fallback",
-            data={"letter": target_letter},
-            hypothesisId="H3",
+        # ALL live detection methods failed — do NOT blindly use stale
+        # calibration data.  Raise an error so the operator can intervene.
+        logger.error(
+            "All live detection methods failed for option %s — "
+            "OCR content-lock, OCR label-based, and local AI all returned None. "
+            "Refusing to click from stale calibration data.",
+            target_letter,
         )
-        #endregion agent log
-        self._last_option_click_target_norm = None
-        self._click.click_option(target_letter)
+        self._sm.force_error(
+            f"Cannot locate option {target_letter} on live screen — "
+            f"all detection methods exhausted"
+        )
+        self._alerts.raise_alert(
+            AlertType.VERIFICATION_FAILURE,
+            f"Could not detect option {target_letter} on screen. "
+            f"Please verify exam screen is visible and retry.",
+        )
         return target_letter
 
     def _verify_option_click(self, letter: str) -> bool:

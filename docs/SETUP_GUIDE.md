@@ -210,7 +210,8 @@ OCR scans whole screen and adaptive radio-circle detection localize option row t
         ↓
 If OCR cannot localize confidently → Local Qwen targeting fallback
         ↓
-Controller maps normalized target to calibrated HID absolute coordinates
+Controller maps normalized target → capture pixels → `grid_map.json`
+transform → screen pixels → HID absolute coordinates
         ↓
 Pi clicks the correct option on exam laptop
         ↓
@@ -258,7 +259,7 @@ When the AI gives a different answer than what's in the database:
 | `ConnectionResetError 10054` during cloud AI call | Transient internet/provider reset. Controller now wraps it as AI provider failure and auto-falls back to alternate provider once |
 | Cloud AI intermittently fails | Retries use exponential backoff (`AI_API_BACKOFF_BASE_SECONDS`: 1s, 2s, ...) before final failure |
 | Local AI not active / timing out early | `start.bat` now enforces Ollama readiness and warmup when `LOCAL_AI_ASSIST_ENABLED=True`; increase `OLLAMA_TIMEOUT_SECONDS` only if needed |
-| Click lands on wrong option | Keep full exam window in frame, rerun calibration. Calibration-anchored labels now use Y-proximity matching to prevent mislabeling when a radio button is missed. Verify `answer_panel_detected_options.png` debug image for correct A..E mapping. Keep `LOCAL_AI_ASSIST_ENABLED=True`. |
+| Click lands on wrong option | Keep full exam window in frame, rerun calibration. Calibration-anchored labels use Y-proximity matching. Verify `answer_panel_detected_options.png` for correct A..E mapping. If clicks are **consistently one option row too low or high** (live detection is correct but HID lands wrong), check `config/grid_map.json` **`transform`**: naive `scale_y = screen_h / capture_h` with zero `offset_y` is often wrong for angled capture; tune `scale_y` / `offset_y` (v1.4.1) or copy a verified `grid_map.json` from a good run. Re-calibration preserves an existing non-naive transform. |
 | Correct option clicked but system still says verification failed | Verification checks the exact click target and falls back to a panel-wide highlight scan. On failure it retries the same option once with fresh detection. If this persists, inspect the verification debug crop for highlight visibility and reduce glare/blur. |
 | NEXT click skips a question | NEXT verification uses multi-tier thresholds (q-panel diff + pHash + combined signals). Fixed in v1.4.0 — if it recurs, check logs for `NEXT verify` threshold values. |
 | Local AI responses are slow | Normal for first query (~5s). Subsequent queries are faster |
@@ -273,6 +274,6 @@ When the AI gives a different answer than what's in the database:
 | `start.bat` | Start everything on PC (Ollama + model + controller) |
 | `start_pi.sh` | Start everything on Pi (HIDPi check + listener) |
 | `.env` | API keys, Pi IP, model config |
-| `config/grid_map.json` | Calibration data (auto-generated) |
+| `config/grid_map.json` | Calibration data (auto-generated): `positions`, `pixel_positions`, `capture_resolution`, **`transform`** (capture→screen; required for accurate `click_at_normalized`) |
 | `runs/` | Session logs, screenshots, AI responses |
 | `database/questions.db` | Question cache (grows over sessions) |

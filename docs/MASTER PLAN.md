@@ -203,6 +203,12 @@ Configuration file:
 
     grid_map.json
 
+The file also stores **`capture_resolution`** and a linear **`transform`**
+(`scale_x`, `scale_y`, `offset_x`, `offset_y`) so normalized capture
+coordinates map to physical exam-screen pixels before HID dispatch.
+Angled phone photography may require non-naive scales/offsets (see
+`docs/SETUP_GUIDE.md`, v1.4.1).
+
 Example coordinates:
 
     option_A

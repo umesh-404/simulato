@@ -192,8 +192,8 @@ simulato/
 │   └── coordinate_solver.py
 │
 ├── config/
-│   ├── grid_map.json                  # Auto-generated calibration data
-│   └── grid_map_template.json
+│   ├── grid_map.json                  # Auto-generated: grid, pixel_positions, capture_resolution, transform
+│   └── grid_map_template.json         # Minimal schema reference (full maps include transform block)
 │
 ├── scripts/
 │   ├── start_controller.sh

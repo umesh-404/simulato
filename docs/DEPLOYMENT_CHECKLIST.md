@@ -89,9 +89,9 @@ curl http://localhost:8000/api/status
 - [x] Capture Phone app open and in Capture Mode
 - [x] Tap **CALIBRATE SCREEN MAP** button on Capture Phone
 - [x] Controller log shows: `Calibration successful: N positions mapped`
-- [x] `config/grid_map.json` saved and loaded
+- [x] `config/grid_map.json` saved and loaded (includes `transform` for capture→screen; v1.4.1+ preserves non-naive transform on re-calibration)
 - [x] Capture Phone shows "Calibration successful" toast
-- [x] Test click on each visible option row verified (3-5 rows, virtual letters A..E)
+- [x] Test click on each visible option row verified (3-5 rows, virtual letters A..E); if clicks land systematically one row off, adjust `transform` in `grid_map.json` or see `docs/SETUP_GUIDE.md`
 - [x] NEXT button click verified
 - [x] NEXT does not double-click after successful navigation (passive re-check + combined-signal verification confirms change before retry)
 - [x] Scroll action verified (if applicable)

@@ -103,6 +103,8 @@ def main() -> None:
             port=CONTROLLER_PORT,
             log_level="info",
             access_log=False,
+            ws_ping_interval=20,
+            ws_ping_timeout=30,
         )
     except KeyboardInterrupt:
         logger.info("Keyboard interrupt received")

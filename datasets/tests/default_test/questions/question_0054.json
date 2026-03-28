@@ -1,0 +1,12 @@
+{
+  "question_id": 54,
+  "canonical_text": "simplify log 10 + log 100 + log 1000 + ........ + log 1000000000||1|45|55|log 10",
+  "option_a": "45",
+  "option_b": "log 10",
+  "option_c": "1",
+  "option_d": "55",
+  "option_e": "",
+  "correct_answer": "45",
+  "answer_letter": "A",
+  "version": 1
+}

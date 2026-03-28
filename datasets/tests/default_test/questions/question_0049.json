@@ -1,0 +1,12 @@
+{
+  "question_id": 49,
+  "canonical_text": "multi choice type question the question below consists of a question and two statements numbered a and b given below it. you have to decide whether the data provided in the statements are sufficient to answer the questions. read both statements and give an answer. the ratio of 2 numbers x and y is 23. what are the values of x and y (a) 3x - 2y  0 (b) 2x + 7y  1||if the question can be answered by using both statements together but not by either statement|if the question can be answered by using either statement alone|if the question can be answered by using statement a alone but not by using b alone|if the question can be answered by using statement b alone but not by using a alone",
+  "option_a": "If the question can be answered by using statement B alone but not by using A alone",
+  "option_b": "If the question can be answered by using both statements together but not by either statement",
+  "option_c": "If the question can be answered by using either statement alone",
+  "option_d": "If the question can be answered by using statement A alone but not by using B alone",
+  "option_e": "",
+  "correct_answer": "If the question can be answered by using statement B alone but not by using A alone",
+  "answer_letter": "A",
+  "version": 1
+}

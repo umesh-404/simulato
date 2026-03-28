@@ -1,0 +1,12 @@
+{
+  "question_id": 50,
+  "canonical_text": "if m and n are whole numbers such that m^n  121 the value of (m - 1)^(n + 1) is||1|10|1000|121",
+  "option_a": "1000",
+  "option_b": "121",
+  "option_c": "10",
+  "option_d": "1",
+  "option_e": "",
+  "correct_answer": "1000",
+  "answer_letter": "A",
+  "version": 1
+}

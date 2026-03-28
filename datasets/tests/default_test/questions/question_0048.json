@@ -1,0 +1,12 @@
+{
+  "question_id": 48,
+  "canonical_text": "the question below consists of a question and two statements numbered a and b given below it. you have to decide whether the data provided in the statement(s) is/are sufficient to answer the question. read both statements and give an answer. what is the fourth number in a given series of even real numbers (a) the sum of the first two numbers is 24. (b) the sum of the last two numbers is 65.||if both the statements taken together are not sufficient and more information is required to solve the question.|if neither statement (a) nor statement (b) is individually sufficient to solve the question but a combination of both is sufficient to solve the question.|if statement (a) alone is sufficient to solve the question but statement (b) alone is not.|if statement (b) alone is sufficient to solve the question but statement (a) alone is not.",
+  "option_a": "if statement (A) alone is sufficient to solve the question, but statement (B) alone is not.",
+  "option_b": "if both the statements taken together are not sufficient and more information is required to solve the question.",
+  "option_c": "if neither statement (A) nor statement (B) is individually sufficient to solve the question, but a combination of both is sufficient to solve the question.",
+  "option_d": "if statement (B) alone is sufficient to solve the question, but statement (A) alone is not.",
+  "option_e": "",
+  "correct_answer": "if both the statements taken together are not sufficient and more information is required to solve the question.",
+  "answer_letter": "B",
+  "version": 1
+}

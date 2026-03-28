@@ -322,12 +322,13 @@ class VerificationEngine:
     def _scan_panel_for_highlight(
         self, img: np.ndarray, cx: int, letter: str,
     ) -> Optional[VerificationResult]:
-        """Scan the answer-panel column for a highlighted row.
+        """Scan the answer-panel column for a blue highlighted option row.
 
-        When the targeted crop misses due to inaccurate coordinates
-        (e.g. synthesized option positions), this scans a vertical column
-        at the same X in 30px steps looking for a saturated band that
-        indicates a selected option.
+        Constrains the scan to the answer panel region (bottom 70% of
+        the image) to avoid false positives from the green header bar
+        or other colored UI chrome.  Only accepts blue-ish hues
+        (H ∈ [90,130] in OpenCV HSV) which match the exam's selection
+        highlight color.
         """
         import cv2
 
@@ -338,33 +339,44 @@ class VerificationEngine:
         if sx2 <= sx1:
             return None
 
-        hsv_strip = cv2.cvtColor(img[0:h, sx1:sx2], cv2.COLOR_BGR2HSV)
+        # Only scan the lower portion where options live — skip the top
+        # 30% which contains the header, navigation bar, and "Answer here".
+        scan_start_y = int(h * 0.30)
+        scan_end_y = h - int(h * 0.05)
+
+        hsv_strip = cv2.cvtColor(img[scan_start_y:scan_end_y, sx1:sx2], cv2.COLOR_BGR2HSV)
         step = 30
         band_half = 20
         best_y = -1
-        best_sat = 0.0
+        best_blue_ratio = 0.0
 
-        for y_center in range(200, h - 200, step):
-            band = hsv_strip[max(0, y_center - band_half):y_center + band_half, :]
+        strip_h = hsv_strip.shape[0]
+        for y_local in range(0, strip_h - band_half, step):
+            band = hsv_strip[max(0, y_local - band_half):y_local + band_half, :]
             if band.size == 0:
                 continue
-            sat_mask = band[:, :, 1] > 80
-            sat_ratio = float(np.count_nonzero(sat_mask)) / max(sat_mask.size, 1)
-            if sat_ratio > 0.40 and sat_ratio > best_sat:
-                best_sat = sat_ratio
-                best_y = y_center
+            # Blue hue range in OpenCV HSV: H ∈ [90, 130], S > 80, V > 80
+            blue_mask = (
+                (band[:, :, 0] >= 90) & (band[:, :, 0] <= 130) &
+                (band[:, :, 1] > 80) &
+                (band[:, :, 2] > 80)
+            )
+            blue_ratio = float(np.count_nonzero(blue_mask)) / max(blue_mask.size, 1)
+            if blue_ratio > 0.25 and blue_ratio > best_blue_ratio:
+                best_blue_ratio = blue_ratio
+                best_y = scan_start_y + y_local
 
         if best_y < 0:
             return None
 
         logger.info(
-            "Panel scan found highlight at Y=%d (sat_ratio=%.2f) for intended %s",
-            best_y, best_sat, letter,
+            "Panel scan found BLUE highlight at Y=%d (blue_ratio=%.2f) for intended %s",
+            best_y, best_blue_ratio, letter,
         )
         return VerificationResult(
             verified=True,
-            details=f"panel_scan_highlight_y={best_y}",
-            confidence=min(best_sat, 1.0),
+            details=f"panel_scan_blue_highlight_y={best_y}",
+            confidence=min(best_blue_ratio, 1.0),
         )
 
     def _verify_with_color_analysis(

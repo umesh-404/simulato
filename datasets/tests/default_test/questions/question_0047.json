@@ -1,0 +1,12 @@
+{
+  "question_id": 47,
+  "canonical_text": "the question below consists of a question and two statements numbered a and b given below it. you have to decide whether the data provided in the statement(s) is/are sufficient to answer the question. read both statements and give an answer. if x and y are integers then what is the value of y (a) xy  27 (b) x  y^2|if both the statements taken together are not sufficient and more information is required to solve the question|if neither statement (a) nor statement (b) is individually sufficient to solve the question but a combination of both is sufficient to solve the question|if statement (a) alone is sufficient to solve the question but statement (b) alone is not|if statement (a) alone is sufficient to solve the question but statement (b) alone is not|if statement (b) alone is sufficient to solve the question but statement (a) alone is not",
+  "option_a": "if both the statements taken together are not sufficient and more information is required to solve the question",
+  "option_b": "if statement (A) alone is sufficient to solve the question, but statement (B) alone is not",
+  "option_c": "if neither statement (A) nor statement (B) is individually sufficient to solve the question, but a combination of both is sufficient to solve the question",
+  "option_d": "if statement (B) alone is sufficient to solve the question, but statement (A) alone is not",
+  "option_e": "if statement (A) alone is sufficient to solve the question, but statement (B) alone is not",
+  "correct_answer": "if neither statement (A) nor statement (B) is individually sufficient to solve the question, but a combination of both is sufficient to solve the question",
+  "answer_letter": "C",
+  "version": 1
+}
