@@ -65,6 +65,7 @@ def _call_api(messages: list[dict]) -> str:
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {GROK_API_KEY}",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     }
     payload = {
         "model": GROK_MODEL,

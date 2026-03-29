@@ -91,8 +91,6 @@ class SystemController:
             "active_ai_provider": self._active_ai_provider,
             "question_number": self._workflow.question_number if self._workflow else 0,
             "api_calls": self._workflow.api_calls if self._workflow else 0,
-            "cache_hits": self._workflow.cache_hits if self._workflow else 0,
-            "image_hash_hits": self._workflow.image_hash_hits if self._workflow else 0,
         }
 
     # ------------------------------------------------------------------
@@ -229,7 +227,6 @@ class SystemController:
 
         self._workflow = WorkflowEngine(
             state_machine=self._sm,
-            db=self._db,
             alert_manager=self._alert_mgr,
             click_dispatcher=self._click_dispatcher,
             verification_engine=self._verification_engine,

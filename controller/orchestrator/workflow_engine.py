@@ -24,25 +24,16 @@ Each step is logged and artifacts are saved for replay (Canonical Law 2, 11).
 import json
 import time
 import threading
+import concurrent.futures
 from pathlib import Path
 from typing import Optional
 
 from controller.ai_pipeline.grok_client import query_grok, GrokAPIError
 from controller.ai_pipeline.gemini_client import query_gemini, GeminiAPIError
-from controller.ai_pipeline.ollama_client import (
-    check_needs_scroll,
-    check_is_answered,
-    check_screen_state,
-    locate_next_button_grid,
-    locate_option_target,
-    locate_next_button_target,
-    OllamaAPIError
-)
+
 from controller.ai_pipeline.response_parser import GrokResponse, ParseError
 from controller.config import (
-    LOCAL_AI_ASSIST_ENABLED,
     OCR_LAYOUT_PRIMARY_ENABLED,
-    OLLAMA_MODEL,
     GROK_MODEL,
     GEMINI_MODEL,
     DEFAULT_AI_PROVIDER,
@@ -55,7 +46,6 @@ from controller.answer_engine.decision_engine import (
     DecisionOutcome,
 )
 from controller.answer_engine.option_matcher import match_option_by_content
-from controller.question_engine.question_matcher import match_question
 from controller.alerts.alert_manager import AlertManager, AlertType, OperatorDecision
 from controller.capture_pipeline.image_receiver import ImageReceiver
 from controller.capture_pipeline.image_stitcher import ImageStitcher
@@ -70,7 +60,7 @@ from controller.hardware_control.verification_engine import VerificationEngine, 
 from controller.orchestrator.state_machine import StateMachine, SystemState
 from controller.utils.logger import get_logger, EventLogger
 from controller.utils.timer import ExecutionTimer
-from database.db_manager import DatabaseManager
+
 
 logger = get_logger("workflow_engine")
 
@@ -89,7 +79,6 @@ class WorkflowEngine:
     def __init__(
         self,
         state_machine: StateMachine,
-        db: DatabaseManager,
         alert_manager: AlertManager,
         click_dispatcher: ClickDispatcher,
         verification_engine: VerificationEngine,
@@ -97,7 +86,6 @@ class WorkflowEngine:
         event_logger: EventLogger,
     ) -> None:
         self._sm = state_machine
-        self._db = db
         self._alerts = alert_manager
         self._click = click_dispatcher
         self._verify = verification_engine
@@ -112,16 +100,12 @@ class WorkflowEngine:
         self._latest_interaction_ocr_layout: Optional[OCRLayoutResult] = None
         self._latest_preprocessed_image_path: Optional[Path] = None
 
-        self._test_id: Optional[int] = None
         self._test_name: Optional[str] = None
         self._question_number = 0
         self._api_calls = 0
-        self._cache_hits = 0
-        self._image_hash_hits = 0
         self._expecting_next_change: bool = False
         self._no_change_after_next_count: int = 0
         self._last_raw_phash: str | None = None
-        self._last_answered_question_id: int | None = None
 
         # Scroll-frame delivery mechanism
         self._scroll_frame_event = threading.Event()
@@ -148,6 +132,12 @@ class WorkflowEngine:
         # once the system resumes after recalibration.
         self._pending_recalib_retry_letter: str | None = None
         self._pending_recalib_retry_answer_text: str = ""
+
+        # Background thread pool for speculative early AI calls.
+        # A single worker ensures at most one speculative call in flight.
+        self._ai_executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="speculative_ai",
+        )
 
     def set_capture_callback(self, callback) -> None:
         """Set callback to request capture from the phone."""
@@ -178,13 +168,7 @@ class WorkflowEngine:
     def api_calls(self) -> int:
         return self._api_calls
 
-    @property
-    def cache_hits(self) -> int:
-        return self._cache_hits
 
-    @property
-    def image_hash_hits(self) -> int:
-        return self._image_hash_hits
 
     @property
     def is_waiting_for_scroll(self) -> bool:
@@ -204,15 +188,11 @@ class WorkflowEngine:
     def set_test_context(self, test_name: str) -> None:
         """Load or create the test context."""
         self._test_name = test_name
-        self._test_id = 1  # DB matching disabled — AI is always queried directly.
         self._question_number = 0
         self._api_calls = 0
-        self._cache_hits = 0
-        self._image_hash_hits = 0
         self._expecting_next_change = False
         self._no_change_after_next_count = 0
         self._last_raw_phash = None
-        self._last_answered_question_id = None
         self._latest_ocr_layout = None
         self._latest_interaction_ocr_layout = None
         self._latest_preprocessed_image_path = None
@@ -252,7 +232,7 @@ class WorkflowEngine:
             logger.warning("Cannot process question — state is %s", self._sm.state.value)
             return None
 
-        if self._test_id is None:
+        if self._test_name is None:
             logger.error("No test context set")
             return None
 
@@ -303,9 +283,9 @@ class WorkflowEngine:
             data={
                 "state": self._sm.state.value,
                 "question_number": self._question_number,
-                "test_id": self._test_id,
+                "test_name": self._test_name,
                 "ocr_enabled": bool(OCR_LAYOUT_PRIMARY_ENABLED),
-                "local_ai_enabled": bool(LOCAL_AI_ASSIST_ENABLED),
+
             },
             hypothesisId="H1",
         )
@@ -354,97 +334,94 @@ class WorkflowEngine:
                 self._last_raw_phash = raw_phash
 
             # Step 2: Validate screen
-            if LOCAL_AI_ASSIST_ENABLED:
-                # Local AI tasks are more robust when they see an anchored, exam-aligned region.
-                initial_preprocessed_path = self._preprocessor.preprocess(image_path)
-                screen_state = check_screen_state(initial_preprocessed_path)
-                if screen_state not in ("QUESTION", "OTHER"):
-                    self._sm.force_error(f"Abnormal screen detected: {screen_state}")
+            validation = self._screen_validator.validate(image_path)
+            if not validation.valid:
+                # False-negative guard: some valid exam screens with light themes
+                # can fail low edge-density checks. If layout + options are found,
+                # proceed deterministically instead of forcing ERROR.
+                if self._is_exam_screen_despite_low_density(image_path, validation):
+                    logger.warning(
+                        "Bypassing low-density screen validation failure because exam layout/options were detected"
+                    )
+                else:
+                    self._sm.force_error(f"Screen validation failed: {validation.issues}")
                     self._alerts.raise_alert(
                         AlertType.UNEXPECTED_SCREEN,
-                        f"Unexpected screen detected: {screen_state}",
+                        f"Unexpected screen detected: {validation.issues}",
                     )
-                    self._log_event("screen_validation_failed", {"issues": screen_state})
+                    self._log_event("screen_validation_failed", {"issues": validation.issues})
                     return None
-            else:
-                validation = self._screen_validator.validate(image_path)
-                if not validation.valid:
-                    # False-negative guard: some valid exam screens with light themes
-                    # can fail low edge-density checks. If layout + options are found,
-                    # proceed deterministically instead of forcing ERROR.
-                    if self._is_exam_screen_despite_low_density(image_path, validation):
-                        logger.warning(
-                            "Bypassing low-density screen validation failure because exam layout/options were detected"
-                        )
-                    else:
-                        self._sm.force_error(f"Screen validation failed: {validation.issues}")
-                        self._alerts.raise_alert(
-                            AlertType.UNEXPECTED_SCREEN,
-                            f"Unexpected screen detected: {validation.issues}",
-                        )
-                        self._log_event("screen_validation_failed", {"issues": validation.issues})
-                        return None
+
+            # --- Speculative early AI call ---
+            # Fire the AI query with the raw image BEFORE preprocessing/OCR/scroll
+            # detection. If no scroll is needed, the AI response will already be
+            # waiting by the time we reach step 6, eliminating the ~2-5s blocking
+            # call. For scroll cases, this result is discarded and a proper call
+            # with the stitched image is made.
+            speculative_future: Optional[concurrent.futures.Future] = None
+            try:
+                speculative_future = self._ai_executor.submit(
+                    self._speculative_ai_query, image_path,
+                )
+                logger.info("Speculative AI call launched with raw image")
+            except Exception as e:
+                logger.warning("Failed to launch speculative AI call: %s", e)
 
             # Step 3: Detect scrolling and capture additional frames
-            # Use Local AI for scroll check if enabled
-            if LOCAL_AI_ASSIST_ENABLED:
-                needs_scroll = check_needs_scroll(initial_preprocessed_path)
-                scroll_direction = "right" # Default direction for stitched questions
-            else:
-                # Prefer panel-aware structural detection when layout is available.
-                needs_scroll = False
-                scroll_direction = "down"
-                try:
-                    layout_for_scroll = None
-                    scroll_ocr_res = None
-                    if OCR_LAYOUT_PRIMARY_ENABLED and self._latest_ocr_layout is not None:
-                        layout_for_scroll = self._latest_ocr_layout.layout
-                    if layout_for_scroll is None:
-                        fallback_layout_res = self._ocr.analyze(initial_preprocessed_path)
-                        scroll_ocr_res = fallback_layout_res
-                        layout_for_scroll = fallback_layout_res.layout if fallback_layout_res is not None else None
-                    if layout_for_scroll is not None:
-                        dual = self._scroll_detector.detect_dual(image_path, layout_for_scroll)
-                        # Respect detector verdict; only override for clearly
-                        # truncated panels (confidence >= 0.35 strongly suggests
-                        # question text is cut off).
-                        needs_scroll = bool(dual.question.needs_scroll or dual.question.confidence >= 0.35)
-                        if not needs_scroll and scroll_ocr_res is not None:
-                            # Option-completeness veto: if the answer panel already
-                            # shows 3+ radio-button options, all content is visible
-                            # and the truncation heuristic should NOT override.
-                            options_veto = False
-                            try:
-                                import cv2
-                                from controller.capture_pipeline.option_detector import OptionDetector
-                                scroll_img = cv2.imread(str(image_path))
-                                if (scroll_img is not None
-                                        and layout_for_scroll is not None
-                                        and layout_for_scroll.answer_panel is not None):
-                                    opt_det = OptionDetector()
-                                    opt_map = opt_det.crop_and_detect(
-                                        scroll_img, layout_for_scroll.answer_panel,
+            # Panel-aware structural detection when layout is available.
+            needs_scroll = False
+            scroll_direction = "down"
+            try:
+                layout_for_scroll = None
+                scroll_ocr_res = None
+                if OCR_LAYOUT_PRIMARY_ENABLED and self._latest_ocr_layout is not None:
+                    layout_for_scroll = self._latest_ocr_layout.layout
+                if layout_for_scroll is None:
+                    fallback_layout_res = self._ocr.analyze(initial_preprocessed_path)
+                    scroll_ocr_res = fallback_layout_res
+                    layout_for_scroll = fallback_layout_res.layout if fallback_layout_res is not None else None
+                if layout_for_scroll is not None:
+                    dual = self._scroll_detector.detect_dual(image_path, layout_for_scroll)
+                    # Respect detector verdict; only override for clearly
+                    # truncated panels (confidence >= 0.35 strongly suggests
+                    # question text is cut off).
+                    needs_scroll = bool(dual.question.needs_scroll or dual.question.confidence >= 0.35)
+                    if not needs_scroll and scroll_ocr_res is not None:
+                        # Option-completeness veto: if the answer panel already
+                        # shows 3+ radio-button options, all content is visible
+                        # and the truncation heuristic should NOT override.
+                        options_veto = False
+                        try:
+                            import cv2
+                            from controller.capture_pipeline.option_detector import OptionDetector
+                            scroll_img = cv2.imread(str(image_path))
+                            if (scroll_img is not None
+                                    and layout_for_scroll is not None
+                                    and layout_for_scroll.answer_panel is not None):
+                                opt_det = OptionDetector()
+                                opt_map = opt_det.crop_and_detect(
+                                    scroll_img, layout_for_scroll.answer_panel,
+                                )
+                                if opt_map is not None and len(opt_map.options) >= 3:
+                                    logger.info(
+                                        "Scroll veto: %d options already visible in answer panel "
+                                        "— overriding truncation heuristic",
+                                        len(opt_map.options),
                                     )
-                                    if opt_map is not None and len(opt_map.options) >= 3:
-                                        logger.info(
-                                            "Scroll veto: %d options already visible in answer panel "
-                                            "— overriding truncation heuristic",
-                                            len(opt_map.options),
-                                        )
-                                        options_veto = True
-                            except Exception:
-                                pass
-                            if not options_veto:
-                                needs_scroll = self._question_panel_text_truncated(scroll_ocr_res)
-                        scroll_direction = "down" if needs_scroll else None
-                    else:
-                        scroll_result = self._scroll_detector.detect(image_path)
-                        needs_scroll = scroll_result.needs_scroll
-                        scroll_direction = scroll_result.direction
-                except Exception:
+                                    options_veto = True
+                        except Exception:
+                            pass
+                        if not options_veto:
+                            needs_scroll = self._question_panel_text_truncated(scroll_ocr_res)
+                    scroll_direction = "down" if needs_scroll else None
+                else:
                     scroll_result = self._scroll_detector.detect(image_path)
                     needs_scroll = scroll_result.needs_scroll
                     scroll_direction = scroll_result.direction
+            except Exception:
+                scroll_result = self._scroll_detector.detect(image_path)
+                needs_scroll = scroll_result.needs_scroll
+                scroll_direction = scroll_result.direction
 
             frames = [image_path]
             if needs_scroll:
@@ -525,33 +502,134 @@ class WorkflowEngine:
             )
             #endregion agent log
 
-            # Steps 5.5 / 5.6 removed: DB image-hash and OCR pre-check bypassed.
-            # The stitched image is always sent directly to the AI.
-
             ai_response = None
             ai_model_used = ""
             answer_text_for_click = ""
+            provider_used = ""
 
-            # Step 6: Query AI directly — DB matching is disabled.
-            try:
-                ai_response, ai_model_used, provider_used = self._query_primary_with_fallback(stitched_path, is_stitched=is_stitched)
-                self._api_calls += 1
-                self._log_event("ai_response", {
-                    "provider": provider_used,
-                    "model": ai_model_used,
-                    "question": ai_response.question[:100],
-                    "answer": ai_response.answer,
-                    "answer_content": ai_response.answer_content[:100],
-                })
-                self._save_ai_response(ai_response, ai_model_used)
-            except (GrokAPIError, GeminiAPIError, OllamaAPIError, ParseError) as e:
-                self._sm.force_error(f"AI processing failed: {e}")
-                self._alerts.raise_alert(
-                    AlertType.AI_PARSE_FAILURE,
-                    f"AI processing failed: {e}",
+            # Step 6: Query AI
+            # Collect the speculative early result (launched right after screen validation,
+            # before preprocessing/OCR/scroll). The speculative call fires grok internally
+            # with up to 2 retries × 30s each = ~61s max. We wait up to 70s to cover that.
+            # This applies for both stitched and non-stitched images — no reason to discard it.
+            SPECULATIVE_WAIT = 70  # seconds — covers grok's full 2-retry cycle (2×30+1s)
+            if speculative_future is not None:
+                try:
+                    spec_response, spec_model, spec_provider = speculative_future.result(
+                        timeout=SPECULATIVE_WAIT,
+                    )
+                    ai_response = spec_response
+                    ai_model_used = spec_model
+                    provider_used = spec_provider
+                    self._api_calls += 1
+                    logger.info(
+                        "Using speculative AI result (provider=%s, model=%s, answer=%s%s)",
+                        spec_provider, spec_model, ai_response.answer,
+                        " [stitched-image-was-sent-separately]" if is_stitched else "",
+                    )
+                    self._log_event("ai_response", {
+                        "provider": provider_used,
+                        "model": ai_model_used,
+                        "question": ai_response.question[:100],
+                        "answer": ai_response.answer,
+                        "answer_content": ai_response.answer_content[:100],
+                        "speculative": True,
+                    })
+                    self._save_ai_response(ai_response, ai_model_used)
+                except Exception as spec_err:
+                    logger.warning(
+                        "Speculative AI call did not complete in time (%s) — falling back to standard call",
+                        spec_err,
+                    )
+                    ai_response = None  # fall through to standard call below
+
+            # For stitched images: even if speculative returned a result (based on first raw
+            # frame), the standard call with the full stitched composite is more accurate.
+            # Only discard speculative result when scrolling was required AND we got one.
+            if is_stitched and ai_response is not None:
+                logger.info(
+                    "Speculative result (answer=%s) available but stitched image requires re-query for completeness",
+                    ai_response.answer,
                 )
-                self._log_event("ai_error", {"error": str(e)})
-                return None
+                # Keep the speculative result as an emergency fallback, then try standard.
+                _speculative_fallback = (ai_response, ai_model_used, provider_used)
+                ai_response = None
+            else:
+                _speculative_fallback = None
+
+            # Standard AI call: used for scroll/stitched cases or when speculative failed.
+            if ai_response is None:
+                try:
+                    ai_response, ai_model_used, provider_used = self._query_primary_with_fallback(stitched_path, is_stitched=is_stitched)
+                    self._api_calls += 1
+                    self._log_event("ai_response", {
+                        "provider": provider_used,
+                        "model": ai_model_used,
+                        "question": ai_response.question[:100],
+                        "answer": ai_response.answer,
+                        "answer_content": ai_response.answer_content[:100],
+                        "speculative": False,
+                    })
+                    self._save_ai_response(ai_response, ai_model_used)
+                except (GrokAPIError, GeminiAPIError, ParseError) as e:
+                    # Standard call failed. Last-resort: check if speculative future
+                    # has since completed (it runs independently in the executor thread).
+                    # This prevents crashes when grok is slow but eventually returns.
+                    recovered = False
+                    if speculative_future is not None and speculative_future.done():
+                        try:
+                            spec_response, spec_model, spec_provider = speculative_future.result(timeout=0)
+                            ai_response = spec_response
+                            ai_model_used = spec_model
+                            provider_used = spec_provider
+                            self._api_calls += 1
+                            recovered = True
+                            logger.warning(
+                                "Standard call failed but speculative future completed — "
+                                "recovered with answer=%s (provider=%s)",
+                                ai_response.answer, spec_provider,
+                            )
+                            self._log_event("ai_response", {
+                                "provider": provider_used,
+                                "model": ai_model_used,
+                                "question": ai_response.question[:100],
+                                "answer": ai_response.answer,
+                                "answer_content": ai_response.answer_content[:100],
+                                "speculative": True,
+                                "recovery": True,
+                            })
+                            self._save_ai_response(ai_response, ai_model_used)
+                        except Exception:
+                            pass
+
+                    # Fall back to speculative result cached from stitched case.
+                    if not recovered and _speculative_fallback is not None:
+                        ai_response, ai_model_used, provider_used = _speculative_fallback
+                        self._api_calls += 1
+                        recovered = True
+                        logger.warning(
+                            "Standard call failed — using speculative fallback result: answer=%s",
+                            ai_response.answer,
+                        )
+                        self._log_event("ai_response", {
+                            "provider": provider_used,
+                            "model": ai_model_used,
+                            "question": ai_response.question[:100],
+                            "answer": ai_response.answer,
+                            "answer_content": ai_response.answer_content[:100],
+                            "speculative": True,
+                            "recovery": True,
+                        })
+                        self._save_ai_response(ai_response, ai_model_used)
+
+                    if not recovered:
+                        self._sm.force_error(f"AI processing failed: {e}")
+                        self._alerts.raise_alert(
+                            AlertType.AI_PARSE_FAILURE,
+                            f"AI processing failed: {e}",
+                        )
+                        self._log_event("ai_error", {"error": str(e)})
+                        return None
 
             # Step 7: Build decision directly from AI response (DB matching disabled).
             logger.info("Using AI answer directly: %s", ai_response.answer if ai_response else "None")
@@ -560,7 +638,6 @@ class WorkflowEngine:
                 outcome=DecisionOutcome.CLICK,
                 click_letter=ai_response.answer if ai_response is not None else None,
                 source="ai_direct",
-                question_id=None,
             )
             # Remap by live on-screen option content to handle shuffled options.
             if decision.click_letter and ai_response is not None:
@@ -599,36 +676,17 @@ class WorkflowEngine:
                             layout_obj.set_max_options(expected_options)
 
             # Step 9: Execute click
-            # Guard: if this is the same question we just answered (NEXT
-            # failed to navigate), the option is already selected on screen.
-            # Re-clicking it would deselect it (toggle behaviour).
-            already_answered = (
-                decision.question_id is not None
-                and decision.question_id == self._last_answered_question_id
-            )
-            if already_answered:
-                logger.warning(
-                    "Same question_id=%d already answered — skipping option click to avoid deselection",
-                    decision.question_id,
-                )
-            elif decision.click_letter:
+            if decision.click_letter:
                 self._current_answer_text_for_click = answer_text_for_click.strip()
                 self._execute_click_with_verification(decision.click_letter)
 
-            if decision.click_letter or already_answered:
+            if decision.click_letter:
                 self._log_event("answer_decision", {
                     "question_number": self._question_number,
                     "click_letter": decision.click_letter,
                     "dispatched_letter": self._last_dispatched_click_letter,
                     "source": decision.source,
-                    "question_id": decision.question_id,
-                    "skipped_click": already_answered,
                 })
-            if decision.question_id is not None:
-                self._last_answered_question_id = decision.question_id
-
-            # Step 10: AI response already saved to file via _save_ai_response.
-            # DB snapshot storage is disabled.
 
             return decision
 
@@ -1269,27 +1327,11 @@ class WorkflowEngine:
                     command=f"CLICK_{target_letter}",
                 )
                 return target_letter
-        if LOCAL_AI_ASSIST_ENABLED and self._latest_preprocessed_image_path is not None:
-            target = locate_option_target(self._latest_preprocessed_image_path, target_letter)
-            if target is not None:
-                self._last_option_click_target_norm = (float(target[0]), float(target[1]))
-                self._log_screen_coords_for_click(target_letter, float(target[0]), float(target[1]))
-                #region agent log
-                from controller.utils.debug_ndjson import dbg as _dbg
-                _dbg(
-                    location="controller/orchestrator/workflow_engine.py:_click_option_best_target",
-                    message="click option via local_ai locate_option_target",
-                    data={"letter": target_letter, "norm_x": float(target[0]), "norm_y": float(target[1])},
-                    hypothesisId="H3",
-                )
-                #endregion agent log
-                self._click.click_at_normalized(target[0], target[1], command=f"CLICK_{target_letter}")
-                return target_letter
         # ALL live detection methods failed — do NOT blindly use stale
         # calibration data.  Raise an error so the operator can intervene.
         logger.error(
             "All live detection methods failed for option %s — "
-            "OCR content-lock, OCR label-based, and local AI all returned None. "
+            "OCR content-lock and OCR label-based both returned None. "
             "Refusing to click from stale calibration data.",
             target_letter,
         )
@@ -1308,8 +1350,7 @@ class WorkflowEngine:
         """
         Verify whether an option click was registered.
 
-        Uses Local AI (Qwen) if enabled, otherwise falls back
-        to the CV-based verification engine.
+        Uses the CV-based verification engine.
         """
         self._verification_frame_event.clear()
         self._verification_frame_data = None
@@ -1325,24 +1366,15 @@ class WorkflowEngine:
             return False
 
         verify_path = self._receiver.receive_image(self._verification_frame_data)
-        if LOCAL_AI_ASSIST_ENABLED:
-            verify_preprocessed_path = self._preprocessor.preprocess(verify_path)
-            verified, selected = check_is_answered(verify_preprocessed_path)
-            if not verified:
-                return False
-            if selected is None:
-                return False
-            return selected.strip().upper() == letter.strip().upper()
 
-        # Prefer verification around the exact OCR/local click target used.
+        # Prefer verification around the exact OCR click target used.
         if self._last_option_click_target_norm is not None:
             nx, ny = self._last_option_click_target_norm
             exact = self._verify.verify_click_at_normalized_on_image(letter, verify_path, nx, ny)
             if exact.verified:
                 return True
 
-        # Local AI assist disabled: still verify against a dedicated fresh frame,
-        # never reuse the pre-click screenshot path.
+        # CV-based verification against a dedicated fresh frame.
         return self._verify.verify_click_on_image(letter, verify_path).verified
 
     def _refresh_interaction_targets_post_ai(self) -> None:
@@ -1445,12 +1477,9 @@ class WorkflowEngine:
             additional_frames.append(frame_path)
             logger.info("Scroll frame %d captured: %s", i + 1, frame_path)
 
-            # Check if more scrolling is needed (local AI first if enabled)
-            if LOCAL_AI_ASSIST_ENABLED:
-                still_needs_scroll = check_needs_scroll(self._preprocessor.preprocess(frame_path))
-            else:
-                scroll_result = self._scroll_detector.detect(frame_path)
-                still_needs_scroll = scroll_result.needs_scroll
+            # Check if more scrolling is needed
+            scroll_result = self._scroll_detector.detect(frame_path)
+            still_needs_scroll = scroll_result.needs_scroll
             if not still_needs_scroll:
                 logger.info("No more scrolling needed after frame %d", i + 1)
                 break
@@ -1504,104 +1533,6 @@ class WorkflowEngine:
                 pass
         return None
 
-    def _validate_cache_hit(self, cached: dict) -> bool:
-        """Validate an image-hash cache hit against live on-screen content.
-
-        Prevents false identity reuse when two different questions hash
-        similarly (adjacent questions with matching layouts).
-
-        Checks:
-            1. Same-question-id guard: if we just answered this exact
-               question_id, it's likely a genuine same-screen (NEXT failed).
-            2. Option text overlap: at least one stored option must
-               fuzzy-match a detected on-screen option.
-
-        Returns True if the match is sufficiently confirmed, False if
-        the cache hit should be rejected.
-        """
-        cached_qid = cached.get("question_id")
-
-        # Guard 1: If this is the exact question we just answered,
-        # the screen genuinely hasn't changed — trust the hit.
-        # BUT: if we just successfully navigated (_expecting_next_change),
-        # we're guaranteed on a different question. A pHash collision
-        # to the same question_id must NOT be auto-trusted; fall through
-        # to Guard 2 (option text overlap) for real validation.
-        if (
-            cached_qid is not None
-            and cached_qid == self._last_answered_question_id
-            and not self._expecting_next_change
-        ):
-            logger.info(
-                "Cache hit validated: same question_id=%d as last answered",
-                cached_qid,
-            )
-            return True
-
-        # Guard 2: Option text overlap.
-        # Compare stored option texts against live OCR-detected options.
-        # This catches the case where two different questions hash similarly
-        # but have completely different option content.
-        if self._latest_ocr_layout is not None:
-            option_map = self._latest_ocr_layout.get_option_map()
-            if option_map is not None and hasattr(option_map, "options") and option_map.options:
-                from controller.utils.text_normalizer import normalize_for_matching
-
-                stored_opts = [
-                    cached.get("option_a", ""),
-                    cached.get("option_b", ""),
-                    cached.get("option_c", ""),
-                    cached.get("option_d", ""),
-                    cached.get("option_e", ""),
-                ]
-                stored_norm = {
-                    normalize_for_matching(o) for o in stored_opts if o.strip()
-                }
-
-                detected_norm = set()
-                for opt in option_map.options:
-                    txt = getattr(opt, "text", "") or ""
-                    if txt.strip():
-                        detected_norm.add(normalize_for_matching(txt))
-
-                if stored_norm and detected_norm:
-                    # Check if any stored option is a substring of (or equals)
-                    # any detected option, or vice versa. This handles partial
-                    # OCR reads (e.g., OCR reads "23.5" from "Rs. 23.5 crore").
-                    overlap = False
-                    for s in stored_norm:
-                        if not s:
-                            continue
-                        for d in detected_norm:
-                            if not d:
-                                continue
-                            # Exact match or significant substring overlap
-                            if s == d or (len(s) >= 4 and s in d) or (len(d) >= 4 and d in s):
-                                overlap = True
-                                break
-                        if overlap:
-                            break
-
-                    if not overlap:
-                        logger.warning(
-                            "Cache hit validation FAILED: zero option text overlap "
-                            "(stored=%r, detected=%r)",
-                            stored_norm,
-                            detected_norm,
-                        )
-                        return False
-                    logger.info("Cache hit validated: option text overlap confirmed")
-                else:
-                    # Not enough data to validate — trust the hash
-                    logger.debug("Cache hit validation: insufficient option data, trusting hash")
-            else:
-                # No option map available — trust the hash
-                logger.debug("Cache hit validation: no option map available, trusting hash")
-        else:
-            # No OCR layout — trust the hash
-            logger.debug("Cache hit validation: no OCR layout available, trusting hash")
-
-        return True
 
     def _compute_image_phash(self, image_path: Path, hash_size: int = 8) -> str | None:
         """
@@ -1630,6 +1561,63 @@ class WorkflowEngine:
         median = float(np.median(dct_low))
         bits = (dct_low > median).astype(int).flatten()
         return "".join(str(b) for b in bits)
+
+    def _speculative_ai_query(
+        self,
+        raw_image_path: Path,
+    ) -> tuple[GrokResponse, str, str]:
+        """Run the AI query speculatively in a background thread.
+
+        Uses the raw captured image (before preprocessing/stitching) with
+        no OCR context.  The vision models can still read the question and
+        options directly from the raw screenshot.
+
+        Returns:
+            (GrokResponse, model_name, provider_name) — same as
+            _query_primary_with_fallback.
+
+        Raises on any AI/parse error so that Future.result() surfaces it.
+        """
+        if self._ai_provider == "gemini":
+            primary = ("gemini", GEMINI_MODEL, query_gemini, bool(GEMINI_API_KEY))
+            secondary = ("grok", GROK_MODEL, query_grok, bool(GROK_API_KEY))
+        else:
+            primary = ("grok", GROK_MODEL, query_grok, bool(GROK_API_KEY))
+            secondary = ("gemini", GEMINI_MODEL, query_gemini, bool(GEMINI_API_KEY))
+
+        provider_name, model_name, query_fn, enabled = primary
+        if not enabled:
+            raise ParseError(f"Primary AI provider '{provider_name}' is not configured")
+
+        try:
+            logger.info(
+                "[Speculative] Querying cloud %s AI (%s) with raw image",
+                provider_name.capitalize(), model_name,
+            )
+            response = query_fn(raw_image_path, ocr_context="", is_stitched=False)
+            logger.info(
+                "[Speculative] AI response received: answer=%s",
+                response.answer,
+            )
+            return response, model_name, provider_name
+        except (GrokAPIError, GeminiAPIError, ParseError) as primary_error:
+            logger.warning(
+                "[Speculative] Primary provider '%s' failed: %s",
+                provider_name, primary_error,
+            )
+            fallback_name, fallback_model, fallback_fn, fallback_enabled = secondary
+            if not fallback_enabled:
+                raise primary_error
+            logger.info(
+                "[Speculative] Falling back to cloud %s AI (%s)",
+                fallback_name.capitalize(), fallback_model,
+            )
+            response = fallback_fn(raw_image_path, ocr_context="", is_stitched=False)
+            logger.info(
+                "[Speculative] Fallback AI response received: answer=%s",
+                response.answer,
+            )
+            return response, fallback_model, fallback_name
 
     def _query_primary_with_fallback(
         self,
@@ -1746,68 +1734,6 @@ class WorkflowEngine:
         except Exception:
             return False
 
-    def _try_db_decision_from_ocr(self) -> Optional[AnswerDecision]:
-        """
-        Attempt a DB-only decision using OCR-extracted question/options.
-        This runs before cloud AI to reduce unnecessary API calls.
-        """
-        try:
-            if self._latest_ocr_layout is None or self._latest_ocr_layout.layout is None:
-                return None
-            layout = self._latest_ocr_layout.layout
-            q_panel = layout.question_panel
-            if q_panel is None:
-                return None
-
-            # Build question text from OCR words inside question panel.
-            q_words = [
-                w for w in self._latest_ocr_layout.words
-                if q_panel.x <= w.cx <= q_panel.x2 and q_panel.y <= w.cy <= q_panel.y2
-            ]
-            if len(q_words) < 8:
-                return None
-            q_words_sorted = sorted(q_words, key=lambda w: (w.y, w.x))
-            question_text = " ".join(w.text for w in q_words_sorted).strip()
-            if len(question_text) < 40:
-                return None
-
-            option_map = self._latest_ocr_layout.get_option_map()
-            if option_map is None or not option_map.options:
-                return None
-            current_options = {opt.label: (opt.text or "") for opt in option_map.options}
-            non_empty = sum(1 for t in current_options.values() if (t or "").strip())
-            if non_empty < 2:
-                return None
-
-            match = match_question(
-                db=self._db,
-                test_id=self._test_id,
-                question_text=question_text,
-                options=current_options,
-            )
-            if not match.is_cached or not match.question_record:
-                return None
-
-            db_answer = match.correct_answer or ""
-            option_match = match_option_by_content(db_answer, current_options)
-            if not option_match.found or not option_match.matched_letter:
-                return None
-
-            logger.info(
-                "OCR DB pre-check HIT: question_id=%d source=%s mapped=%s",
-                match.question_record["question_id"],
-                match.source.value,
-                option_match.matched_letter,
-            )
-            return AnswerDecision(
-                outcome=DecisionOutcome.CLICK,
-                click_letter=option_match.matched_letter,
-                source=f"database_ocr_{match.source.value}",
-                question_id=match.question_record["question_id"],
-                match_result=match,
-            )
-        except Exception:
-            return None
 
     def _is_exam_screen_despite_low_density(self, image_path: Path, validation) -> bool:
         """

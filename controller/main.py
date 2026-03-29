@@ -14,10 +14,6 @@ import uvicorn
 from controller.config import (
     CONTROLLER_HOST,
     CONTROLLER_PORT,
-    LOCAL_AI_ASSIST_ENABLED,
-    OLLAMA_API_URL,
-    OLLAMA_MODEL,
-    OLLAMA_KEEP_ALIVE,
 )
 from controller.orchestrator.system_controller import SystemController
 from controller.mobile_api.api_server import (
@@ -33,52 +29,10 @@ from controller.utils.logger import get_logger
 
 logger = get_logger("main")
 
-
-def warmup_ollama() -> None:
-    """
-    Pre-load the Ollama model into GPU memory by sending a
-    lightweight warmup request. This eliminates the 10-30 second
-    cold start delay on the first real image processing call.
-
-    Runs in a background thread so it doesn't block server startup.
-    """
-    if not LOCAL_AI_ASSIST_ENABLED:
-        logger.info("Local AI assist disabled — skipping model warmup")
-        return
-
-    def _warmup():
-        import requests
-        logger.info("Warming up local AI model: %s", OLLAMA_MODEL)
-        try:
-            payload = {
-                "model": OLLAMA_MODEL,
-                "messages": [{"role": "user", "content": "hi"}],
-                "stream": False,
-                "keep_alive": OLLAMA_KEEP_ALIVE,
-            }
-            resp = requests.post(OLLAMA_API_URL, json=payload, timeout=120)
-            resp.raise_for_status()
-            logger.info("Local AI model loaded into GPU successfully")
-        except requests.exceptions.ConnectionError:
-            logger.warning(
-                "Ollama server not reachable at %s. "
-                "Local AI features will be unavailable until Ollama is running.",
-                OLLAMA_API_URL,
-            )
-        except Exception as e:
-            logger.warning("Ollama warmup failed: %s", e)
-
-    thread = threading.Thread(target=_warmup, daemon=True, name="ollama-warmup")
-    thread.start()
-
-
 def main() -> None:
     logger.info("=" * 60)
     logger.info("SIMULATO CONTROLLER — Starting")
     logger.info("=" * 60)
-
-    # Pre-load local AI model into GPU (background thread)
-    warmup_ollama()
 
     controller = SystemController()
     if not controller.connect_pi():

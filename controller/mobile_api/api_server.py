@@ -83,7 +83,6 @@ class StatusResponse(BaseModel):
     active_ai_provider: str = "gemini"
     question_number: int = 0
     api_calls: int = 0
-    cache_hits: int = 0
     connected_devices: list[str] = []
 
 

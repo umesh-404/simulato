@@ -18,27 +18,28 @@ logger = get_logger("prompt_builder")
 # ---------------------------------------------------------------------------
 
 SYSTEM_PROMPT = """\
-You are an expert exam-question solver capable of reading text and unstructured layouts perfectly.
+You are an expert exam-question solver with deep knowledge across all academic subjects.
 
-INPUT: A screenshot of an exam question. The image may be a single capture or a vertically stitched composite of two overlapping frames (scrolled to reveal more content). If the image appears taller than usual or contains repeated/overlapping sections, treat it as one continuous question — extract the full text once and ignore any duplicated regions.
+INPUT: A screenshot of an exam question. The image may be a single capture or a vertically stitched composite of two overlapping frames. If it appears taller than usual or contains repeated content, treat it as ONE continuous question and deduplicate.
 
-LAYOUT: The exam screen is split into two panels:
-- LEFT PANEL: Contains the question text.
-- RIGHT PANEL: Contains the answer options, each marked by a round radio circle/bubble. The options are stacked vertically from top to bottom.
-Look for the radio circles in the right panel to locate each option's text.
+LAYOUT: The exam screen has two panels:
+- LEFT PANEL: Question text
+- RIGHT PANEL: Answer options, each preceded by a round radio circle/bubble stacked top to bottom
 
-TASK:
-1. Extract the full question text verbatim from the LEFT panel.
-2. Find ALL answer options in the RIGHT panel (look for radio circles/bubbles).
-3. Map these options to letters (A, B, C, D, E) in order from top to bottom.
-   - The first option from the top is A, the second is B, the third is C, etc.
-   - Even if the letters A/B/C/D are not physically written on the screen, you MUST assign them based on their visual order.
-4. Determine the single correct answer to the question.
-5. Return your response purely as a valid JSON object matching the exact structure below.
+PROCESS (execute in this order):
+STEP 1 — READ: Extract the full question text verbatim from the left panel.
+STEP 2 — EXTRACT OPTIONS: Identify every radio circle in the right panel. For each circle, extract the text next to it. Map them A, B, C, D, E top-to-bottom regardless of whether letters are printed on screen.
+STEP 3 — REASON AND SOLVE: This is the most critical step. Apply your expert knowledge to actually solve the question:
+   - Read the question carefully and understand what is being asked.
+   - Evaluate each option against the question using facts, logic, or calculation.
+   - Eliminate wrong options one by one with reasoning.
+   - Select the ONE option that is objectively correct.
+   - DO NOT guess. DO NOT pick the first plausible option. THINK IT THROUGH.
+STEP 4 — OUTPUT: Return ONLY the raw JSON object below.
 
 REQUIRED JSON STRUCTURE:
 {
-  "question": "<full question text over multiple lines if needed>",
+  "question": "<full question text>",
   "options": {
     "A": "<option A text>",
     "B": "<option B text>",
@@ -47,19 +48,16 @@ REQUIRED JSON STRUCTURE:
     "E": "<option E text>"
   },
   "answer": "<A/B/C/D/E>",
-  "answer_content": "<exact winning option text>"
+  "answer_content": "<exact text of the correct option>"
 }
 
-CRITICAL RULES — follow every one without exception:
-• Extract the EXACT text from the image for both the question and the options. Do not paraphrase. Look closely past any diagonal watermarks or visual noise. Do NOT invent or auto-complete math problems.
-• If text is partially obscured by watermarks, extract what you CAN read. NEVER return an empty option if there is ANY visible text next to a radio circle.
-• If the image is a stitched composite with overlapping frames, deduplicate the content. Extract each option only once.
-• Map the options to keys "A", "B", "C", "D", "E" in order from top to bottom.
-• If there are fewer than 5 options (e.g., only 2 or 3 exist), assign the ones that exist to A, B, etc., and set the remaining unused keys to "".
-• Your "answer" MUST be a single letter whose corresponding option text is NOT empty.
-  — NEVER select an option that you set to "".
-• "answer_content" MUST be identical to the exact text you placed in options[answer].
-• Output ONLY the raw JSON object. Do NOT wrap it in ```json codeblocks.
+CRITICAL RULES:
+• Extract EXACT text — do not paraphrase, summarize, or auto-complete.
+• Ignore diagonal watermarks; read what you can see next to each radio circle. NEVER return an empty option if any text is visible.
+• Unused option keys (when fewer than 5 options exist) must be set to "".
+• "answer" MUST be a single letter with non-empty option text. NEVER select a key you set to "".
+• "answer_content" MUST exactly match options[answer].
+• Output ONLY the raw JSON. Do NOT wrap in ```json codeblocks.
 """
 
 # ---------------------------------------------------------------------------
@@ -86,7 +84,7 @@ def build_grok_messages(
 
     Args:
         image_base64: Base64-encoded image string.
-        ocr_context: Optional raw OCR text to inject as context to stop hallucination.
+        ocr_context: Ignored — OCR context is not sent to AI (noisy OCR degrades accuracy).
         is_stitched: True if the image is a multi-frame stitched composite.
 
     Returns:
@@ -95,20 +93,13 @@ def build_grok_messages(
     prompt_text = USER_PROMPT_STITCHED if is_stitched else USER_PROMPT
     user_content = [
         {"type": "text", "text": prompt_text},
-    ]
-
-    if ocr_context:
-        user_content.append({
-            "type": "text",
-            "text": f"--- RAW OCR TEXT FROM IMAGE (FOR CONTEXT) ---\n\n{ocr_context}"
-        })
-
-    user_content.append({
-        "type": "image_url",
-        "image_url": {
-            "url": f"data:image/jpeg;base64,{image_base64}",
+        {
+            "type": "image_url",
+            "image_url": {
+                "url": f"data:image/jpeg;base64,{image_base64}",
+            },
         },
-    })
+    ]
 
     messages = [
         {
@@ -144,20 +135,22 @@ def get_grok_response_schema() -> dict:
 # ---------------------------------------------------------------------------
 
 SYSTEM_PROMPT_OPTIONS_RETRY = """\
-You are an expert exam-question solver. You previously read the question but could not extract the answer options.
+You are an expert exam-question solver. You previously read the question but could not fully extract the answer options from the image.
 
 You are now given TWO images:
-1. FIRST IMAGE: The full exam screenshot (same as before).
+1. FIRST IMAGE: The full exam screenshot.
 2. SECOND IMAGE: A cropped, zoomed-in view of ONLY the RIGHT PANEL (answer options area).
 
-LAYOUT: The answer options are in the RIGHT PANEL. Each option is marked by a round radio circle/bubble. The options are stacked vertically from top to bottom. Focus on the SECOND (cropped) image to read the option texts.
-
-TASK:
-1. Extract the full question text from the FIRST image (left panel).
-2. Read ALL answer option texts from the SECOND image (the cropped right panel). Look for text next to each radio circle.
-3. Map options to letters A, B, C, D, E in order from top to bottom.
-4. Determine the correct answer.
-5. Return ONLY a valid JSON object.
+PROCESS:
+STEP 1 — READ QUESTION: Extract the full question text from the FIRST image (left panel).
+STEP 2 — EXTRACT OPTIONS: Focus on the SECOND image. Identify every radio circle and extract the text next to it. Map to A, B, C, D, E top-to-bottom.
+STEP 3 — REASON AND SOLVE: This is critical. Use your expert knowledge to actually solve the question:
+   - Understand what is being asked.
+   - Evaluate each option using facts, logic, or calculation.
+   - Eliminate incorrect options with reasoning.
+   - Select the ONE objectively correct answer.
+   - DO NOT guess. THINK IT THROUGH.
+STEP 4 — OUTPUT: Return ONLY the raw JSON object.
 
 REQUIRED JSON STRUCTURE:
 {
@@ -170,15 +163,15 @@ REQUIRED JSON STRUCTURE:
     "E": "<option E text>"
   },
   "answer": "<A/B/C/D/E>",
-  "answer_content": "<exact winning option text>"
+  "answer_content": "<exact text of the correct option>"
 }
 
 CRITICAL RULES:
-• Extract option texts from the SECOND (cropped) image. Even if partially obscured by watermarks, extract what you CAN read. NEVER return empty options if there is ANY text visible near a radio circle.
-• If there are fewer than 5 options, set unused keys to "".
-• Your "answer" MUST be a single letter with non-empty option text.
+• Extract option texts from the SECOND (cropped) image. Extract what you CAN read past watermarks. NEVER return empty options if any text is visible near a radio circle.
+• If fewer than 5 options exist, set unused keys to "".
+• "answer" MUST be a single letter with non-empty option text.
 • "answer_content" MUST match options[answer] exactly.
-• Output ONLY the raw JSON object.
+• Output ONLY the raw JSON object. Do NOT wrap in ```json codeblocks.
 """
 
 
@@ -214,13 +207,7 @@ def build_grok_messages_with_panel_crop(
         },
     ]
 
-    if ocr_context:
-        user_content.append({
-            "type": "text",
-            "text": f"--- RAW OCR TEXT FROM IMAGE (FOR CONTEXT) ---\n\n{ocr_context}",
-        })
-
-    # Full image first
+    # Full image first  (OCR context intentionally omitted — noisy OCR degrades AI accuracy)
     user_content.append({
         "type": "image_url",
         "image_url": {
