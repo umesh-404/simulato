@@ -1,0 +1,12 @@
+{
+  "question_id": 69,
+  "canonical_text": "multiple choice question a company has 5 magazines 4 newspapers and 3 new tv channels. in how many ways can one tv channel be selected out of these 3 tv channels||12|3|4|5",
+  "option_a": "5",
+  "option_b": "4",
+  "option_c": "3",
+  "option_d": "12",
+  "option_e": "",
+  "correct_answer": "3",
+  "answer_letter": "C",
+  "version": 1
+}

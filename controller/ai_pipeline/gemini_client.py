@@ -94,14 +94,16 @@ def _call_api(messages: list[dict]) -> str:
     return raw_text
 
 
-def query_gemini(image_path: Path) -> GrokResponse:
+def query_gemini(image_path: Path, ocr_context: str = "", is_stitched: bool = False) -> GrokResponse:
     """
-    Send an image to Gemini Vision and return a validated structured response.
+    Send an image to Gemini and return a validated structured response.
 
-    Retries up to MAX_RETRIES times on parse failures.
+    Retries up to MAX_RETRIES times on parse failures or HTTP 429 errors.
 
     Args:
         image_path: Path to the stitched question image.
+        ocr_context: Optional OCR text to guide the model.
+        is_stitched: True if the image is a multi-frame stitched composite.
 
     Returns:
         Validated GrokResponse with question, options, answer, answer_content.
@@ -111,14 +113,15 @@ def query_gemini(image_path: Path) -> GrokResponse:
         ParseError: If all retry attempts produce unparseable responses.
     """
     image_b64 = _encode_image(image_path)
-    messages = build_grok_messages(image_b64)
+    # Gemini uses the identical system prompt and user schema as Grok
+    messages = build_grok_messages(image_b64, ocr_context, is_stitched=is_stitched)
 
     last_error: Optional[Exception] = None
     for attempt in range(1, MAX_RETRIES + 1):
         logger.info("Gemini API call attempt %d/%d for %s", attempt, MAX_RETRIES, image_path.name)
         try:
             raw_text = _call_api(messages)
-            logger.debug("Gemini raw response (attempt %d): %s", attempt, raw_text[:200])
+            logger.info("Gemini raw response (attempt %d): %s", attempt, raw_text[:500])
             response = parse_grok_response(raw_text)
             logger.info(
                 "Gemini query successful on attempt %d: answer=%s",

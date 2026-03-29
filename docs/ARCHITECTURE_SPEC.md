@@ -2,9 +2,9 @@
 
 ## Project: Simulato
 
-Version: 1.4.0\
+Version: 1.5.0\
 Status: Authoritative Architecture Specification\
-Last Updated: 2026-03-28
+Last Updated: 2026-03-29
 
 ------------------------------------------------------------------------
 
@@ -137,14 +137,11 @@ Responsibilities:
 -   receive images from capture phone
 -   detect question boundaries
 -   detect scrolling requirements
--   validate local database for previous answers
 -   stitch image segments
--   call Cloud AI (Grok) for primary question solving
+-   call Cloud AI (Grok/Gemini) for question solving — **always, for every question**
 -   call Local AI (Ollama/Qwen) for auxiliary screen analysis (scroll/answer verification)
 -   process structured AI responses (via `response_format`)
--   perform database lookup
--   perform question matching
--   determine answer actions
+-   determine answer actions from AI response
 -   dispatch commands to Raspberry Pi
 -   verify input results
 -   manage system state
@@ -406,35 +403,27 @@ This image represents the entire question context.
 
 ### 6.2 AI Processing
 
-Simulato uses a **Tiered AI Strategy**:
+Simulato uses a **Tiered AI Strategy** enhanced by **OCR Context Injection**.
+Every question is sent directly to the cloud AI — there is no database pre-check
+or image-hash cache layer in the processing path.
 
-1.  **Primary Solver (Cloud AI — selectable at runtime):**
-    -   **Gemini 2.5 Flash** (default): Google's vision model via
-        OpenAI-compatible endpoint.
-    -   **Grok Vision**: xAI's vision model with Structured Outputs
-        (JSON Schema).
-    The active provider is selected by the operator from the Remote
-    Control phone dropdown and can be switched at any time via the
-    `SET_AI_PROVIDER` command.
-2.  **Auxiliary Analyst Layer (OCR + Local Qwen):** Responsible for
-screen understanding and **never used to answer questions**:
-    -   OCR Full-Screen Layout Pass on each processed question frame
-        (primary source for option/NEXT target localization).
-    -   Anchored preprocessing: top-bar template matching finds a stable ROI;
-        the preprocessed image is masked (same dimensions) and `preprocess_meta.json`
-        is saved for replay/debug.
-    -   Scroll Verification (detecting clipped text), called for **every
-        new screen and each scroll frame**.
-        Scroll verification uses OCR truncation heuristic first (confidence-gated),
-        then falls back to Ollama `SCROLL_CHECK_PROMPT` when needed.
-    -   Answer Verification (detecting post-click highlights using
-        dedicated verification captures).
-    -   Option Target Localization (returning precise normalized click
-        coordinates for virtual letters A/B/C/D/E, mapped by top-to-bottom
-        radio-circle row order).
-    -   NEXT Button Localization (returning precise normalized click
-        coordinates, with calibrated-grid fallback).
-    -   Screen Type Identification (login vs. question vs. error).
+1.  **Primary Solver (Cloud AI):**
+    -   **Grok Vision** (default primary): xAI's fast vision model with Structured Outputs.
+    -   **Gemini 2.5 Flash** (fallback): Google's vision model, automatically engaged if Grok fails parsing or transport.
+    The primary solver is fed the stitched question image along with an **OCR Text Injection** (a complete raw transcript of all text extracted by Tesseract). This forces the LLM to ground its reasoning on the actual pixels, virtually eliminating hallucinated answers when watermarks degrade visual clarity.
+    When the image is a multi-frame stitched composite, a dedicated `USER_PROMPT_STITCHED` message explicitly tells the AI to treat it as a single continuous question and deduplicate any repeated content.
+
+2.  **Auxiliary Analyst Layer (OCR + Local Qwen):** Responsible for screen understanding and **never used to answer questions**:
+    -   OCR Full-Screen Layout Pass on each processed question frame.
+    -   Anchored preprocessing: top-bar template matching finds a stable ROI.
+    -   Option Target Localization: determines the live pixel position of radio buttons.
+    -   NEXT Button Localization: determines exact coordinates for the NEXT button.
+
+**Coordinate Targeting (Split-Axis Blending):**
+Option clicks use a robust Split-Axis Strategy to combine live OCR detection with pre-computed calibration:
+-   **X-Axis (Horizontal):** Heavily uses calibration data, as radio button columns are perfectly stable across all questions.
+-   **Y-Axis (Vertical):** Heavily uses live detection, as different question text lengths push the radio buttons up and down between questions.
+If live Y-axis detection deviates too far from calibration (>120px), the system falls back entirely to pure calibration mapping.
 
 The local analyst utilizes Ollama (e.g. `qwen2.5vl:7b-q4_K_M`) for
 air-gapped or low-latency screen classification and is wrapped with a
@@ -443,40 +432,40 @@ For scroll verification, Ollama is the fallback when OCR confidence is low.
 
 Processing steps:
 
-1.  extract structured question data (from Primary Solver when needed)
-2.  normalize text
-3.  compute canonical representation
-4.  perform database lookup (DB-first)
-5.  if and only if **no matching question** is found in the database,
-    call the Primary Solver (Grok/Gemini) for a new AI answer
+1.  capture and stitch question image
+2.  run OCR layout pass
+3.  call Primary Solver (Grok/Gemini) with image + OCR context
+4.  parse structured JSON response
+5.  remap AI answer letter to live on-screen option content (handles shuffled options)
 
 ------------------------------------------------------------------------
 
 # 8. QUESTION IDENTIFICATION ENGINE
 
-Matching occurs in multiple stages.
+Database-based question matching (SHA256, SimHash, embedding lookup) has been
+**disabled** in the current pipeline.
 
-Stage 1 --- Canonical Hash Match
-Stage 2 --- SimHash Similarity
-Stage 3 --- Embedding Similarity
-Stage 4 --- AI Query (fallback)
+Every question is treated as new and sent directly to the cloud AI.
+The AI is always the source of truth for the answer.
 
-Matching is restricted to the **active test context**.
+The database schema and matching code are retained in the codebase but
+are not called during normal question processing.
 
 ------------------------------------------------------------------------
 
 # 9. ANSWER MATCHING
 
-Answers must be selected using **option text**, not option position.
+After the AI returns a structured JSON response, the system remaps the
+returned answer letter to the **current live on-screen option content**.
 
 Steps:
 
-1.  retrieve stored correct answer text
-2.  compare with current option texts
-3.  determine matching option index
-4.  dispatch click command
+1.  AI returns answer letter (e.g. "A") and answer content text
+2.  OCR reads current on-screen option texts from the answer panel
+3.  System matches AI answer content against live option texts
+4.  The live-matched letter is used for click dispatch
 
-This guarantees correctness when options are shuffled.
+This guarantees correctness when options are shuffled between screens.
 
 ------------------------------------------------------------------------
 
@@ -547,41 +536,33 @@ Operator selects action before system continues.
 
 # 12. DATA STORAGE MODEL
 
-Simulato stores full question snapshots.
+Simulato stores AI responses as JSON files alongside screenshot artifacts
+for each processed question. This enables debugging and replay.
 
-Stored components:
+Stored per-question artifacts (file-based):
 
--   screenshot
--   question text
--   options (A, B, C, D, E)
--   AI response (full JSON)
--   selected answer (text)
--   answer letter (A/B/C/D/E)
--   canonical hash (SHA256)
--   SimHash fingerprint (64-bit)
--   embedding vector (bge-small-en-v1.5)
--   image perceptual hash (pHash via DCT, 64-bit)
--   timestamps (ISO8601 UTC)
--   decision source (ai_new / database / database_image_hash / operator)
+-   screenshot (JPEG)
+-   AI response JSON (question text, options, answer, model used)
+-   event log entry (decision source, click letter, timing)
 
-The `image_phash` field enables the **image-hash DB-first fast path**:
-when a previously seen stitched image is captured again, the system
-bypasses the AI call entirely and uses the cached answer directly.
+The **SQLite database** (`database/questions.db`) is present in the
+codebase but question storage and lookup are **not performed** during
+normal question processing. The database connection is initialized at
+startup for future use.
 
-This ensures experiment reproducibility.
+Note: pHash is still computed for **NEXT-button navigation verification**
+(detecting whether the screen actually changed after a NEXT click);
+it is not used for question identity lookup.
 
 ------------------------------------------------------------------------
 
 # 13. DATASET VERSIONING
 
-Stored questions are immutable.
+AI response JSON files are written once per question capture and are
+not modified. Each run produces its own artifact directory.
 
-If a stored question changes:
-
--   new version created
--   previous version preserved
-
-No silent modification allowed.
+Dataset versioning via database records is not active in the current
+pipeline.
 
 ------------------------------------------------------------------------
 
@@ -592,10 +573,10 @@ Every system event must be logged.
 Log entries include:
 
 -   timestamps
--   question identifiers
--   AI calls
--   database hits
--   click commands
+-   question number
+-   AI provider and model used
+-   AI answer (letter + content)
+-   click letter dispatched
 -   verification outcomes
 -   operator interventions
 
@@ -656,14 +637,19 @@ Complete run sequence:
 
 1.  operator enters test name (if omitted by client, controller uses
     `default_test` deterministically)
-2.  system loads test context
-3.  system enters RUNNING state
-4.  question captured
-5.  question processed
-6.  answer determined
-7.  click executed
-8.  result verified
-9.  next question triggered
+2.  system enters RUNNING state
+3.  question captured from Capture Phone
+4.  screen validated (fail-safe)
+5.  scroll detection run; additional frames captured if needed
+6.  frames stitched into composite image
+7.  OCR layout pass run on stitched image
+8.  stitched image + OCR context sent **directly to cloud AI**
+9.  AI response parsed (structured JSON)
+10. answer letter remapped to live on-screen option content
+11. click dispatched to Raspberry Pi
+12. click verified via dedicated capture
+13. NEXT clicked; navigation verified
+14. loop to step 3 for next question
 
 Loop continues until test completion.
 
@@ -678,10 +664,11 @@ STOP safety rule:
 
 Failures include:
 
--   AI response errors
+-   AI response parse errors
+-   AI API transport failures
 -   input injection failure
 -   unexpected screen layout
--   database inconsistency
+-   click verification failure
 
 On failure:
 

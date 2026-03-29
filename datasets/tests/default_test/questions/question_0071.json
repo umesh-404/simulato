@@ -1,0 +1,12 @@
+{
+  "question_id": 71,
+  "canonical_text": "from tickets 10000 lottery numbered 1 to 10000 one ticket is drawn at random. what is the probability that the number marked on the drawn ticket is divisible by 20||1/10|1/20|1/50|3/20",
+  "option_a": "3/20",
+  "option_b": "1/10",
+  "option_c": "1/20",
+  "option_d": "1/50",
+  "option_e": "",
+  "correct_answer": "1/50",
+  "answer_letter": "D",
+  "version": 1
+}

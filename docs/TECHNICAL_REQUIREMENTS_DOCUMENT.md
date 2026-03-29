@@ -41,7 +41,7 @@ The Main Control PC orchestrates the entire system.
             ↑
     Raspberry Pi (USB HID Injector)
             ↑
-    Main Control PC (AI + Database + Controller)
+    Main Control PC (AI + Controller)
             ↑
     Capture Phone (Camera Device)
             ↑
@@ -226,6 +226,7 @@ AI models used (Tiered Strategy):
 Capabilities:
 
 -   read screenshots
+-   read injected raw OCR text context (Tesseract)
 -   extract question text
 -   extract options
 -   determine correct answer
@@ -379,6 +380,9 @@ Example coordinates:
     E (15,16)
     NEXT (18,19)
 
+Runtime Coordinate Blending:
+    Click execution merges live OCR Detection (for adaptive Y-axis row placement) with pre-calibrated grid data (for exact X-axis column placement and fallback).
+
 ------------------------------------------------------------------------
 
 # 11. Communication Requirements
@@ -435,14 +439,20 @@ Commands:
 
 # 12. Question Identification Requirements
 
-Question lookup pipeline:
+Database-based question matching has been **disabled** in the current
+pipeline. Every question is sent directly to the cloud AI.
 
-1.  Normalize text
-2.  Generate SHA256 hash
-3.  Compare hash within active test
-4.  Compare SimHash
-5.  Run embedding similarity search
-6.  If no match → call Grok API (using `response_format: json_schema`) or Local Ollama.
+Question processing pipeline:
+
+1.  Capture and stitch question image
+2.  Run OCR layout pass on stitched image
+3.  Call cloud AI (Grok/Gemini) with image + OCR context
+4.  Parse structured JSON response
+5.  Remap AI answer letter to live on-screen option content
+6.  Dispatch click via Raspberry Pi
+
+The matching code (SHA256, SimHash, embeddings) remains in the codebase
+but is not invoked during normal operation.
 
 ------------------------------------------------------------------------
 
@@ -493,17 +503,12 @@ Expected performance:
   ------------------ ---------
   Image capture      0.5 s
   Scroll detection   0.2 s
-  Database lookup    \<1 ms
   AI inference       2‑3 s
   Input injection    \<0.1 s
 
 Average question processing time:
 
-\~3 seconds.
-
-Cached questions:
-
-\~0.2 seconds.
+\~3–4 seconds per question (AI call dominant).
 
 ------------------------------------------------------------------------
 
@@ -541,12 +546,11 @@ Development order:
 The system is considered complete when:
 
 -   All devices communicate correctly
--   Questions are captured reliably
+-   Questions are captured and stitched reliably
 -   AI responses are parsed correctly
 -   Inputs are injected successfully
--   Database stores questions
--   Cached questions bypass API
--   Fail‑safe triggers on abnormal screens
+-   Click verification confirms correct option selected
+-   Fail-safe triggers on abnormal screens
 -   Remote interface controls system
 
 ------------------------------------------------------------------------

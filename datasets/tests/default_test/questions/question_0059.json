@@ -1,0 +1,12 @@
+{
+  "question_id": 59,
+  "canonical_text": "find the first term of an arithmetic progression whose 7th and 13th terms are respectively 42 and 78|10|12|5|6|none of the mentioned options",
+  "option_a": "10",
+  "option_b": "5",
+  "option_c": "6",
+  "option_d": "None of the mentioned options",
+  "option_e": "12",
+  "correct_answer": "6",
+  "answer_letter": "C",
+  "version": 1
+}

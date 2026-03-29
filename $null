@@ -1,0 +1,387 @@
+2026-03-30T02:22:28 | INFO     | simulato.coordinate_solver | Calibration image: 4096x3072
+2026-03-30T02:22:29 | INFO     | simulato.coordinate_solver | First-pass option-like regions: 0
+2026-03-30T02:22:29 | INFO     | simulato.coordinate_solver | Running relaxed second-pass detection for option regions
+2026-03-30T02:22:29 | INFO     | simulato.coordinate_solver | Second-pass option-like regions: 0
+2026-03-30T02:22:29 | INFO     | simulato.image_preprocessor | Preprocessed image saved: calibration_20260328T075551_preprocessed.jpg (mask_applied=True, roi_y=358)
+2026-03-30T02:22:29 | INFO     | simulato.coordinate_solver | Calibration using preprocessed image: calibration_20260328T075551_preprocessed.jpg
+2026-03-30T02:22:29 | INFO     | simulato.exam_layout      | Detecting exam layout for: calibration_20260328T075551_preprocessed.jpg
+2026-03-30T02:22:30 | INFO     | simulato.exam_layout      | Layout detected: divider_x=1573, q_panel=(409,368,1164,2459), a_panel=(1573,368,2523,2459), confidence=0.90
+2026-03-30T02:22:30 | INFO     | simulato.option_detector  | Detecting options for: calibration_20260328T075551_preprocessed.jpg
+2026-03-30T02:22:30 | INFO     | simulato.option_detector  | Options zone: Y=[998, 2385] within panel Y=[368, 2827] (header_bottom=998)
+2026-03-30T02:22:30 | INFO     | simulato.option_detector  | 42 raw > 38 radius > 29 edge > 19 x-col > 5 clusters > 4 validated (cap 5)
+2026-03-30T02:22:30 | INFO     | simulato.option_detector  | Option A: circle=(1620,1173) r=18 click=(1620,1173) text='oe 8 tafe 2s iinformo' conf=8.2
+2026-03-30T02:22:31 | INFO     | simulato.option_detector  | Option B: circle=(1612,1397) r=15 click=(1612,1397) text='PEWO8 ek geek, You) jou ee ee (B).alor' conf=17.1
+2026-03-30T02:22:31 | INFO     | simulato.option_detector  | Option C: circle=(1622,1618) r=18 click=(1622,1618) text='' conf=0.0
+2026-03-30T02:22:31 | INFO     | simulato.option_detector  | Option D: circle=(1644,1767) r=17 click=(1644,1767) text='' conf=0.0
+2026-03-30T02:22:31 | INFO     | simulato.option_detector  | Detected 4 options via crop_and_detect (42 raw candidates)
+2026-03-30T02:22:31 | INFO     | simulato.coordinate_solver | Screen bounds detected: top=538, bottom=2719, left=127, right=3959 (3832x2181 in capture, area_ratio=0.66)
+2026-03-30T02:22:31 | INFO     | simulato.coordinate_solver | Using screen-boundary transform: scale=(0.501044, 0.495186) offset=(-63.6, -266.4)
+2026-03-30T02:22:31 | INFO     | simulato.coordinate_solver | Affine transform: scale=(0.501044, 0.495186) offset=(-63.6, -266.4) (naive scale was 0.468750, 0.351562)
+2026-03-30T02:22:31 | INFO     | simulato.coordinate_solver | Detected A: pixel=(748,314) \u2192 grid=(7,5)
+2026-03-30T02:22:31 | INFO     | simulato.coordinate_solver | Detected B: pixel=(744,425) \u2192 grid=(7,7)
+2026-03-30T02:22:31 | INFO     | simulato.coordinate_solver | Detected C: pixel=(749,535) \u2192 grid=(7,9)
+2026-03-30T02:22:31 | INFO     | simulato.coordinate_solver | Detected D: pixel=(760,609) \u2192 grid=(7,11)
+2026-03-30T02:22:31 | INFO     | simulato.coordinate_solver | Estimated E: pixel=(750,752) \u2192 grid=(7,13)
+2026-03-30T02:22:31 | INFO     | simulato.coordinate_solver | NEXT button below screen boundary — using proportional position: pixel=(1834,1037)
+2026-03-30T02:22:31 | INFO     | simulato.coordinate_solver | Detected NEXT: pixel=(1834,1037) \u2192 grid=(19,19)
+2026-03-30T02:22:31 | INFO     | simulato.coordinate_solver | Calibration complete: 8 positions mapped
+2026-03-30T02:22:31 | INFO     | simulato.coordinate_solver | Calibration image: 4096x3072
+2026-03-30T02:22:31 | INFO     | simulato.coordinate_solver | First-pass option-like regions: 0
+2026-03-30T02:22:31 | INFO     | simulato.coordinate_solver | Running relaxed second-pass detection for option regions
+2026-03-30T02:22:31 | INFO     | simulato.coordinate_solver | Second-pass option-like regions: 0
+2026-03-30T02:22:31 | INFO     | simulato.image_preprocessor | Preprocessed image saved: calibration_20260328T083222_preprocessed.jpg (mask_applied=True, roi_y=358)
+2026-03-30T02:22:31 | INFO     | simulato.coordinate_solver | Calibration using preprocessed image: calibration_20260328T083222_preprocessed.jpg
+2026-03-30T02:22:31 | INFO     | simulato.exam_layout      | Detecting exam layout for: calibration_20260328T083222_preprocessed.jpg
+2026-03-30T02:22:32 | INFO     | simulato.exam_layout      | Layout detected: divider_x=1594, q_panel=(409,368,1185,2459), a_panel=(1594,368,2502,2459), confidence=0.90
+2026-03-30T02:22:32 | INFO     | simulato.option_detector  | Detecting options for: calibration_20260328T083222_preprocessed.jpg
+2026-03-30T02:22:32 | INFO     | simulato.option_detector  | Options zone: Y=[1119, 2385] within panel Y=[368, 2827] (header_bottom=1119)
+2026-03-30T02:22:32 | INFO     | simulato.option_detector  | 41 raw > 41 radius > 30 edge > 18 x-col > 5 clusters > 5 validated (cap 5)
+2026-03-30T02:22:32 | INFO     | simulato.option_detector  | Option A: circle=(1640,1296) r=18 click=(1640,1296) text='ee EIR both t eA te intone' conf=40.1
+2026-03-30T02:22:32 | INFO     | simulato.option_detector  | Option B: circle=(1641,1489) r=13 click=(1641,1489) text='7 | @ae' conf=48.7
+2026-03-30T02:22:33 | INFO     | simulato.option_detector  | Option C: circle=(1620,1751) r=17 click=(1620,1751) text='fe “pe © ibneith' conf=32.2
+2026-03-30T02:22:33 | INFO     | simulato.option_detector  | Option D: circle=(1635,1889) r=10 click=(1635,1889) text='He a sowelt tN a a questic' conf=22.9
+2026-03-30T02:22:33 | INFO     | simulato.option_detector  | Option E: circle=(1640,2196) r=17 click=(1640,2196) text='ae by Wao' conf=35.7
+2026-03-30T02:22:33 | INFO     | simulato.option_detector  | Detected 5 options via crop_and_detect (41 raw candidates)
+2026-03-30T02:22:33 | INFO     | simulato.coordinate_solver | Screen bounds detected: top=664, bottom=2850, left=143, right=3975 (3832x2186 in capture, area_ratio=0.67)
+2026-03-30T02:22:33 | INFO     | simulato.coordinate_solver | Using screen-boundary transform: scale=(0.501044, 0.494053) offset=(-71.6, -328.1)
+2026-03-30T02:22:33 | INFO     | simulato.coordinate_solver | Affine transform: scale=(0.501044, 0.494053) offset=(-71.6, -328.1) (naive scale was 0.468750, 0.351562)
+2026-03-30T02:22:33 | INFO     | simulato.coordinate_solver | Detected A: pixel=(750,312) \u2192 grid=(7,5)
+2026-03-30T02:22:33 | INFO     | simulato.coordinate_solver | Detected B: pixel=(751,408) \u2192 grid=(7,7)
+2026-03-30T02:22:33 | INFO     | simulato.coordinate_solver | Detected C: pixel=(740,537) \u2192 grid=(7,9)
+2026-03-30T02:22:33 | INFO     | simulato.coordinate_solver | Detected D: pixel=(748,605) \u2192 grid=(7,11)
+2026-03-30T02:22:33 | INFO     | simulato.coordinate_solver | Detected E: pixel=(750,757) \u2192 grid=(7,14)
+2026-03-30T02:22:33 | INFO     | simulato.coordinate_solver | NEXT button below screen boundary — using proportional position: pixel=(1834,1037)
+2026-03-30T02:22:33 | INFO     | simulato.coordinate_solver | Detected NEXT: pixel=(1834,1037) \u2192 grid=(19,19)
+2026-03-30T02:22:33 | INFO     | simulato.coordinate_solver | Calibration complete: 8 positions mapped
+2026-03-30T02:22:33 | INFO     | simulato.coordinate_solver | Calibration image: 4096x3072
+2026-03-30T02:22:33 | INFO     | simulato.coordinate_solver | First-pass option-like regions: 15
+2026-03-30T02:22:34 | INFO     | simulato.image_preprocessor | Preprocessed image saved: calibration_20260328T092315_preprocessed.jpg (mask_applied=True, roi_y=358)
+2026-03-30T02:22:34 | INFO     | simulato.coordinate_solver | Calibration using preprocessed image: calibration_20260328T092315_preprocessed.jpg
+2026-03-30T02:22:34 | INFO     | simulato.exam_layout      | Detecting exam layout for: calibration_20260328T092315_preprocessed.jpg
+2026-03-30T02:22:34 | INFO     | simulato.exam_layout      | Layout detected: divider_x=1884, q_panel=(409,368,1475,2459), a_panel=(1884,368,2212,2459), confidence=0.90
+2026-03-30T02:22:34 | INFO     | simulato.option_detector  | Detecting options for: calibration_20260328T092315_preprocessed.jpg
+2026-03-30T02:22:35 | INFO     | simulato.option_detector  | Options zone: Y=[1056, 2385] within panel Y=[368, 2827] (header_bottom=1056)
+2026-03-30T02:22:35 | INFO     | simulato.option_detector  | 5 raw > 5 radius > 4 edge > 3 x-col > 1 clusters > 1 validated (cap 5)
+2026-03-30T02:22:35 | INFO     | simulato.option_detector  | Option A: circle=(2006,1491) r=8 click=(2006,1491) text='ee _— ST oS 127 LU G Super Badges' conf=49.4
+2026-03-30T02:22:35 | INFO     | simulato.option_detector  | Detected 1 options via crop_and_detect (5 raw candidates)
+2026-03-30T02:22:35 | INFO     | simulato.coordinate_solver | Detected A: pixel=(1189,15) \u2192 grid=(12,0)
+2026-03-30T02:22:35 | INFO     | simulato.coordinate_solver | Detected B: pixel=(1074,18) \u2192 grid=(11,0)
+2026-03-30T02:22:35 | INFO     | simulato.coordinate_solver | Detected C: pixel=(173,575) \u2192 grid=(1,10)
+2026-03-30T02:22:35 | INFO     | simulato.coordinate_solver | Detected D: pixel=(1809,735) \u2192 grid=(18,13)
+2026-03-30T02:22:35 | INFO     | simulato.coordinate_solver | Detected NEXT: pixel=(1851,1048) \u2192 grid=(19,19)
+2026-03-30T02:22:35 | INFO     | simulato.coordinate_solver | Calibration complete: 7 positions mapped
+2026-03-30T02:22:35 | INFO     | simulato.coordinate_solver | Calibration image: 4096x3072
+2026-03-30T02:22:35 | INFO     | simulato.coordinate_solver | First-pass option-like regions: 0
+2026-03-30T02:22:35 | INFO     | simulato.coordinate_solver | Running relaxed second-pass detection for option regions
+2026-03-30T02:22:35 | INFO     | simulato.coordinate_solver | Second-pass option-like regions: 7
+2026-03-30T02:22:35 | INFO     | simulato.image_preprocessor | Preprocessed image saved: calibration_20260328T092353_preprocessed.jpg (mask_applied=True, roi_y=358)
+2026-03-30T02:22:35 | INFO     | simulato.coordinate_solver | Calibration using preprocessed image: calibration_20260328T092353_preprocessed.jpg
+2026-03-30T02:22:35 | INFO     | simulato.exam_layout      | Detecting exam layout for: calibration_20260328T092353_preprocessed.jpg
+2026-03-30T02:22:37 | INFO     | simulato.exam_layout      | Layout detected: divider_x=1564, q_panel=(409,368,1155,2459), a_panel=(1564,368,2532,2459), confidence=0.90
+2026-03-30T02:22:37 | INFO     | simulato.option_detector  | Detecting options for: calibration_20260328T092353_preprocessed.jpg
+2026-03-30T02:22:37 | INFO     | simulato.option_detector  | Options zone: Y=[1056, 2385] within panel Y=[368, 2827] (header_bottom=1056)
+2026-03-30T02:22:37 | INFO     | simulato.option_detector  | 12 raw > 11 radius > 9 edge > 3 x-col > 1 clusters > 1 validated (cap 5)
+2026-03-30T02:22:37 | INFO     | simulato.option_detector  | Option A: circle=(1809,1438) r=10 click=(1809,1438) text='iges 127 |' conf=86.7
+2026-03-30T02:22:37 | INFO     | simulato.option_detector  | Detected 1 options via crop_and_detect (12 raw candidates)
+2026-03-30T02:22:37 | INFO     | simulato.coordinate_solver | Detected A: pixel=(112,308) \u2192 grid=(1,5)
+2026-03-30T02:22:37 | INFO     | simulato.coordinate_solver | Detected B: pixel=(108,445) \u2192 grid=(1,8)
+2026-03-30T02:22:37 | INFO     | simulato.coordinate_solver | Detected C: pixel=(107,516) \u2192 grid=(1,9)
+2026-03-30T02:22:37 | INFO     | simulato.coordinate_solver | Detected D: pixel=(104,657) \u2192 grid=(1,12)
+2026-03-30T02:22:37 | INFO     | simulato.coordinate_solver | Detected NEXT: pixel=(970,584) \u2192 grid=(10,10)
+2026-03-30T02:22:37 | INFO     | simulato.coordinate_solver | Calibration complete: 7 positions mapped
+2026-03-30T02:22:37 | INFO     | simulato.coordinate_solver | Calibration image: 4096x3072
+2026-03-30T02:22:37 | INFO     | simulato.coordinate_solver | First-pass option-like regions: 0
+2026-03-30T02:22:37 | INFO     | simulato.coordinate_solver | Running relaxed second-pass detection for option regions
+2026-03-30T02:22:37 | INFO     | simulato.coordinate_solver | Second-pass option-like regions: 0
+2026-03-30T02:22:38 | INFO     | simulato.image_preprocessor | Preprocessed image saved: calibration_20260328T092513_preprocessed.jpg (mask_applied=True, roi_y=358)
+2026-03-30T02:22:38 | INFO     | simulato.coordinate_solver | Calibration using preprocessed image: calibration_20260328T092513_preprocessed.jpg
+2026-03-30T02:22:38 | INFO     | simulato.exam_layout      | Detecting exam layout for: calibration_20260328T092513_preprocessed.jpg
+2026-03-30T02:22:38 | INFO     | simulato.exam_layout      | Layout detected: divider_x=1884, q_panel=(409,368,1475,2459), a_panel=(1884,368,2212,2459), confidence=0.50
+2026-03-30T02:22:38 | INFO     | simulato.option_detector  | Detecting options for: calibration_20260328T092513_preprocessed.jpg
+2026-03-30T02:22:38 | INFO     | simulato.option_detector  | Options zone: Y=[1056, 2385] within panel Y=[368, 2827] (header_bottom=1056)
+2026-03-30T02:22:38 | INFO     | simulato.option_detector  | 21 raw > 20 radius > 15 edge > 9 x-col > 4 clusters > 4 validated (cap 5)
+2026-03-30T02:22:38 | INFO     | simulato.option_detector  | Option A: circle=(2077,1107) r=25 click=(2077,1107) text='here' conf=96.0
+2026-03-30T02:22:39 | INFO     | simulato.option_detector  | Option B: circle=(2112,1313) r=19 click=(2112,1313) text='0' conf=91.0
+2026-03-30T02:22:39 | INFO     | simulato.option_detector  | Option C: circle=(2088,1504) r=20 click=(2088,1504) text='1' conf=15.0
+2026-03-30T02:22:39 | INFO     | simulato.option_detector  | Option D: circle=(2099,1692) r=14 click=(2099,1692) text='' conf=0.0
+2026-03-30T02:22:39 | INFO     | simulato.option_detector  | Detected 4 options via crop_and_detect (21 raw candidates)
+2026-03-30T02:22:39 | INFO     | simulato.coordinate_solver | Screen bounds detected: top=701, bottom=2927, left=112, right=3978 (3866x2226 in capture, area_ratio=0.68)
+2026-03-30T02:22:39 | INFO     | simulato.coordinate_solver | Using screen-boundary transform: scale=(0.496637, 0.485175) offset=(-55.6, -340.1)
+2026-03-30T02:22:39 | INFO     | simulato.coordinate_solver | Affine transform: scale=(0.496637, 0.485175) offset=(-55.6, -340.1) (naive scale was 0.468750, 0.351562)
+2026-03-30T02:22:39 | INFO     | simulato.coordinate_solver | Detected A: pixel=(976,197) \u2192 grid=(10,3)
+2026-03-30T02:22:39 | INFO     | simulato.coordinate_solver | Detected B: pixel=(993,297) \u2192 grid=(10,5)
+2026-03-30T02:22:39 | INFO     | simulato.coordinate_solver | Detected C: pixel=(981,390) \u2192 grid=(10,7)
+2026-03-30T02:22:39 | INFO     | simulato.coordinate_solver | Detected D: pixel=(987,481) \u2192 grid=(10,8)
+2026-03-30T02:22:39 | INFO     | simulato.coordinate_solver | Estimated E: pixel=(984,568) \u2192 grid=(10,10)
+2026-03-30T02:22:39 | INFO     | simulato.coordinate_solver | NEXT button below screen boundary — using proportional position: pixel=(1834,1037)
+2026-03-30T02:22:39 | INFO     | simulato.coordinate_solver | Detected NEXT: pixel=(1834,1037) \u2192 grid=(19,19)
+2026-03-30T02:22:39 | INFO     | simulato.coordinate_solver | Calibration complete: 8 positions mapped
+2026-03-30T02:22:39 | INFO     | simulato.coordinate_solver | Calibration image: 4096x3072
+2026-03-30T02:22:39 | INFO     | simulato.coordinate_solver | First-pass option-like regions: 0
+2026-03-30T02:22:39 | INFO     | simulato.coordinate_solver | Running relaxed second-pass detection for option regions
+2026-03-30T02:22:39 | INFO     | simulato.coordinate_solver | Second-pass option-like regions: 0
+2026-03-30T02:22:39 | INFO     | simulato.image_preprocessor | Preprocessed image saved: calibration_20260328T092601_preprocessed.jpg (mask_applied=True, roi_y=358)
+2026-03-30T02:22:39 | INFO     | simulato.coordinate_solver | Calibration using preprocessed image: calibration_20260328T092601_preprocessed.jpg
+2026-03-30T02:22:39 | INFO     | simulato.exam_layout      | Detecting exam layout for: calibration_20260328T092601_preprocessed.jpg
+2026-03-30T02:22:40 | INFO     | simulato.exam_layout      | Layout detected: divider_x=1884, q_panel=(409,368,1475,2459), a_panel=(1884,368,2212,2459), confidence=0.50
+2026-03-30T02:22:40 | INFO     | simulato.option_detector  | Detecting options for: calibration_20260328T092601_preprocessed.jpg
+2026-03-30T02:22:40 | INFO     | simulato.option_detector  | Options zone: Y=[1056, 2385] within panel Y=[368, 2827] (header_bottom=1056)
+2026-03-30T02:22:40 | INFO     | simulato.option_detector  | 18 raw > 17 radius > 14 edge > 5 x-col > 4 clusters > 4 validated (cap 5)
+2026-03-30T02:22:40 | INFO     | simulato.option_detector  | Option A: circle=(2006,1105) r=13 click=(2006,1105) text='ver here' conf=95.0
+2026-03-30T02:22:41 | INFO     | simulato.option_detector  | Option B: circle=(2017,1313) r=28 click=(2017,1313) text='1000 1 :' conf=53.0
+2026-03-30T02:22:41 | INFO     | simulato.option_detector  | Option C: circle=(2021,1696) r=25 click=(2021,1696) text='Zp 10' conf=55.0
+2026-03-30T02:22:41 | INFO     | simulato.option_detector  | Option D: circle=(2027,1887) r=28 click=(2027,1887) text=']' conf=87.0
+2026-03-30T02:22:41 | INFO     | simulato.option_detector  | Detected 4 options via crop_and_detect (18 raw candidates)
+2026-03-30T02:22:41 | INFO     | simulato.coordinate_solver | Screen bounds detected: top=701, bottom=2926, left=114, right=3980 (3866x2225 in capture, area_ratio=0.68)
+2026-03-30T02:22:41 | INFO     | simulato.coordinate_solver | Using screen-boundary transform: scale=(0.496637, 0.485393) offset=(-56.6, -340.3)
+2026-03-30T02:22:41 | INFO     | simulato.coordinate_solver | Affine transform: scale=(0.496637, 0.485393) offset=(-56.6, -340.3) (naive scale was 0.468750, 0.351562)
+2026-03-30T02:22:41 | INFO     | simulato.coordinate_solver | Detected A: pixel=(940,196) \u2192 grid=(9,3)
+2026-03-30T02:22:41 | INFO     | simulato.coordinate_solver | Detected B: pixel=(945,297) \u2192 grid=(9,5)
+2026-03-30T02:22:41 | INFO     | simulato.coordinate_solver | Detected C: pixel=(947,483) \u2192 grid=(9,8)
+2026-03-30T02:22:41 | INFO     | simulato.coordinate_solver | Detected D: pixel=(950,576) \u2192 grid=(9,10)
+2026-03-30T02:22:41 | INFO     | simulato.coordinate_solver | Estimated E: pixel=(946,600) \u2192 grid=(9,11)
+2026-03-30T02:22:41 | INFO     | simulato.coordinate_solver | NEXT button below screen boundary — using proportional position: pixel=(1834,1037)
+2026-03-30T02:22:41 | INFO     | simulato.coordinate_solver | Detected NEXT: pixel=(1834,1037) \u2192 grid=(19,19)
+2026-03-30T02:22:41 | INFO     | simulato.coordinate_solver | Calibration complete: 8 positions mapped
+2026-03-30T02:22:41 | INFO     | simulato.coordinate_solver | Calibration image: 4096x3072
+2026-03-30T02:22:41 | INFO     | simulato.coordinate_solver | First-pass option-like regions: 0
+2026-03-30T02:22:41 | INFO     | simulato.coordinate_solver | Running relaxed second-pass detection for option regions
+2026-03-30T02:22:41 | INFO     | simulato.coordinate_solver | Second-pass option-like regions: 0
+2026-03-30T02:22:42 | INFO     | simulato.image_preprocessor | Preprocessed image saved: calibration_20260328T093135_preprocessed.jpg (mask_applied=True, roi_y=358)
+2026-03-30T02:22:42 | INFO     | simulato.coordinate_solver | Calibration using preprocessed image: calibration_20260328T093135_preprocessed.jpg
+2026-03-30T02:22:42 | INFO     | simulato.exam_layout      | Detecting exam layout for: calibration_20260328T093135_preprocessed.jpg
+2026-03-30T02:22:42 | INFO     | simulato.exam_layout      | Layout detected: divider_x=1884, q_panel=(409,368,1475,2459), a_panel=(1884,368,2212,2459), confidence=0.90
+2026-03-30T02:22:42 | INFO     | simulato.option_detector  | Detecting options for: calibration_20260328T093135_preprocessed.jpg
+2026-03-30T02:22:42 | INFO     | simulato.option_detector  | Options zone: Y=[1056, 2385] within panel Y=[368, 2827] (header_bottom=1056)
+2026-03-30T02:22:42 | INFO     | simulato.option_detector  | 19 raw > 17 radius > 17 edge > 8 x-col > 5 clusters > 5 validated (cap 5)
+2026-03-30T02:22:42 | INFO     | simulato.option_detector  | Option A: circle=(2010,1120) r=9 click=(2010,1120) text='Wer here Ge gnyh aint ns.' conf=6.0
+2026-03-30T02:22:43 | INFO     | simulato.option_detector  | Option B: circle=(2029,1323) r=23 click=(2029,1323) text='ee' conf=2.0
+2026-03-30T02:22:43 | INFO     | simulato.option_detector  | Option C: circle=(2032,1510) r=23 click=(2032,1510) text='tee ee ea ee' conf=25.5
+2026-03-30T02:22:43 | INFO     | simulato.option_detector  | Option D: circle=(2033,1699) r=25 click=(2033,1699) text='Cc fe' conf=25.5
+2026-03-30T02:22:43 | INFO     | simulato.option_detector  | Option E: circle=(2039,1887) r=27 click=(2039,1887) text='' conf=0.0
+2026-03-30T02:22:43 | INFO     | simulato.option_detector  | Detected 5 options via crop_and_detect (19 raw candidates)
+2026-03-30T02:22:43 | INFO     | simulato.coordinate_solver | Screen bounds detected: top=725, bottom=2919, left=150, right=3957 (3807x2194 in capture, area_ratio=0.66)
+2026-03-30T02:22:43 | INFO     | simulato.coordinate_solver | Using screen-boundary transform: scale=(0.504334, 0.492252) offset=(-75.7, -356.9)
+2026-03-30T02:22:43 | INFO     | simulato.coordinate_solver | Affine transform: scale=(0.504334, 0.492252) offset=(-75.7, -356.9) (naive scale was 0.468750, 0.351562)
+2026-03-30T02:22:43 | INFO     | simulato.coordinate_solver | Detected A: pixel=(938,194) \u2192 grid=(9,3)
+2026-03-30T02:22:43 | INFO     | simulato.coordinate_solver | Detected B: pixel=(948,294) \u2192 grid=(9,5)
+2026-03-30T02:22:43 | INFO     | simulato.coordinate_solver | Detected C: pixel=(949,386) \u2192 grid=(9,7)
+2026-03-30T02:22:43 | INFO     | simulato.coordinate_solver | Detected D: pixel=(950,479) \u2192 grid=(9,8)
+2026-03-30T02:22:43 | INFO     | simulato.coordinate_solver | Detected E: pixel=(953,572) \u2192 grid=(9,10)
+2026-03-30T02:22:43 | INFO     | simulato.coordinate_solver | NEXT button below screen boundary — using proportional position: pixel=(1834,1037)
+2026-03-30T02:22:43 | INFO     | simulato.coordinate_solver | Detected NEXT: pixel=(1834,1037) \u2192 grid=(19,19)
+2026-03-30T02:22:43 | INFO     | simulato.coordinate_solver | Calibration complete: 8 positions mapped
+2026-03-30T02:22:43 | INFO     | simulato.coordinate_solver | Calibration image: 4096x3072
+2026-03-30T02:22:43 | INFO     | simulato.coordinate_solver | First-pass option-like regions: 0
+2026-03-30T02:22:43 | INFO     | simulato.coordinate_solver | Running relaxed second-pass detection for option regions
+2026-03-30T02:22:43 | INFO     | simulato.coordinate_solver | Second-pass option-like regions: 0
+2026-03-30T02:22:44 | INFO     | simulato.image_preprocessor | Preprocessed image saved: calibration_20260328T094431_preprocessed.jpg (mask_applied=True, roi_y=358)
+2026-03-30T02:22:44 | INFO     | simulato.coordinate_solver | Calibration using preprocessed image: calibration_20260328T094431_preprocessed.jpg
+2026-03-30T02:22:44 | INFO     | simulato.exam_layout      | Detecting exam layout for: calibration_20260328T094431_preprocessed.jpg
+2026-03-30T02:22:44 | INFO     | simulato.exam_layout      | Layout detected: divider_x=1844, q_panel=(409,368,1435,2459), a_panel=(1844,368,2252,2459), confidence=0.90
+2026-03-30T02:22:44 | INFO     | simulato.option_detector  | Detecting options for: calibration_20260328T094431_preprocessed.jpg
+2026-03-30T02:22:44 | INFO     | simulato.option_detector  | Options zone: Y=[1056, 2385] within panel Y=[368, 2827] (header_bottom=1056)
+2026-03-30T02:22:44 | INFO     | simulato.option_detector  | 21 raw > 20 radius > 14 edge > 6 x-col > 3 clusters > 3 validated (cap 5)
+2026-03-30T02:22:45 | INFO     | simulato.option_detector  | Option A: circle=(1985,1114) r=14 click=(1985,1114) text='jet here ial Peg AHP ad Pal alk nb' conf=30.3
+2026-03-30T02:22:45 | INFO     | simulato.option_detector  | Option B: circle=(1985,1311) r=25 click=(1985,1311) text='Neat HE' conf=44.0
+2026-03-30T02:22:45 | INFO     | simulato.option_detector  | Option C: circle=(1993,1864) r=25 click=(1993,1864) text='ee a elit 3H eer ae ea ee' conf=17.9
+2026-03-30T02:22:45 | INFO     | simulato.option_detector  | Detected 3 options via crop_and_detect (21 raw candidates)
+2026-03-30T02:22:45 | INFO     | simulato.coordinate_solver | Screen bounds detected: top=726, bottom=2875, left=140, right=3883 (3743x2149 in capture, area_ratio=0.64)
+2026-03-30T02:22:45 | INFO     | simulato.coordinate_solver | Using screen-boundary transform: scale=(0.512958, 0.502559) offset=(-71.8, -364.9)
+2026-03-30T02:22:45 | INFO     | simulato.coordinate_solver | Affine transform: scale=(0.512958, 0.502559) offset=(-71.8, -364.9) (naive scale was 0.468750, 0.351562)
+2026-03-30T02:22:45 | INFO     | simulato.coordinate_solver | Detected A: pixel=(946,195) \u2192 grid=(9,3)
+2026-03-30T02:22:45 | INFO     | simulato.coordinate_solver | Detected B: pixel=(946,294) \u2192 grid=(9,5)
+2026-03-30T02:22:45 | INFO     | simulato.coordinate_solver | Detected C: pixel=(951,572) \u2192 grid=(9,10)
+2026-03-30T02:22:45 | INFO     | simulato.coordinate_solver | Estimated D: pixel=(948,760) \u2192 grid=(9,14)
+2026-03-30T02:22:45 | INFO     | simulato.coordinate_solver | Estimated E: pixel=(948,949) \u2192 grid=(9,17)
+2026-03-30T02:22:45 | INFO     | simulato.coordinate_solver | NEXT button below screen boundary — using proportional position: pixel=(1834,1037)
+2026-03-30T02:22:45 | INFO     | simulato.coordinate_solver | Detected NEXT: pixel=(1834,1037) \u2192 grid=(19,19)
+2026-03-30T02:22:45 | INFO     | simulato.coordinate_solver | Calibration complete: 8 positions mapped
+2026-03-30T02:22:45 | INFO     | simulato.coordinate_solver | Calibration image: 4096x3072
+2026-03-30T02:22:45 | INFO     | simulato.coordinate_solver | First-pass option-like regions: 0
+2026-03-30T02:22:45 | INFO     | simulato.coordinate_solver | Running relaxed second-pass detection for option regions
+2026-03-30T02:22:45 | INFO     | simulato.coordinate_solver | Second-pass option-like regions: 0
+2026-03-30T02:22:46 | INFO     | simulato.image_preprocessor | Preprocessed image saved: calibration_20260328T111750_preprocessed.jpg (mask_applied=True, roi_y=358)
+2026-03-30T02:22:46 | INFO     | simulato.coordinate_solver | Calibration using preprocessed image: calibration_20260328T111750_preprocessed.jpg
+2026-03-30T02:22:46 | INFO     | simulato.exam_layout      | Detecting exam layout for: calibration_20260328T111750_preprocessed.jpg
+2026-03-30T02:22:46 | INFO     | simulato.exam_layout      | Layout detected: divider_x=2122, q_panel=(409,368,1713,2459), a_panel=(2122,368,1974,2459), confidence=0.90
+2026-03-30T02:22:46 | INFO     | simulato.option_detector  | Detecting options for: calibration_20260328T111750_preprocessed.jpg
+2026-03-30T02:22:46 | INFO     | simulato.option_detector  | Options zone: Y=[1056, 2385] within panel Y=[368, 2827] (header_bottom=1056)
+2026-03-30T02:22:46 | INFO     | simulato.option_detector  | 359 raw > 269 radius > 105 edge > 67 x-col > 3 clusters > 3 validated (cap 5)
+2026-03-30T02:22:47 | INFO     | simulato.option_detector  | Option A: circle=(2172,1094) r=12 click=(2172,1094) text='nS I : Jt ho, : , ee, poke, Sf 1 wey :' conf=13.8
+2026-03-30T02:22:47 | INFO     | simulato.option_detector  | Option B: circle=(2172,1516) r=18 click=(2172,1516) text='0 er rh 1 1 . ("i Pr' conf=29.5
+2026-03-30T02:22:47 | INFO     | simulato.option_detector  | Option C: circle=(2200,1884) r=20 click=(2200,1884) text='' conf=0.0
+2026-03-30T02:22:47 | INFO     | simulato.option_detector  | Detected 3 options via crop_and_detect (359 raw candidates)
+2026-03-30T02:22:47 | INFO     | simulato.coordinate_solver | Screen bounds detected: top=625, bottom=2812, left=111, right=3957 (3846x2187 in capture, area_ratio=0.67)
+2026-03-30T02:22:47 | INFO     | simulato.coordinate_solver | Using screen-boundary transform: scale=(0.499220, 0.493827) offset=(-55.4, -308.6)
+2026-03-30T02:22:47 | INFO     | simulato.coordinate_solver | Affine transform: scale=(0.499220, 0.493827) offset=(-55.4, -308.6) (naive scale was 0.468750, 0.351562)
+2026-03-30T02:22:47 | INFO     | simulato.coordinate_solver | Detected A: pixel=(1029,232) \u2192 grid=(10,4)
+2026-03-30T02:22:47 | INFO     | simulato.coordinate_solver | Detected B: pixel=(1029,440) \u2192 grid=(10,8)
+2026-03-30T02:22:47 | INFO     | simulato.coordinate_solver | Detected C: pixel=(1043,622) \u2192 grid=(10,11)
+2026-03-30T02:22:47 | INFO     | simulato.coordinate_solver | Estimated D: pixel=(1033,817) \u2192 grid=(10,15)
+2026-03-30T02:22:47 | INFO     | simulato.coordinate_solver | Estimated E: pixel=(1033,1012) \u2192 grid=(10,18)
+2026-03-30T02:22:47 | INFO     | simulato.coordinate_solver | NEXT button below screen boundary — using proportional position: pixel=(1834,1037)
+2026-03-30T02:22:47 | INFO     | simulato.coordinate_solver | Detected NEXT: pixel=(1834,1037) \u2192 grid=(19,19)
+2026-03-30T02:22:47 | INFO     | simulato.coordinate_solver | Calibration complete: 8 positions mapped
+2026-03-30T02:22:47 | INFO     | simulato.coordinate_solver | Calibration image: 4096x3072
+2026-03-30T02:22:47 | INFO     | simulato.coordinate_solver | First-pass option-like regions: 0
+2026-03-30T02:22:47 | INFO     | simulato.coordinate_solver | Running relaxed second-pass detection for option regions
+2026-03-30T02:22:47 | INFO     | simulato.coordinate_solver | Second-pass option-like regions: 2
+2026-03-30T02:22:47 | INFO     | simulato.image_preprocessor | Preprocessed image saved: calibration_20260328T111801_preprocessed.jpg (mask_applied=True, roi_y=358)
+2026-03-30T02:22:47 | INFO     | simulato.coordinate_solver | Calibration using preprocessed image: calibration_20260328T111801_preprocessed.jpg
+2026-03-30T02:22:47 | INFO     | simulato.exam_layout      | Detecting exam layout for: calibration_20260328T111801_preprocessed.jpg
+2026-03-30T02:22:48 | INFO     | simulato.exam_layout      | Layout detected: divider_x=1910, q_panel=(409,368,1501,2459), a_panel=(1910,368,2186,2459), confidence=0.90
+2026-03-30T02:22:48 | INFO     | simulato.option_detector  | Detecting options for: calibration_20260328T111801_preprocessed.jpg
+2026-03-30T02:22:48 | INFO     | simulato.option_detector  | Options zone: Y=[1060, 2385] within panel Y=[368, 2827] (header_bottom=1060)
+2026-03-30T02:22:48 | INFO     | simulato.option_detector  | 11 raw > 10 radius > 8 edge > 5 x-col > 4 clusters > 4 validated (cap 5)
+2026-03-30T02:22:48 | INFO     | simulato.option_detector  | Option A: circle=(2119,1199) r=14 click=(2119,1199) text='i 1 ie ot) .' conf=54.4
+2026-03-30T02:22:48 | INFO     | simulato.option_detector  | Option B: circle=(2123,1401) r=8 click=(2123,1401) text='Ve 4 . die . ig | i hays i Mai Beh t cern' conf=38.3
+2026-03-30T02:22:49 | INFO     | simulato.option_detector  | Option C: circle=(2133,1556) r=11 click=(2133,1556) text='ma [it I Porn Mik '' conf=13.5
+2026-03-30T02:22:49 | INFO     | simulato.option_detector  | Option D: circle=(2115,1769) r=15 click=(2115,1769) text='Lal ‘ : . wae vf . ° . i} i ' le i Ue, he ‘' conf=29.5
+2026-03-30T02:22:49 | INFO     | simulato.option_detector  | Detected 4 options via crop_and_detect (11 raw candidates)
+2026-03-30T02:22:49 | INFO     | simulato.coordinate_solver | Screen bounds detected: top=627, bottom=2673, left=247, right=3852 (3605x2046 in capture, area_ratio=0.59)
+2026-03-30T02:22:49 | INFO     | simulato.coordinate_solver | Using screen-boundary transform: scale=(0.532594, 0.527859) offset=(-131.6, -331.0)
+2026-03-30T02:22:49 | INFO     | simulato.coordinate_solver | Affine transform: scale=(0.532594, 0.527859) offset=(-131.6, -331.0) (naive scale was 0.468750, 0.351562)
+2026-03-30T02:22:49 | INFO     | simulato.coordinate_solver | Detected A: pixel=(997,302) \u2192 grid=(10,5)
+2026-03-30T02:22:49 | INFO     | simulato.coordinate_solver | Detected B: pixel=(999,409) \u2192 grid=(10,7)
+2026-03-30T02:22:49 | INFO     | simulato.coordinate_solver | Detected C: pixel=(1004,490) \u2192 grid=(10,9)
+2026-03-30T02:22:49 | INFO     | simulato.coordinate_solver | Detected D: pixel=(995,603) \u2192 grid=(10,11)
+2026-03-30T02:22:49 | INFO     | simulato.coordinate_solver | Estimated E: pixel=(999,728) \u2192 grid=(10,13)
+2026-03-30T02:22:49 | INFO     | simulato.coordinate_solver | NEXT button below screen boundary — using proportional position: pixel=(1834,1037)
+2026-03-30T02:22:49 | INFO     | simulato.coordinate_solver | Detected NEXT: pixel=(1834,1037) \u2192 grid=(19,19)
+2026-03-30T02:22:49 | INFO     | simulato.coordinate_solver | Calibration complete: 8 positions mapped
+2026-03-30T02:22:49 | INFO     | simulato.coordinate_solver | Calibration image: 4096x3072
+2026-03-30T02:22:49 | INFO     | simulato.coordinate_solver | First-pass option-like regions: 3
+2026-03-30T02:22:49 | INFO     | simulato.coordinate_solver | Running relaxed second-pass detection for option regions
+2026-03-30T02:22:49 | INFO     | simulato.coordinate_solver | Second-pass option-like regions: 0
+2026-03-30T02:22:49 | INFO     | simulato.image_preprocessor | Preprocessed image saved: calibration_20260328T135959_preprocessed.jpg (mask_applied=True, roi_y=358)
+2026-03-30T02:22:49 | INFO     | simulato.coordinate_solver | Calibration using preprocessed image: calibration_20260328T135959_preprocessed.jpg
+2026-03-30T02:22:49 | INFO     | simulato.exam_layout      | Detecting exam layout for: calibration_20260328T135959_preprocessed.jpg
+2026-03-30T02:22:50 | INFO     | simulato.exam_layout      | Layout detected: divider_x=2096, q_panel=(409,368,1687,2459), a_panel=(2096,368,2000,2459), confidence=0.90
+2026-03-30T02:22:50 | INFO     | simulato.option_detector  | Detecting options for: calibration_20260328T135959_preprocessed.jpg
+2026-03-30T02:22:50 | INFO     | simulato.option_detector  | Options zone: Y=[1056, 2385] within panel Y=[368, 2827] (header_bottom=1056)
+2026-03-30T02:22:50 | INFO     | simulato.option_detector  | 4 raw > 4 radius > 4 edge > 4 x-col > 4 clusters > 4 validated (cap 5)
+2026-03-30T02:22:50 | INFO     | simulato.option_detector  | Option A: circle=(2104,1246) r=15 click=(2104,1246) text='celle Minas ped Heol Aa a fara in Tet GLE ek Pp RG GT i Ee t' conf=18.5
+2026-03-30T02:22:51 | INFO     | simulato.option_detector  | Option B: circle=(2098,1430) r=10 click=(2098,1430) text='Fra Aes ee va Phy ea yee ! reve olt : eee Bui etn i filtro G' conf=15.7
+2026-03-30T02:22:51 | INFO     | simulato.option_detector  | Option C: circle=(2103,1637) r=12 click=(2103,1637) text='LAG psa reea fyb bed hgh pp : EP PASO fe' conf=7.0
+2026-03-30T02:22:51 | INFO     | simulato.option_detector  | Option D: circle=(2101,1829) r=17 click=(2101,1829) text='Bent gives! cle . ple Mypeabetpragdgtees ro . DAP BEE ALE Be' conf=19.9
+2026-03-30T02:22:51 | INFO     | simulato.option_detector  | Detected 4 options via crop_and_detect (4 raw candidates)
+2026-03-30T02:22:51 | INFO     | simulato.coordinate_solver | Screen bounds detected: top=615, bottom=2865, left=82, right=3999 (3917x2250 in capture, area_ratio=0.70)
+2026-03-30T02:22:51 | INFO     | simulato.coordinate_solver | Using screen-boundary transform: scale=(0.490171, 0.480000) offset=(-40.2, -295.2)
+2026-03-30T02:22:51 | INFO     | simulato.coordinate_solver | Affine transform: scale=(0.490171, 0.480000) offset=(-40.2, -295.2) (naive scale was 0.468750, 0.351562)
+2026-03-30T02:22:51 | INFO     | simulato.coordinate_solver | Detected A: pixel=(991,303) \u2192 grid=(10,5)
+2026-03-30T02:22:51 | INFO     | simulato.coordinate_solver | Detected B: pixel=(988,391) \u2192 grid=(10,7)
+2026-03-30T02:22:51 | INFO     | simulato.coordinate_solver | Detected C: pixel=(991,491) \u2192 grid=(10,9)
+2026-03-30T02:22:51 | INFO     | simulato.coordinate_solver | Detected D: pixel=(990,583) \u2192 grid=(10,10)
+2026-03-30T02:22:51 | INFO     | simulato.coordinate_solver | Estimated E: pixel=(990,672) \u2192 grid=(10,12)
+2026-03-30T02:22:51 | INFO     | simulato.coordinate_solver | NEXT button below screen boundary — using proportional position: pixel=(1834,1037)
+2026-03-30T02:22:51 | INFO     | simulato.coordinate_solver | Detected NEXT: pixel=(1834,1037) \u2192 grid=(19,19)
+2026-03-30T02:22:51 | INFO     | simulato.coordinate_solver | Calibration complete: 8 positions mapped
+2026-03-30T02:22:51 | INFO     | simulato.coordinate_solver | Calibration image: 4096x3072
+2026-03-30T02:22:51 | INFO     | simulato.coordinate_solver | First-pass option-like regions: 0
+2026-03-30T02:22:51 | INFO     | simulato.coordinate_solver | Running relaxed second-pass detection for option regions
+2026-03-30T02:22:51 | INFO     | simulato.coordinate_solver | Second-pass option-like regions: 0
+2026-03-30T02:22:51 | INFO     | simulato.image_preprocessor | Preprocessed image saved: calibration_20260328T140105_preprocessed.jpg (mask_applied=True, roi_y=358)
+2026-03-30T02:22:51 | INFO     | simulato.coordinate_solver | Calibration using preprocessed image: calibration_20260328T140105_preprocessed.jpg
+2026-03-30T02:22:51 | INFO     | simulato.exam_layout      | Detecting exam layout for: calibration_20260328T140105_preprocessed.jpg
+2026-03-30T02:22:52 | INFO     | simulato.exam_layout      | Layout detected: divider_x=2096, q_panel=(409,368,1687,2459), a_panel=(2096,368,2000,2459), confidence=0.90
+2026-03-30T02:22:52 | INFO     | simulato.option_detector  | Detecting options for: calibration_20260328T140105_preprocessed.jpg
+2026-03-30T02:22:52 | INFO     | simulato.option_detector  | Options zone: Y=[1056, 2385] within panel Y=[368, 2827] (header_bottom=1056)
+2026-03-30T02:22:52 | INFO     | simulato.option_detector  | 4 raw > 4 radius > 4 edge > 4 x-col > 4 clusters > 4 validated (cap 5)
+2026-03-30T02:22:52 | INFO     | simulato.option_detector  | Option A: circle=(2105,1249) r=14 click=(2105,1249) text='ae Tid Het irl el ae Mi Viliiy Patt Pe .' conf=13.2
+2026-03-30T02:22:53 | INFO     | simulato.option_detector  | Option B: circle=(2104,1640) r=10 click=(2104,1640) text='ylastted PAPI TULETREEA PU TLUME it Je2! jist Bu Pe a ea PPT' conf=14.3
+2026-03-30T02:22:53 | INFO     | simulato.option_detector  | Option C: circle=(2103,1823) r=15 click=(2103,1823) text='WEARER Binitdey Soul ly fata fe 3 Lo. aol .' conf=21.4
+2026-03-30T02:22:53 | INFO     | simulato.option_detector  | Option D: circle=(2119,2200) r=16 click=(2119,2200) text='° , .' conf=30.0
+2026-03-30T02:22:53 | INFO     | simulato.option_detector  | Detected 4 options via crop_and_detect (4 raw candidates)
+2026-03-30T02:22:53 | INFO     | simulato.coordinate_solver | Screen bounds detected: top=615, bottom=2865, left=81, right=4000 (3919x2250 in capture, area_ratio=0.70)
+2026-03-30T02:22:53 | INFO     | simulato.coordinate_solver | Using screen-boundary transform: scale=(0.489921, 0.480000) offset=(-39.7, -295.2)
+2026-03-30T02:22:53 | INFO     | simulato.coordinate_solver | Affine transform: scale=(0.489921, 0.480000) offset=(-39.7, -295.2) (naive scale was 0.468750, 0.351562)
+2026-03-30T02:22:53 | INFO     | simulato.coordinate_solver | Detected A: pixel=(992,304) \u2192 grid=(10,5)
+2026-03-30T02:22:53 | INFO     | simulato.coordinate_solver | Detected B: pixel=(991,492) \u2192 grid=(10,9)
+2026-03-30T02:22:53 | INFO     | simulato.coordinate_solver | Detected C: pixel=(991,580) \u2192 grid=(10,10)
+2026-03-30T02:22:53 | INFO     | simulato.coordinate_solver | Detected D: pixel=(998,761) \u2192 grid=(10,14)
+2026-03-30T02:22:53 | INFO     | simulato.coordinate_solver | Estimated E: pixel=(993,1028) \u2192 grid=(10,19)
+2026-03-30T02:22:53 | INFO     | simulato.coordinate_solver | NEXT button below screen boundary — using proportional position: pixel=(1834,1037)
+2026-03-30T02:22:53 | INFO     | simulato.coordinate_solver | Detected NEXT: pixel=(1834,1037) \u2192 grid=(19,19)
+2026-03-30T02:22:53 | INFO     | simulato.coordinate_solver | Calibration complete: 8 positions mapped
+2026-03-30T02:22:53 | INFO     | simulato.coordinate_solver | Calibration image: 4096x3072
+2026-03-30T02:22:53 | INFO     | simulato.coordinate_solver | First-pass option-like regions: 0
+2026-03-30T02:22:53 | INFO     | simulato.coordinate_solver | Running relaxed second-pass detection for option regions
+2026-03-30T02:22:53 | INFO     | simulato.coordinate_solver | Second-pass option-like regions: 0
+2026-03-30T02:22:54 | INFO     | simulato.image_preprocessor | Preprocessed image saved: calibration_20260328T142138_preprocessed.jpg (mask_applied=True, roi_y=358)
+2026-03-30T02:22:54 | INFO     | simulato.coordinate_solver | Calibration using preprocessed image: calibration_20260328T142138_preprocessed.jpg
+2026-03-30T02:22:54 | INFO     | simulato.exam_layout      | Detecting exam layout for: calibration_20260328T142138_preprocessed.jpg
+2026-03-30T02:22:54 | INFO     | simulato.exam_layout      | Layout detected: divider_x=1884, q_panel=(409,368,1475,2459), a_panel=(1884,368,2212,2459), confidence=0.90
+2026-03-30T02:22:54 | INFO     | simulato.option_detector  | Detecting options for: calibration_20260328T142138_preprocessed.jpg
+2026-03-30T02:22:54 | INFO     | simulato.option_detector  | Options zone: Y=[1025, 2385] within panel Y=[368, 2827] (header_bottom=1025)
+2026-03-30T02:22:54 | INFO     | simulato.option_detector  | 15 raw > 15 radius > 12 edge > 4 x-col > 4 clusters > 4 validated (cap 5)
+2026-03-30T02:22:55 | INFO     | simulato.option_detector  | Option A: circle=(2023,1170) r=28 click=(2023,1170) text='' conf=0.0
+2026-03-30T02:22:55 | INFO     | simulato.option_detector  | Option B: circle=(2027,1364) r=25 click=(2027,1364) text='' conf=0.0
+2026-03-30T02:22:55 | INFO     | simulato.option_detector  | Option C: circle=(2030,1551) r=24 click=(2030,1551) text='' conf=0.0
+2026-03-30T02:22:55 | INFO     | simulato.option_detector  | Option D: circle=(2035,1743) r=24 click=(2035,1743) text='as ASE eau ffbaeta a eesti capac! tl' conf=16.0
+2026-03-30T02:22:55 | INFO     | simulato.option_detector  | Detected 4 options via crop_and_detect (15 raw candidates)
+2026-03-30T02:22:55 | INFO     | simulato.coordinate_solver | Screen bounds detected: top=557, bottom=2781, left=100, right=3959 (3859x2224 in capture, area_ratio=0.68)
+2026-03-30T02:22:55 | INFO     | simulato.coordinate_solver | Using screen-boundary transform: scale=(0.497538, 0.485612) offset=(-49.8, -270.5)
+2026-03-30T02:22:55 | INFO     | simulato.coordinate_solver | Affine transform: scale=(0.497538, 0.485612) offset=(-49.8, -270.5) (naive scale was 0.468750, 0.351562)
+2026-03-30T02:22:55 | INFO     | simulato.coordinate_solver | Detected A: pixel=(957,298) \u2192 grid=(9,5)
+2026-03-30T02:22:55 | INFO     | simulato.coordinate_solver | Detected B: pixel=(959,392) \u2192 grid=(9,7)
+2026-03-30T02:22:55 | INFO     | simulato.coordinate_solver | Detected C: pixel=(960,483) \u2192 grid=(10,8)
+2026-03-30T02:22:55 | INFO     | simulato.coordinate_solver | Detected D: pixel=(963,576) \u2192 grid=(10,10)
+2026-03-30T02:22:55 | INFO     | simulato.coordinate_solver | Estimated E: pixel=(960,671) \u2192 grid=(10,12)
+2026-03-30T02:22:55 | INFO     | simulato.coordinate_solver | NEXT button below screen boundary — using proportional position: pixel=(1834,1037)
+2026-03-30T02:22:55 | INFO     | simulato.coordinate_solver | Detected NEXT: pixel=(1834,1037) \u2192 grid=(19,19)
+2026-03-30T02:22:55 | INFO     | simulato.coordinate_solver | Calibration complete: 8 positions mapped
+2026-03-30T02:22:55 | INFO     | simulato.coordinate_solver | Calibration image: 4096x3072
+2026-03-30T02:22:55 | INFO     | simulato.coordinate_solver | First-pass option-like regions: 0
+2026-03-30T02:22:55 | INFO     | simulato.coordinate_solver | Running relaxed second-pass detection for option regions
+2026-03-30T02:22:55 | INFO     | simulato.coordinate_solver | Second-pass option-like regions: 0
+2026-03-30T02:22:56 | INFO     | simulato.image_preprocessor | Preprocessed image saved: calibration_20260328T142143_preprocessed.jpg (mask_applied=True, roi_y=358)
+2026-03-30T02:22:56 | INFO     | simulato.coordinate_solver | Calibration using preprocessed image: calibration_20260328T142143_preprocessed.jpg
+2026-03-30T02:22:56 | INFO     | simulato.exam_layout      | Detecting exam layout for: calibration_20260328T142143_preprocessed.jpg
+Traceback (most recent call last):
+  File "D:\Python Projects\simulato\test_calibration.py", line 15, in <module>
+    r = calibrate_from_screenshot(img)
+  File "D:\Python Projects\simulato\calibration\coordinate_solver.py", line 279, in calibrate_from_screenshot
+    layout = ExamLayoutDetector().detect(prep_path)
+  File "D:\Python Projects\simulato\controller\capture_pipeline\exam_layout.py", line 193, in detect
+    self._detect_bottom_buttons(gray, layout, bottom_bar_y, h, w, color_img=img)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Python Projects\simulato\controller\capture_pipeline\exam_layout.py", line 361, in _detect_bottom_buttons
+    data = pytesseract.image_to_data(
+        bar_region,
+    ...<2 lines>...
+        timeout=OCR_TIMEOUT_SECONDS,
+    )
+  File "C:\Users\jumes\AppData\Roaming\Python\Python314\site-packages\pytesseract\pytesseract.py", line 596, in image_to_data
+    return {
+           ~
+    ...<6 lines>...
+        Output.STRING: lambda: run_and_get_output(*args),
+        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    }[output_type]()
+    ~~~~~~~~~~~~~~^^
+  File "C:\Users\jumes\AppData\Roaming\Python\Python314\site-packages\pytesseract\pytesseract.py", line 602, in <lambda>
+    Output.DICT: lambda: file_to_dict(run_and_get_output(*args), '\t', -1),
+                                      ~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Users\jumes\AppData\Roaming\Python\Python314\site-packages\pytesseract\pytesseract.py", line 352, in run_and_get_output
+    run_tesseract(**kwargs)
+    ~~~~~~~~~~~~~^^^^^^^^^^
+  File "C:\Users\jumes\AppData\Roaming\Python\Python314\site-packages\pytesseract\pytesseract.py", line 282, in run_tesseract
+    with timeout_manager(proc, timeout) as error_string:
+         ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "C:\Python314\Lib\contextlib.py", line 141, in __enter__
+    return next(self.gen)
+  File "C:\Users\jumes\AppData\Roaming\Python\Python314\site-packages\pytesseract\pytesseract.py", line 148, in timeout_manager
+    _, error_string = proc.communicate(timeout=seconds)
+                      ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Python314\Lib\subprocess.py", line 1220, in communicate
+    stdout, stderr = self._communicate(input, endtime, timeout)
+                     ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python314\Lib\subprocess.py", line 1642, in _communicate
+    self.stdout_thread.join(self._remaining_time(endtime))
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python314\Lib\threading.py", line 1132, in join
+    self._os_thread_handle.join(timeout)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+KeyboardInterrupt
+^C

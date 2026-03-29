@@ -1,0 +1,12 @@
+{
+  "question_id": 60,
+  "canonical_text": "what is the sum of all natural numbers between 1 and 100 which are multiples of 7||675|705|735|745",
+  "option_a": "735",
+  "option_b": "705",
+  "option_c": "675",
+  "option_d": "745",
+  "option_e": "",
+  "correct_answer": "735",
+  "answer_letter": "A",
+  "version": 1
+}

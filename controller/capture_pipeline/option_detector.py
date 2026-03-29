@@ -105,7 +105,10 @@ class OptionDetector:
     HEADER_SKIP_MAX_FRAC = 0.38
 
     # Bottom margin: fraction of answer panel to skip (footer buttons).
-    BOTTOM_SKIP_FRAC = 0.06
+    # The footer contains Clear/Prev/Next buttons whose circular shapes
+    # can be misdetected as radio buttons (e.g. Clear button at y=2536).
+    # 18% excludes the entire footer bar safely.
+    BOTTOM_SKIP_FRAC = 0.18
 
     # Radio strip: left portion of the answer panel where circles live.
     # On wider panels (divider further left), the radio circles can be
@@ -805,7 +808,9 @@ class OptionDetector:
 
         Two-phase approach:
           Phase 1 (ratio-based): reject clusters whose gap to neighbours
-                  deviates too far from the median gap.
+                  deviates too far from the median gap.  Requires at least
+                  5 clusters to act — with only 3--4, a single missed circle
+                  creates irregular gaps that cascade into false removals.
           Phase 2 (leave-one-out): if we still have more clusters than
                   expected and removing one cluster dramatically improves
                   regularity, remove it.
@@ -818,7 +823,10 @@ class OptionDetector:
         # --- Phase 1: Ratio-based outlier rejection ---
         MAX_ITERATIONS = 3
         for iteration in range(MAX_ITERATIONS):
-            if len(working) < 3:
+            # Never drop below 3 clusters — with fewer, the ratio-based
+            # filter has insufficient data to distinguish phantoms from
+            # real options with irregular spacing.
+            if len(working) <= 3:
                 break
 
             ys = [c["center_y"] for c in working]

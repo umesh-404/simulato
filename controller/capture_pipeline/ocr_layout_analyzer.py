@@ -68,6 +68,13 @@ class OCRLayoutResult:
         self._option_map_cache: Optional[Any] = None
         self._max_options: int | None = None  # Set by workflow after AI response
 
+    @property
+    def full_text(self) -> str:
+        """Return all OCR words joined as a single string to provide context to the AI."""
+        # Sort words roughly top-to-bottom, then left-to-right
+        sorted_words = sorted(self.words, key=lambda w: (w.y // 20, w.x))
+        return " ".join(w.text for w in sorted_words)
+
     def detect_question_number(self) -> Optional[tuple[int, int]]:
         """Extract the current question number and total from OCR words.
 

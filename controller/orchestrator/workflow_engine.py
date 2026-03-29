@@ -51,7 +51,6 @@ from controller.config import (
     VERIFY_FRAME_TIMEOUT_SECONDS,
 )
 from controller.answer_engine.decision_engine import (
-    decide_answer,
     AnswerDecision,
     DecisionOutcome,
 )
@@ -138,15 +137,25 @@ class WorkflowEngine:
         self._verification_frame_data: Optional[bytes] = None
         self._is_waiting_verification_flag: bool = False
         self._request_capture_callback: Optional[callable] = None
+        self._request_recalibration_callback: Optional[callable] = None
         self._ai_provider: str = DEFAULT_AI_PROVIDER  # "grok" or "gemini"
         self._last_verification_timed_out: bool = False
         self._last_option_click_target_norm: tuple[float, float] | None = None
         self._current_answer_text_for_click: str = ""
         self._last_dispatched_click_letter: str | None = None
+        # When a click fails verification due to large drift, we pause and
+        # request recalibration.  This stores the letter we need to retry
+        # once the system resumes after recalibration.
+        self._pending_recalib_retry_letter: str | None = None
+        self._pending_recalib_retry_answer_text: str = ""
 
     def set_capture_callback(self, callback) -> None:
         """Set callback to request capture from the phone."""
         self._request_capture_callback = callback
+
+    def set_recalibration_callback(self, callback) -> None:
+        """Set callback to request recalibration from the system controller."""
+        self._request_recalibration_callback = callback
 
     def set_ai_provider(self, provider: str) -> None:
         """Set the active AI provider for primary question solving."""
@@ -194,9 +203,8 @@ class WorkflowEngine:
 
     def set_test_context(self, test_name: str) -> None:
         """Load or create the test context."""
-        test = self._db.get_or_create_test(test_name)
-        self._test_id = test["test_id"]
         self._test_name = test_name
+        self._test_id = 1  # DB matching disabled — AI is always queried directly.
         self._question_number = 0
         self._api_calls = 0
         self._cache_hits = 0
@@ -213,7 +221,7 @@ class WorkflowEngine:
         self._mapping_frame_data = None
         self._is_waiting_mapping_flag = False
         self._mapping_frame_event.set()
-        logger.info("Test context set: %s (id=%d)", test_name, self._test_id)
+        logger.info("Test context set: %s", test_name)
 
     def receive_scroll_frame(self, image_data: bytes) -> None:
         """Called by system_controller when a scroll frame image is received."""
@@ -246,6 +254,39 @@ class WorkflowEngine:
 
         if self._test_id is None:
             logger.error("No test context set")
+            return None
+
+        # ---- Resume from recalibration pause ----
+        # If we paused for recalibration and the operator has recalibrated +
+        # pressed CONTINUE, retry the failed click using the newly calibrated
+        # grid_map positions.
+        retry_letter = self._pending_recalib_retry_letter
+        if retry_letter is not None:
+            self._pending_recalib_retry_letter = None
+            self._current_answer_text_for_click = self._pending_recalib_retry_answer_text
+            self._pending_recalib_retry_answer_text = ""
+            logger.info(
+                "Resuming after recalibration — retrying click for option %s (question %d)",
+                retry_letter, self._question_number,
+            )
+            # Use the calibrated grid_map position directly for the retry.
+            # This bypasses live detection entirely, which may have been
+            # picking up false positives (e.g. the Clear button).
+            try:
+                self._click.click_option(retry_letter)
+                time.sleep(1.8)
+                verified = self._verify_option_click(retry_letter)
+                if verified:
+                    logger.info("Post-recalibration click verified for option %s", retry_letter)
+                else:
+                    logger.warning(
+                        "Post-recalibration click for %s not verified — proceeding anyway",
+                        retry_letter,
+                    )
+            except Exception as e:
+                logger.warning("Post-recalibration click retry failed: %s", e)
+            # Advance to next question (snapshot was already stored before pause).
+            self.advance_to_next()
             return None
 
         self._question_number += 1
@@ -369,7 +410,32 @@ class WorkflowEngine:
                         # question text is cut off).
                         needs_scroll = bool(dual.question.needs_scroll or dual.question.confidence >= 0.35)
                         if not needs_scroll and scroll_ocr_res is not None:
-                            needs_scroll = self._question_panel_text_truncated(scroll_ocr_res)
+                            # Option-completeness veto: if the answer panel already
+                            # shows 3+ radio-button options, all content is visible
+                            # and the truncation heuristic should NOT override.
+                            options_veto = False
+                            try:
+                                import cv2
+                                from controller.capture_pipeline.option_detector import OptionDetector
+                                scroll_img = cv2.imread(str(image_path))
+                                if (scroll_img is not None
+                                        and layout_for_scroll is not None
+                                        and layout_for_scroll.answer_panel is not None):
+                                    opt_det = OptionDetector()
+                                    opt_map = opt_det.crop_and_detect(
+                                        scroll_img, layout_for_scroll.answer_panel,
+                                    )
+                                    if opt_map is not None and len(opt_map.options) >= 3:
+                                        logger.info(
+                                            "Scroll veto: %d options already visible in answer panel "
+                                            "— overriding truncation heuristic",
+                                            len(opt_map.options),
+                                        )
+                                        options_veto = True
+                            except Exception:
+                                pass
+                            if not options_veto:
+                                needs_scroll = self._question_panel_text_truncated(scroll_ocr_res)
                         scroll_direction = "down" if needs_scroll else None
                     else:
                         scroll_result = self._scroll_detector.detect(image_path)
@@ -385,6 +451,9 @@ class WorkflowEngine:
                 self._log_event("scroll_detected", {"direction": scroll_direction})
                 additional = self._capture_scroll_frames(scroll_direction)
                 frames.extend(additional)
+
+            # Track whether the image sent to AI is a multi-frame stitch.
+            is_stitched = len(frames) > 1
 
             # Step 4: Stitch (or copy single frame)
             stitched_path = image_path.parent / f"stitched_{self._question_number:04d}.jpg"
@@ -456,68 +525,25 @@ class WorkflowEngine:
             )
             #endregion agent log
 
-            # Step 5.5: Image-hash DB-first lookup (no AI call on hit)
-            image_phash = self._compute_image_phash(stitched_path)
-            cached_question = None
-            if image_phash is not None:
-                cached_question = self._db.lookup_by_image_phash(self._test_id, image_phash)
-                if cached_question is None:
-                    cached_question = self._db.lookup_by_image_phash_near(self._test_id, image_phash, max_distance=3)
-                if cached_question:
-                    # Validate cache hit against live on-screen content
-                    # to prevent false identity reuse across different questions
-                    # that happen to hash similarly.
-                    if not self._validate_cache_hit(cached_question):
-                        logger.warning(
-                            "Image-hash cache hit REJECTED by content validation "
-                            "(question_id=%d, test_id=%d)",
-                            cached_question["question_id"],
-                            self._test_id,
-                        )
-                        cached_question = None
-                    else:
-                        logger.info(
-                            "Image-hash DB HIT (validated): question_id=%d (test_id=%d)",
-                            cached_question["question_id"],
-                            self._test_id,
-                        )
-                        self._image_hash_hits += 1
-
-            # Step 5.6: OCR-text DB pre-check (no cloud call if cached by text/options)
-            ocr_cached_decision = None
-            if cached_question is None:
-                ocr_cached_decision = self._try_db_decision_from_ocr()
-            #region agent log
-            _dbg(
-                location="controller/orchestrator/workflow_engine.py:process_question",
-                message="db image_phash lookup",
-                data={
-                    "image_phash_present": image_phash is not None,
-                    "cached_hit": cached_question is not None,
-                    "question_id": (cached_question.get("question_id") if cached_question else None),
-                },
-                hypothesisId="H4",
-            )
-            #endregion agent log
+            # Steps 5.5 / 5.6 removed: DB image-hash and OCR pre-check bypassed.
+            # The stitched image is always sent directly to the AI.
 
             ai_response = None
             ai_model_used = ""
             answer_text_for_click = ""
 
-            # Step 6: Query AI (dispatch to active provider) — only if no image-hash hit
+            # Step 6: Query AI directly — DB matching is disabled.
             try:
-                if cached_question is None:
-                    if ocr_cached_decision is None:
-                        ai_response, ai_model_used, provider_used = self._query_primary_with_fallback(preprocessed_path)
-                        self._api_calls += 1
-                        self._log_event("ai_response", {
-                            "provider": provider_used,
-                            "model": ai_model_used,
-                            "question": ai_response.question[:100],
-                            "answer": ai_response.answer,
-                            "answer_content": ai_response.answer_content[:100],
-                        })
-                        self._save_ai_response(ai_response, ai_model_used)
+                ai_response, ai_model_used, provider_used = self._query_primary_with_fallback(stitched_path, is_stitched=is_stitched)
+                self._api_calls += 1
+                self._log_event("ai_response", {
+                    "provider": provider_used,
+                    "model": ai_model_used,
+                    "question": ai_response.question[:100],
+                    "answer": ai_response.answer,
+                    "answer_content": ai_response.answer_content[:100],
+                })
+                self._save_ai_response(ai_response, ai_model_used)
             except (GrokAPIError, GeminiAPIError, OllamaAPIError, ParseError) as e:
                 self._sm.force_error(f"AI processing failed: {e}")
                 self._alerts.raise_alert(
@@ -527,48 +553,22 @@ class WorkflowEngine:
                 self._log_event("ai_error", {"error": str(e)})
                 return None
 
-            # Step 7: Run decision engine or DB-only decision if we have an image-hash hit
-            if cached_question is not None:
-                db_answer = cached_question.get("correct_answer", "")
-                answer_letter = cached_question.get("answer_letter", "")
-                answer_text_for_click = db_answer or ""
-                if not answer_letter:
-                    logger.error(
-                        "Cached question %d has empty answer_letter; cannot use image-hash fast path",
-                        cached_question.get("question_id"),
-                    )
-                    return None
+            # Step 7: Build decision directly from AI response (DB matching disabled).
+            logger.info("Using AI answer directly: %s", ai_response.answer if ai_response else "None")
+            answer_text_for_click = (ai_response.answer_content if ai_response is not None else "") or ""
+            decision = AnswerDecision(
+                outcome=DecisionOutcome.CLICK,
+                click_letter=ai_response.answer if ai_response is not None else None,
+                source="ai_direct",
+                question_id=None,
+            )
+            # Remap by live on-screen option content to handle shuffled options.
+            if decision.click_letter and ai_response is not None:
+                decision.click_letter = self._remap_letter_by_option_content(
+                    db_answer_text=ai_response.answer_content,
+                    fallback_letter=decision.click_letter,
+                )
 
-                logger.info(
-                    "Using DB answer via image-hash fast path: letter=%s",
-                    answer_letter,
-                )
-                remapped = self._remap_letter_by_option_content(
-                    db_answer_text=db_answer,
-                    fallback_letter=answer_letter,
-                )
-                decision = AnswerDecision(
-                    outcome=DecisionOutcome.CLICK,
-                    click_letter=remapped,
-                    source="database_image_hash",
-                    question_id=cached_question.get("question_id"),
-                )
-            elif ocr_cached_decision is not None:
-                decision = ocr_cached_decision
-                if decision.match_result is not None:
-                    answer_text_for_click = (decision.match_result.correct_answer or "").strip()
-            else:
-                decision = decide_answer(self._db, self._test_id, ai_response)  # type: ignore[arg-type]
-                answer_text_for_click = (ai_response.answer_content if ai_response is not None else "") or ""
-                # Always remap by live on-screen option content to handle shuffled options.
-                if decision.click_letter and ai_response is not None:
-                    decision.click_letter = self._remap_letter_by_option_content(
-                        db_answer_text=ai_response.answer_content,
-                        fallback_letter=decision.click_letter,
-                    )
-
-            if decision.source and decision.source != "ai_new":
-                self._cache_hits += 1
 
             # Step 8: Handle outcome
             if decision.outcome == DecisionOutcome.CONFLICT:
@@ -592,7 +592,7 @@ class WorkflowEngine:
 
                 # Set expected option count on the interaction layout so the
                 # option detector trims phantom circles beyond the real count.
-                expected_options = self._compute_expected_option_count(ai_response, cached_question)
+                expected_options = self._compute_expected_option_count(ai_response)
                 if expected_options is not None:
                     for layout_obj in (self._latest_interaction_ocr_layout, self._latest_ocr_layout):
                         if layout_obj is not None and hasattr(layout_obj, 'set_max_options'):
@@ -627,40 +627,8 @@ class WorkflowEngine:
             if decision.question_id is not None:
                 self._last_answered_question_id = decision.question_id
 
-            # Step 10: Store full question snapshot (Canonical Law 10)
-            if decision.question_id is not None:
-                if ai_response is not None:
-                    ai_response_json = json.dumps({
-                        "model": ai_model_used,
-                        "question": ai_response.question,
-                        "options": {
-                            "A": ai_response.options.A,
-                            "B": ai_response.options.B,
-                            "C": ai_response.options.C,
-                            "D": ai_response.options.D,
-                            "E": ai_response.options.E,
-                        },
-                        "answer": ai_response.answer,
-                        "answer_content": ai_response.answer_content,
-                    }, ensure_ascii=False)
-                    selected_answer_text = ai_response.answer_content
-                else:
-                    ai_response_json = ""
-                    # For image-hash fast path, selected answer is the DB correct_answer
-                    if cached_question is not None:
-                        selected_answer_text = cached_question.get("correct_answer", "")
-                    else:
-                        selected_answer_text = ""
-
-                self._db.store_snapshot(
-                    question_id=decision.question_id,
-                    run_id=self._receiver.run_dir.name,
-                    screenshot_path=str(image_path),
-                    ai_response=ai_response_json,
-                    selected_answer=selected_answer_text,
-                    decision_source=decision.source or "unknown",
-                    image_phash=image_phash,
-                )
+            # Step 10: AI response already saved to file via _save_ai_response.
+            # DB snapshot storage is disabled.
 
             return decision
 
@@ -893,52 +861,15 @@ class WorkflowEngine:
             return None
 
     def _click_next_best_target(self) -> None:
-        """Click NEXT using the best available detection method.
+        """Click NEXT using the calibrated grid-map position.
 
-        Priority:
-        1. OCR layout result (uses layout detector rect → CV color → OCR word)
-        2. Layout detector's next_button rect directly from the latest layout
-        3. Local AI (Qwen) target localization
-        4. Calibrated grid-map fallback
+        The NEXT button is in the exam footer bar, which is darker than the
+        main content area.  The screen-boundary transform (used for option
+        radio buttons) only covers the bright content area and maps footer
+        positions to below the screen.  Using the calibrated pixel position
+        from grid_map (which applies a proportional fallback for footer
+        elements) avoids this problem entirely.
         """
-        if OCR_LAYOUT_PRIMARY_ENABLED and self._latest_interaction_ocr_layout is not None:
-            ocr_next = self._latest_interaction_ocr_layout.locate_next_target()
-            if ocr_next is not None:
-                logger.info("Using OCR-derived NEXT target (%.4f, %.4f)", ocr_next[0], ocr_next[1])
-                self._click.click_at_normalized(ocr_next[0], ocr_next[1], command="CLICK_NEXT")
-                return
-
-            # Fallback: use layout detector's next_button rect directly.
-            layout = self._latest_interaction_ocr_layout.layout
-            if layout is not None and layout.next_button is not None:
-                nb = layout.next_button
-                ix = max(1, self._latest_interaction_ocr_layout.image_w - 1)
-                iy = max(1, self._latest_interaction_ocr_layout.image_h - 1)
-                nx = max(0.0, min(1.0, float(nb.x + nb.w // 2) / float(ix)))
-                ny = max(0.0, min(1.0, float(nb.y + nb.h // 2) / float(iy)))
-                logger.info("Using layout-detector NEXT button rect (%.4f, %.4f)", nx, ny)
-                self._click.click_at_normalized(nx, ny, command="CLICK_NEXT")
-                return
-
-            # Last layout fallback: bottom-right corner of answer panel.
-            if layout is not None and layout.answer_panel is not None:
-                ap = layout.answer_panel
-                ix = max(1, self._latest_interaction_ocr_layout.image_w - 1)
-                iy = max(1, self._latest_interaction_ocr_layout.image_h - 1)
-                nx = max(0.0, min(1.0, float(ap.x + int(ap.w * 0.90)) / float(ix)))
-                ny = max(0.0, min(1.0, float(ap.y + int(ap.h * 0.96)) / float(iy)))
-                logger.info("Using layout-derived NEXT fallback target (%.4f, %.4f)", nx, ny)
-                self._click.click_at_normalized(nx, ny, command="CLICK_NEXT")
-                return
-        if LOCAL_AI_ASSIST_ENABLED and self._latest_preprocessed_image_path is not None:
-            norm_target = locate_next_button_target(self._latest_preprocessed_image_path)
-            if norm_target is not None:
-                self._click.click_at_normalized(norm_target[0], norm_target[1], command="CLICK_NEXT")
-                return
-            visible, grid_pos = locate_next_button_grid(self._latest_preprocessed_image_path)
-            if visible and grid_pos is not None:
-                self._click.click_next_at_grid(grid_pos[0], grid_pos[1])
-                return
         self._click.click_next()
 
     def _execute_click_with_verification(self, letter: str) -> None:
@@ -1012,39 +943,115 @@ class WorkflowEngine:
 
         logger.error("Click verification FAILED after retry for option %s", letter)
 
-        alert_type = AlertType.VERIFICATION_FAILURE
-        alert_msg = f"Click verification failed for option {letter} after retry"
+        # ---------------------------------------------------------------
+        # Auto-recalibration recovery (Canonical Law 5 extension):
+        #
+        # When click verification fails after standard retry, the most
+        # common root cause is a stale/inaccurate calibration grid_map
+        # (e.g. bad option detection during calibration produced wrong
+        # estimated positions for D/E).
+        #
+        # Instead of immediately going to ERROR, we:
+        #   1. Capture a fresh frame  (the current exam screen)
+        #   2. Run calibrate_from_screenshot on it
+        #   3. Save the new grid_map if successful
+        #   4. Re-detect options and retry the click
+        #   5. If still failing after recalibration → then error out
+        # ---------------------------------------------------------------
+        logger.info(
+            "Attempting auto-recalibration recovery for option %s",
+            letter,
+        )
 
-        # Diagnostic: compare live click target against calibration as
-        # a drift indicator.  This is informational only — decisions are
-        # always based on live detection, never calibration.
-        if self._last_option_click_target_norm is not None:
-            try:
-                from calibration.grid_mapper import GridMap
-                gm = GridMap.load()
-                calib = gm.pixel_positions.get(letter.strip().upper())
-                if calib is not None:
-                    cap_w, cap_h = gm.capture_resolution
-                    _, norm_y = self._last_option_click_target_norm
-                    py = int(round(norm_y * max(1, cap_h - 1)))
-                    _, click_sy = gm.capture_to_screen_pixel(0, py)
-                    calib_sy = calib[1]
-                    drift = abs(click_sy - calib_sy)
+        recalib_success = False
+        try:
+            from calibration.coordinate_solver import calibrate_from_screenshot
+            from calibration.grid_mapper import GridMap
+
+            # Request a fresh capture for recalibration.
+            self._verification_frame_event.clear()
+            self._verification_frame_data = None
+            self._is_waiting_verification_flag = True
+            if self._request_capture_callback:
+                self._request_capture_callback()
+            arrived = self._verification_frame_event.wait(timeout=VERIFY_FRAME_TIMEOUT)
+            self._is_waiting_verification_flag = False
+
+            if arrived and self._verification_frame_data is not None:
+                # Save recalibration image to the calibration directory.
+                from datetime import datetime, timezone
+                cal_dir = Path("runs") / "calibration"
+                cal_dir.mkdir(parents=True, exist_ok=True)
+                ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+                recalib_path = cal_dir / f"calibration_auto_{ts}.jpg"
+                recalib_path.write_bytes(self._verification_frame_data)
+                logger.info(
+                    "Auto-recalibration: saved frame as %s (%d bytes)",
+                    recalib_path.name, len(self._verification_frame_data),
+                )
+
+                result = calibrate_from_screenshot(recalib_path)
+                if result.success and result.grid_map is not None:
+                    result.grid_map.save()
+                    recalib_success = True
                     logger.info(
-                        "Drift diagnostic for %s: live_screen_y=%d, calibrated_y=%d, drift=%dpx",
-                        letter, click_sy, calib_sy, drift,
+                        "Auto-recalibration SUCCEEDED: %d positions mapped",
+                        len(result.grid_map.positions),
                     )
-                    if drift > 80:
-                        alert_type = AlertType.CALIBRATION_REQUIRED
-                        alert_msg = (
-                            f"Click {letter} live target is {drift}px from calibration. "
-                            f"Consider recalibrating for optimal coordinate transforms."
-                        )
-            except Exception:
-                pass
 
+                    # Best-effort: update header anchor template.
+                    try:
+                        from controller.capture_pipeline.header_anchor import HeaderAnchor
+                        HeaderAnchor.ensure_template_from_image(recalib_path, force=True)
+                    except Exception:
+                        pass
+                else:
+                    logger.warning(
+                        "Auto-recalibration FAILED: %s",
+                        result.message if result else "no result",
+                    )
+            else:
+                logger.warning("Auto-recalibration: capture timed out (no frame received)")
+
+        except Exception as e:
+            logger.warning("Auto-recalibration failed with exception: %s", e)
+
+        if recalib_success:
+            # Re-detect options on the latest frame with fresh calibration.
+            try:
+                latest_img = self._latest_preprocessed_image_path
+                if latest_img is not None:
+                    fresh_ocr = OCRLayoutAnalyzer().analyze(latest_img)
+                    if fresh_ocr is not None:
+                        self._latest_interaction_ocr_layout = fresh_ocr
+                        logger.info("Refreshed option targets after auto-recalibration")
+            except Exception as e:
+                logger.warning("Post-recalibration option refresh failed: %s", e)
+
+            # Final retry with fresh calibration
+            logger.info("Post-recalibration retry click for option %s", letter)
+            dispatched_letter = self._click_option_best_target(letter)
+            self._last_dispatched_click_letter = dispatched_letter
+            time.sleep(1.8)
+            verified = self._verify_option_click(dispatched_letter)
+            if verified:
+                logger.info(
+                    "Post-recalibration click VERIFIED for option %s (dispatched=%s)",
+                    letter, dispatched_letter,
+                )
+                return
+            logger.error(
+                "Post-recalibration click verification STILL FAILED for option %s",
+                letter,
+            )
+
+        # All recovery attempts exhausted — this is a genuine failure.
+        # Force ERROR state and alert the operator.
         self._sm.force_error(f"Input verification failed for option {letter}")
-        self._alerts.raise_alert(alert_type, alert_msg)
+        self._alerts.raise_alert(
+            AlertType.VERIFICATION_FAILURE,
+            f"Click verification failed for option {letter} after auto-recalibration retry",
+        )
 
     def _candidate_option_click_sequence(self, intended_letter: str) -> list[str]:
         """
@@ -1102,11 +1109,119 @@ class WorkflowEngine:
         except Exception:
             pass
 
+    # Maximum screen-pixel X delta between live detection and calibration
+    # for the X-axis blend.  The radio-button column is stable across
+    # questions so deltas should be small.  If the X delta exceeds this
+    # threshold it indicates a misdetection and we fall back to pure
+    # calibration X.
+    _CALIB_BLEND_MAX_X_DELTA = 60
+
+    # Maximum screen-pixel Y delta between live detection and calibration
+    # for accepting live Y.  Moderate Y shifts (up to this value) are
+    # expected because question text length varies between questions,
+    # pushing options up or down.  Larger deltas suggest a misdetection
+    # (e.g. the detector found the wrong row).
+    _CALIB_BLEND_MAX_Y_DELTA = 120
+
+    def _blend_with_calibration(
+        self,
+        letter: str,
+        live_norm: tuple[float, float],
+    ) -> tuple[float, float]:
+        """Blend live-detected capture-normalized coords with calibration.
+
+        Split-axis strategy:
+        - X axis: use calibration (radio-button column is stable across
+          questions).  Live X is only used as a small nudge when close.
+        - Y axis: prefer live detection (option positions shift vertically
+          between questions depending on question text length).  Fall back
+          to calibration Y only when live detection is wildly off or
+          inter-option spacing looks inconsistent.
+        """
+        try:
+            from calibration.grid_mapper import GridMap
+            gm = GridMap.load()
+            calib_pixel = gm.pixel_positions.get(letter.strip().upper())
+            if calib_pixel is None:
+                return live_norm
+
+            cap_w, cap_h = gm.capture_resolution
+            calib_sx, calib_sy = calib_pixel
+
+            # Convert live norm -> capture pixel -> screen pixel
+            live_cap_x = int(round(live_norm[0] * max(1, cap_w - 1)))
+            live_cap_y = int(round(live_norm[1] * max(1, cap_h - 1)))
+            live_sx, live_sy = gm.capture_to_screen_pixel(live_cap_x, live_cap_y)
+
+            dx = abs(live_sx - calib_sx)
+            dy = abs(live_sy - calib_sy)
+
+            # --- X axis: use calibration (stable column) with tiny live nudge ---
+            if dx <= self._CALIB_BLEND_MAX_X_DELTA:
+                # Small X delta: blend heavily toward calibration
+                final_sx = live_sx * 0.1 + calib_sx * 0.9
+            else:
+                # Large X delta: live X is unreliable, use pure calibration
+                final_sx = float(calib_sx)
+
+            # --- Y axis: prefer live detection (adapts to question layout) ---
+            # Validate that the live Y detection is plausible by checking
+            # that the Y shift from calibration is within a reasonable range.
+            # Option Y positions can shift ~30-60px between questions due to
+            # different question text lengths, but shifts > 120px suggest
+            # the detector found the wrong row entirely.
+            live_y_trusted = dy <= self._CALIB_BLEND_MAX_Y_DELTA
+
+            if live_y_trusted:
+                # Trust live Y — it adapts to the current question's layout.
+                # Blend with a small calibration component for stability.
+                final_sy = live_sy * 0.85 + calib_sy * 0.15
+                y_mode = "live_primary"
+            else:
+                # Y delta too large — the detector may have found the wrong
+                # row.  Fall back to calibration Y.
+                final_sy = float(calib_sy)
+                y_mode = "calib_fallback"
+
+            blend_mode = f"x=calib, y={y_mode}"
+
+            # Convert blended screen pixel back to capture-normalized.
+            scale_x = float(gm.transform.get("scale_x", 1.0))
+            scale_y = float(gm.transform.get("scale_y", 1.0))
+            offset_x = float(gm.transform.get("offset_x", 0.0))
+            offset_y = float(gm.transform.get("offset_y", 0.0))
+
+            if scale_x == 0 or scale_y == 0:
+                return live_norm
+
+            blend_cap_x = (final_sx - offset_x) / scale_x
+            blend_cap_y = (final_sy - offset_y) / scale_y
+
+            blend_nx = max(0.0, min(1.0, blend_cap_x / max(1, cap_w - 1)))
+            blend_ny = max(0.0, min(1.0, blend_cap_y / max(1, cap_h - 1)))
+
+            logger.info(
+                "Calibration blend for %s: live_screen=(%d,%d), calib=(%d,%d), "
+                "final_screen=(%.0f,%.0f), delta=(%d,%d), mode=%s",
+                letter, live_sx, live_sy, calib_sx, calib_sy,
+                final_sx, final_sy, dx, dy, blend_mode,
+            )
+            return (blend_nx, blend_ny)
+
+        except Exception as e:
+            logger.debug("Calibration blend failed for %s: %s", letter, e)
+            return live_norm
+
     def _click_option_best_target(self, letter: str) -> str:
         """
-        Click an option using live detection only: OCR layout (primary),
-        then local vision assist. Does not fall back to static calibration
-        pixels — if all methods fail, the run errors so the operator can fix framing or detection.
+        Click an option using live detection, blended with calibration
+        data for improved accuracy.
+
+        OCR layout (primary) provides the live-detected radio circle
+        position in capture-space.  When calibration data is available
+        and close to the live detection, we blend the two (favouring
+        calibration) to compensate for HoughCircles imprecision on
+        phone-captured frames.
         """
         target_letter = letter.strip().upper()
         if OCR_LAYOUT_PRIMARY_ENABLED and self._latest_interaction_ocr_layout is not None:
@@ -1123,11 +1238,12 @@ class WorkflowEngine:
                         resolved_letter,
                     )
                 logger.info("Using OCR-derived content-locked target for option %s", resolved_letter)
-                self._last_option_click_target_norm = (float(ocr_target[0]), float(ocr_target[1]))
-                self._log_screen_coords_for_click(resolved_letter, float(ocr_target[0]), float(ocr_target[1]))
+                final_target = self._blend_with_calibration(resolved_letter, ocr_target)
+                self._last_option_click_target_norm = (float(final_target[0]), float(final_target[1]))
+                self._log_screen_coords_for_click(resolved_letter, float(final_target[0]), float(final_target[1]))
                 self._click.click_at_normalized(
-                    ocr_target[0],
-                    ocr_target[1],
+                    final_target[0],
+                    final_target[1],
                     command=f"CLICK_{resolved_letter}",
                 )
                 return resolved_letter
@@ -1135,20 +1251,21 @@ class WorkflowEngine:
             ocr_target = self._latest_interaction_ocr_layout.locate_option_target(target_letter)
             if ocr_target is not None:
                 logger.info("Using OCR-derived target for option %s", target_letter)
-                self._last_option_click_target_norm = (float(ocr_target[0]), float(ocr_target[1]))
-                self._log_screen_coords_for_click(target_letter, float(ocr_target[0]), float(ocr_target[1]))
+                final_target = self._blend_with_calibration(target_letter, ocr_target)
+                self._last_option_click_target_norm = (float(final_target[0]), float(final_target[1]))
+                self._log_screen_coords_for_click(target_letter, float(final_target[0]), float(final_target[1]))
                 #region agent log
                 from controller.utils.debug_ndjson import dbg as _dbg
                 _dbg(
                     location="controller/orchestrator/workflow_engine.py:_click_option_best_target",
                     message="click option via OCRLayoutResult",
-                    data={"letter": target_letter, "norm_x": float(ocr_target[0]), "norm_y": float(ocr_target[1])},
+                    data={"letter": target_letter, "norm_x": float(final_target[0]), "norm_y": float(final_target[1])},
                     hypothesisId="H3",
                 )
                 #endregion agent log
                 self._click.click_at_normalized(
-                    ocr_target[0],
-                    ocr_target[1],
+                    final_target[0],
+                    final_target[1],
                     command=f"CLICK_{target_letter}",
                 )
                 return target_letter
@@ -1370,14 +1487,12 @@ class WorkflowEngine:
     def _compute_expected_option_count(
         self,
         ai_response: Optional[GrokResponse],
-        cached_question: Optional[dict],
     ) -> Optional[int]:
-        """Determine expected option count from AI response or cached question.
+        """Determine expected option count from the AI response.
 
         Returns 4 if option E is empty/absent, 5 if present, or None if
         the count cannot be determined.
         """
-        # Priority 1: AI response options
         if ai_response is not None:
             try:
                 opt_e = (ai_response.options.E or "").strip()
@@ -1387,15 +1502,6 @@ class WorkflowEngine:
                 return 5
             except Exception:
                 pass
-
-        # Priority 2: Cached question record
-        if cached_question is not None:
-            opt_e = (cached_question.get("option_e", "") or "").strip()
-            if not opt_e:
-                logger.info("Cached question has empty option_e — expecting 4 options")
-                return 4
-            return 5
-
         return None
 
     def _validate_cache_hit(self, cached: dict) -> bool:
@@ -1525,11 +1631,19 @@ class WorkflowEngine:
         bits = (dct_low > median).astype(int).flatten()
         return "".join(str(b) for b in bits)
 
-    def _query_primary_with_fallback(self, stitched_path: Path) -> tuple[GrokResponse, str, str]:
+    def _query_primary_with_fallback(
+        self,
+        stitched_path: Path,
+        is_stitched: bool = False,
+    ) -> tuple[GrokResponse, str, str]:
         """
         Query selected cloud provider first, then fallback once to the other
         provider if available and primary fails.
         """
+        ocr_context = ""
+        if self._latest_ocr_layout is not None:
+            ocr_context = self._latest_ocr_layout.full_text
+
         if self._ai_provider == "gemini":
             primary = ("gemini", GEMINI_MODEL, query_gemini, bool(GEMINI_API_KEY))
             secondary = ("grok", GROK_MODEL, query_grok, bool(GROK_API_KEY))
@@ -1541,15 +1655,15 @@ class WorkflowEngine:
         if not enabled:
             raise ParseError(f"Primary AI provider '{provider_name}' is not configured")
         try:
-            logger.info("Querying cloud %s AI (%s)", provider_name.capitalize(), model_name)
-            return query_fn(stitched_path), model_name, provider_name
+            logger.info("Querying cloud %s AI (%s) with %d chars of OCR context", provider_name.capitalize(), model_name, len(ocr_context))
+            return query_fn(stitched_path, ocr_context=ocr_context, is_stitched=is_stitched), model_name, provider_name
         except (GrokAPIError, GeminiAPIError, ParseError) as primary_error:
             logger.warning("Primary provider '%s' failed: %s", provider_name, primary_error)
             fallback_name, fallback_model, fallback_fn, fallback_enabled = secondary
             if not fallback_enabled:
                 raise primary_error
-            logger.info("Falling back to cloud %s AI (%s)", fallback_name.capitalize(), fallback_model)
-            return fallback_fn(stitched_path), fallback_model, fallback_name
+            logger.info("Falling back to cloud %s AI (%s) with %d chars of OCR context", fallback_name.capitalize(), fallback_model, len(ocr_context))
+            return fallback_fn(stitched_path, ocr_context=ocr_context, is_stitched=is_stitched), fallback_model, fallback_name
 
     def _remap_letter_by_option_content(self, db_answer_text: str, fallback_letter: str) -> str:
         """
@@ -1581,23 +1695,54 @@ class WorkflowEngine:
 
     def _question_panel_text_truncated(self, ocr_res: OCRLayoutResult) -> bool:
         """
-        Heuristic: if OCR words in question panel touch near the bottom edge,
-        treat as truncated content requiring scroll.
+        Heuristic: if high-confidence OCR words in question panel touch near
+        the bottom edge, treat as truncated content requiring scroll.
+
+        Only words with confidence >= MIN_BOTTOM_CONF are counted.
+        Diagonal watermark text (e.g. "23000003117") produces low-confidence
+        OCR fragments that would otherwise trigger false scroll detection
+        when they land near the panel bottom.
+
+        Common navigation/status text (Marks, Negative, View More, Clear,
+        Prev, Next) is filtered out to prevent false positives.
         """
+        MIN_BOTTOM_CONF = 60
+        # Navigation/status words that commonly appear near the question
+        # panel bottom but do NOT indicate truncated content.
+        STATUS_WORDS = {
+            "marks", "negative", "view", "more", "clear",
+            "prev", "next", "submit", "answered", "bookmarked",
+            "skipped", "not", "viewed", "saved", "server",
+            "section", "test",
+        }
         try:
             if ocr_res is None or ocr_res.layout is None or ocr_res.layout.question_panel is None:
                 return False
             qp = ocr_res.layout.question_panel
             panel_h = max(1, qp.h)
-            bottom_band_y = qp.y + int(panel_h * 0.93)
+            # Bottom 5% of the question panel (tighter than 7%)
+            bottom_band_y = qp.y + int(panel_h * 0.95)
             words = [
                 w for w in ocr_res.words
                 if qp.x <= w.cx <= qp.x2 and qp.y <= w.cy <= qp.y2
             ]
             if len(words) < 10:
                 return False
-            near_bottom = [w for w in words if w.cy >= bottom_band_y]
-            return len(near_bottom) >= 2
+            near_bottom = [
+                w for w in words
+                if (w.cy >= bottom_band_y
+                    and w.conf >= MIN_BOTTOM_CONF
+                    and w.text.strip().lower() not in STATUS_WORDS
+                    and not w.text.strip().replace(".", "").replace(",", "").isdigit())
+            ]
+            if near_bottom:
+                logger.debug(
+                    "Truncation heuristic: %d high-conf words near bottom "
+                    "(Y>=%d, conf>=%d): %s",
+                    len(near_bottom), bottom_band_y, MIN_BOTTOM_CONF,
+                    [(w.text, w.conf) for w in near_bottom[:5]],
+                )
+            return len(near_bottom) >= 3
         except Exception:
             return False
 

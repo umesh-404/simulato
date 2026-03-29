@@ -1,0 +1,12 @@
+{
+  "question_id": 64,
+  "canonical_text": "a cricket team played 48 matches. the team won 16 matches and lost 8 matches. 24 matches ended in a draw. what percent of the total matches did the team lose||11.11|16.66|35|75",
+  "option_a": "75%",
+  "option_b": "35%",
+  "option_c": "11.11%",
+  "option_d": "16.66%",
+  "option_e": "",
+  "correct_answer": "16.66%",
+  "answer_letter": "D",
+  "version": 1
+}

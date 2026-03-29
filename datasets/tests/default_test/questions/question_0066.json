@@ -1,0 +1,12 @@
+{
+  "question_id": 66,
+  "canonical_text": "in an election the candidate who got 56 of the votes cast won by 144 votes. find the total number of voters on the voting list if 80 of people cast their vote and there were no invalid votes.||1500|1800|360|720",
+  "option_a": "720",
+  "option_b": "360",
+  "option_c": "1800",
+  "option_d": "1500",
+  "option_e": "",
+  "correct_answer": "1500",
+  "answer_letter": "D",
+  "version": 1
+}

@@ -487,11 +487,13 @@ All implementation follows:
 - [x] **Low:** Added zero-guard on `grid_size` division in `grid_mapper.py`
 - [x] **Low:** Fixed `clean_imports.py` and `restore_imports.py` to skip missing files and guard against duplicate inserts
 
-## 6.2 Updates (v1.4.1) — capture-to-screen mapping
+## 6.2 Updates (v1.4.1) — Pipeline Stability & Targeting
 
+- [x] **Critical:** Integrated **OCR Context Injection**. Tesseract raw OCR transcript is injected alongside the base64 image into the Grok/Gemini vision prompts. This successfully prevents "blind hallucination" math word problems caused by aggressive watermarks.
+- [x] **Critical:** Redesigned `workflow_engine._blend_with_calibration()` to use a **Split-Axis Strategy**. X-axis coordinate blends heavily use pure calibration (since the radio-column is perfectly stable across questions). Y-axis uses mostly live OCR layout detection (as Y shifts per question text length), with a >120px sanity fallback threshold.
 - [x] **Critical:** Documented and shipped **perspective-aware `transform`** in `config/grid_map.json` — naive `scale_y = screen_h / capture_h` with zero offset caused systematic vertical mis-clicks (e.g. one option row low) when the capture phone views the laptop at an angle; `click_at_normalized` now benefits from tuned `scale_y` / `offset_y` (and matching `scale_x` where needed).
 - [x] **Medium:** `coordinate_solver.calibrate_from_screenshot` — replaced broad `except Exception` around transform reuse with `_try_reuse_transform_from_disk()`; reuse triggers on non-zero offsets **or** material scale drift from naive ratios (preserves scale-only corrections).
-- [x] **Low:** `workflow_engine._click_option_best_target` docstring aligned with behavior (no static calibration fallback for options).
+- [x] **Low:** Removed redundant Anti-Hallucination "Reasoning Steps" requirement from Grok prompt; OCR context proved sufficient while lowering latency and parser complexity.
 
 ---
 

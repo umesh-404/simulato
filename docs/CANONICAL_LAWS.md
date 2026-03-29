@@ -176,22 +176,14 @@ No automatic override is permitted.
 
 ## LAW 7 --- QUESTION DATASET INTEGRITY
 
-Once a question is recorded in the database, its stored representation
-must remain immutable.
+AI response artifacts (JSON files) written during a run are immutable.
+Once saved, they must not be silently overwritten or modified.
 
-Stored components include:
+The SQLite database is present in the codebase but question storage is
+currently inactive. If re-enabled, stored question records must remain
+immutable; changes must create a new version record.
 
--   canonical question text
--   option texts
--   correct answer text
--   question hash
-
-If any of these components change, the system must:
-
--   create a new version record
--   preserve the previous version
-
-Silent modification of stored questions is forbidden.
+Silent modification of any stored artifact is forbidden.
 
 ------------------------------------------------------------------------
 
@@ -214,28 +206,32 @@ Reliance on stored option letters (A/B/C/D) is forbidden.
 
 ## LAW 9 --- AI RESPONSE VALIDATION
 
-AI responses must never automatically override stored database answers.
+The cloud AI (Grok/Gemini) is the **sole source of truth** for answers
+in the current pipeline. Database-stored answers are not consulted.
 
-When AI response conflicts with stored answer:
+The AI response must be validated for correct JSON structure before any
+click is dispatched. A parse failure must halt execution and alert the
+operator; the system must not guess or proceed with a malformed response.
 
-system must pause and notify the operator.
-
-Execution must not continue until the operator provides instruction.
+If database matching is re-enabled in the future, AI responses must
+never automatically override stored database answers without operator
+confirmation.
 
 ------------------------------------------------------------------------
 
 ## LAW 10 --- FULL QUESTION SNAPSHOT STORAGE
 
-Simulato must store a full snapshot for every captured question.
+Simulato must store sufficient artifacts for every captured question to
+support debugging and replay.
 
-Required stored elements:
+Required stored artifacts (file-based, per question):
 
--   original screenshot
--   extracted question text
--   extracted options
--   AI response
--   selected answer
--   decision metadata
+-   original screenshot (JPEG)
+-   AI response JSON (question, options, answer, model, provider)
+-   event log entry (click letter, decision source, timing)
+
+Database snapshot storage is currently disabled. The artifacts above
+are written by `_save_ai_response` and the event logger.
 
 This ensures:
 

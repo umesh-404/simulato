@@ -23,41 +23,97 @@ from controller.utils.logger import get_logger
 
 logger = get_logger("coordinate_solver")
 
-# When re-running calibration, reuse a prior transform if it differs from a
-# fresh naive scale/offset — e.g. perspective-corrected `scale_y` / `offset_y`
-# in `grid_map.json`. Pure naive maps have scale ≈ screen/capture and zero offsets.
-_TRANSFORM_SCALE_EPS = 0.001
-_TRANSFORM_OFFSET_EPS = 0.5
+# Minimum percentage of the capture image that the detected screen area
+# should cover to be considered valid.  Prevents false positives from small
+# bright patches.
+_SCREEN_AREA_MIN_RATIO = 0.10
 
 
-def _try_reuse_transform_from_disk(
-    naive_sx: float,
-    naive_sy: float,
+def _detect_screen_bounds(
+    gray: "np.ndarray",
+    capture_w: int,
+    capture_h: int,
+    screen_w: int,
+    screen_h: int,
 ) -> tuple[float, float, float, float] | None:
-    """
-    Load existing `config/grid_map.json` and return (sx, sy, ox, oy) if it
-    carries a non-naive capture→screen mapping worth preserving.
+    """Detect the laptop screen boundaries within the capture image.
 
-    Returns None if no file, parse error, or transform is effectively naive.
+    The capture phone photographs the laptop from above/in front, so the
+    image contains the bright exam screen surrounded by dark desk/bezel.
+    This function identifies the screen rectangle and computes the affine
+    transform (scale_x, scale_y, offset_x, offset_y) that maps capture
+    pixel coordinates to exam-screen pixel coordinates.
+
+    Returns (scale_x, scale_y, offset_x, offset_y) or None on failure.
     """
     try:
-        existing = GridMap.load()
-    except (FileNotFoundError, OSError, ValueError, KeyError, TypeError) as e:
-        logger.debug("No reusable transform from disk: %s", e)
+        import cv2
+
+        # Threshold to find the bright screen area.
+        _, bright = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY)
+
+        # Clean up noise with morphological open.
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15))
+        bright = cv2.morphologyEx(bright, cv2.MORPH_OPEN, kernel)
+
+        # Find rows and columns that contain bright pixels.
+        rows_with_bright = np.any(bright > 0, axis=1)
+        cols_with_bright = np.any(bright > 0, axis=0)
+
+        row_indices = np.where(rows_with_bright)[0]
+        col_indices = np.where(cols_with_bright)[0]
+
+        if len(row_indices) < 100 or len(col_indices) < 100:
+            logger.debug("Screen bounds detection: not enough bright pixels")
+            return None
+
+        screen_top = int(row_indices[0])
+        screen_bottom = int(row_indices[-1])
+        screen_left = int(col_indices[0])
+        screen_right = int(col_indices[-1])
+
+        screen_w_cap = screen_right - screen_left
+        screen_h_cap = screen_bottom - screen_top
+
+        # Sanity check: screen area should be significant portion of the image.
+        area_ratio = (screen_w_cap * screen_h_cap) / max(1, capture_w * capture_h)
+        if area_ratio < _SCREEN_AREA_MIN_RATIO:
+            logger.debug(
+                "Screen bounds detection: area ratio %.3f < %.3f",
+                area_ratio, _SCREEN_AREA_MIN_RATIO,
+            )
+            return None
+
+        # Sanity check: screen should be roughly rectangular.
+        aspect_capture = screen_w_cap / max(1, screen_h_cap)
+        aspect_screen = screen_w / max(1, screen_h)
+        if abs(aspect_capture / aspect_screen - 1.0) > 0.35:
+            logger.debug(
+                "Screen bounds detection: aspect mismatch capture=%.2f vs screen=%.2f",
+                aspect_capture, aspect_screen,
+            )
+            return None
+
+        # Compute the affine transform.
+        # screen_pixel = (capture_pixel - screen_edge) * (screen_res / screen_cap_size)
+        # Which equals: capture_pixel * scale + offset
+        scale_x = float(screen_w) / max(1, screen_w_cap)
+        scale_y = float(screen_h) / max(1, screen_h_cap)
+        offset_x = -float(screen_left) * scale_x
+        offset_y = -float(screen_top) * scale_y
+
+        logger.info(
+            "Screen bounds detected: top=%d, bottom=%d, left=%d, right=%d "
+            "(%.0fx%.0f in capture, area_ratio=%.2f)",
+            screen_top, screen_bottom, screen_left, screen_right,
+            screen_w_cap, screen_h_cap, area_ratio,
+        )
+
+        return (scale_x, scale_y, offset_x, offset_y)
+
+    except Exception as e:
+        logger.debug("Screen bounds detection failed: %s", e)
         return None
-
-    esx = float(existing.transform.get("scale_x", naive_sx))
-    esy = float(existing.transform.get("scale_y", naive_sy))
-    eox = float(existing.transform.get("offset_x", 0.0))
-    eoy = float(existing.transform.get("offset_y", 0.0))
-
-    if abs(eox) > _TRANSFORM_OFFSET_EPS or abs(eoy) > _TRANSFORM_OFFSET_EPS:
-        return (esx, esy, eox, eoy)
-
-    if abs(esx / naive_sx - 1.0) > _TRANSFORM_SCALE_EPS or abs(esy / naive_sy - 1.0) > _TRANSFORM_SCALE_EPS:
-        return (esx, esy, eox, eoy)
-
-    return None
 
 
 class CalibrationResult:
@@ -200,14 +256,30 @@ def calibrate_from_screenshot(image_path: Path, resolution: tuple[int, int] = (1
 
     # Primary calibration path (robust): exam layout + radio-row option detector.
     # This matches runtime click mapping behavior and is more stable than global contours.
+    #
+    # CRITICAL: The calibration MUST use the PREPROCESSED image for option
+    # detection, not the raw capture.  The preprocessing pipeline applies
+    # CLAHE and header-region masking which:
+    #   1. Removes watermark text that HoughCircles misidentifies as circles
+    #   2. Changes the divider X detection (raw: 1567, preprocessed: 1861)
+    # If we detect on the raw image, the calibrated positions will be
+    # ~200px off from where the pipeline finds circles at runtime.
+    # The screen-boundary detection above still uses the raw image (correct).
     try:
         from controller.capture_pipeline.exam_layout import ExamLayoutDetector
         from controller.capture_pipeline.option_detector import OptionDetector
+        from controller.capture_pipeline.image_preprocessor import ImagePreprocessor
 
-        layout = ExamLayoutDetector().detect(image_path)
+        # Preprocess the calibration image to match the pipeline's view.
+        prep_path = image_path.with_name(f"{image_path.stem}_preprocessed{image_path.suffix}")
+        preprocessor = ImagePreprocessor()
+        prep_path = preprocessor.preprocess(image_path, prep_path)
+        logger.info("Calibration using preprocessed image: %s", prep_path.name)
+
+        layout = ExamLayoutDetector().detect(prep_path)
         option_map = None
         if layout is not None and layout.answer_panel is not None:
-            option_map = OptionDetector().detect(image_path, layout)
+            option_map = OptionDetector().detect(prep_path, layout)
 
         if option_map is not None and option_map.count >= 3:
             ordered = sorted(option_map.options, key=lambda o: int(o.circle_y))
@@ -218,9 +290,48 @@ def calibrate_from_screenshot(image_path: Path, resolution: tuple[int, int] = (1
             # Validate geometry so we do not persist obviously broken maps.
             if any(ys[i] >= ys[i + 1] for i in range(len(ys) - 1)):
                 raise ValueError("non-monotonic option rows in primary calibration path")
+
+            # Spacing uniformity: reject individual options whose gap to
+            # the next/previous option is wildly larger than the median gap.
+            # This catches footer buttons (Clear/Prev/Next) that have circular
+            # shapes and get misidentified as radio buttons.  E.g.:
+            #   A=1165, B=1525, C=1706, D(fake)=2536
+            #   gaps = [360, 181, 830] → median=360 → D's gap 830 > 2.5*360
+            # We strip the outlier and let extrapolation fill in the real D.
+            if len(ys) >= 3:
+                gaps = [ys[i + 1] - ys[i] for i in range(len(ys) - 1)]
+                median_gap = float(np.median(gaps))
+                if median_gap > 10:
+                    max_allowed_gap = median_gap * 2.5
+                    bad_indices: set[int] = set()
+                    for gi, g in enumerate(gaps):
+                        if g > max_allowed_gap:
+                            # The option on the far side of the gap is the outlier.
+                            # (The cluster further from its neighbours is suspect.)
+                            bad_indices.add(gi + 1)
+                            logger.warning(
+                                "Spacing outlier: option %s at y=%d has gap %d (median=%d, max_allowed=%d) — removing",
+                                ordered[gi + 1].label, ys[gi + 1], g, int(median_gap), int(max_allowed_gap),
+                            )
+                    if bad_indices:
+                        ordered = [o for i, o in enumerate(ordered) if i not in bad_indices]
+                        ys = [int(o.click_y) for o in ordered]
+                        xs = [int(o.click_x) for o in ordered]
+                        x_anchor = int(round(sum(xs) / max(1, len(xs))))
+                        logger.info(
+                            "After spacing cleanup: %d options remain (%s)",
+                            len(ordered), ", ".join(o.label for o in ordered),
+                        )
+                        # Re-check we still have enough
+                        if len(ordered) < 3:
+                            raise ValueError("Too few options remain after spacing outlier removal")
+
             if layout.answer_panel is not None:
                 ap = layout.answer_panel
-                min_x = ap.x + int(ap.w * 0.02)
+                # Radio circles sit at the very left edge of the answer
+                # panel (adjacent to the divider).  Allow a small margin
+                # to the LEFT of ap.x for detection variance.
+                min_x = ap.x - int(ap.w * 0.05)
                 max_x = ap.x + int(ap.w * 0.40)
                 if not (min_x <= x_anchor <= max_x):
                     raise ValueError("option x-anchor outside expected answer-panel radio band")
@@ -238,29 +349,19 @@ def calibrate_from_screenshot(image_path: Path, resolution: tuple[int, int] = (1
             # ---------------------------------------------------------------
             # Build capture → screen affine transform.
             #
-            # The naive transform (screen = capture * screen_res/capture_res)
-            # assumes the camera image is an undistorted 1:1 map of the screen.
-            # In practice the capture phone photographs the laptop at an angle,
-            # introducing perspective distortion that the naive linear scale
-            # cannot capture.
-            #
-            # If `grid_map.json` already contains a non-naive transform
-            # (perspective correction: non-zero offsets and/or scale drift from
-            # screen_size/capture_size), preserve it when re-calibrating so
-            # option row positions refresh without losing the mapping fix.
-            #
-            # Otherwise start with the naive linear scale (zero offsets). If
-            # clicks land consistently one row off, tune `transform` in
-            # `grid_map.json` or copy a known-good file from a verified setup.
+            # Detect the laptop screen boundaries within the capture image.
+            # The phone camera sees the bright exam screen surrounded by
+            # dark desk/bezel.  By finding the screen edges, we compute
+            # a fresh transform every calibration — no stale data reuse.
             # ---------------------------------------------------------------
             cell_w = float(resolution[0]) / float(max(1, gm.grid_size[0]))
             cell_h = float(resolution[1]) / float(max(1, gm.grid_size[1]))
 
-            reused = _try_reuse_transform_from_disk(naive_sx, naive_sy)
-            if reused is not None:
-                fit_sx, fit_sy, fit_ox, fit_oy = reused
+            detected = _detect_screen_bounds(gray, w, h, resolution[0], resolution[1])
+            if detected is not None:
+                fit_sx, fit_sy, fit_ox, fit_oy = detected
                 logger.info(
-                    "Reusing transform from existing grid_map: "
+                    "Using screen-boundary transform: "
                     "scale=(%.6f, %.6f) offset=(%.1f, %.1f)",
                     fit_sx, fit_sy, fit_ox, fit_oy,
                 )
@@ -269,9 +370,10 @@ def calibrate_from_screenshot(image_path: Path, resolution: tuple[int, int] = (1
                 fit_sy = naive_sy
                 fit_ox = 0.0
                 fit_oy = 0.0
-                logger.info(
-                    "Using naive transform: scale=(%.6f, %.6f) offset=(0, 0). "
-                    "If clicks land one option row off, add perspective correction to grid_map.json.",
+                logger.warning(
+                    "Screen boundary detection failed — using naive transform: "
+                    "scale=(%.6f, %.6f) offset=(0, 0). "
+                    "If clicks land off-target, check camera framing and lighting.",
                     fit_sx, fit_sy,
                 )
 
@@ -333,7 +435,24 @@ def calibrate_from_screenshot(image_path: Path, resolution: tuple[int, int] = (1
                     gm.pixel_positions[letter] = (est_sx, est_sy)
                     logger.info("Estimated %s: pixel=(%d,%d) → grid=(%d,%d)", letter, est_sx, est_sy, egc, egr)
 
+            # The NEXT button is in the exam footer bar, which is darker
+            # than the main content area.  The screen-boundary transform is
+            # computed from the bright content area and may not cover the
+            # footer.  If the NEXT button capture position maps outside the
+            # screen (or very close to the bottom edge), use a fixed
+            # proportional screen position instead.
             sx_next, sy_next = _cap_to_screen(next_cap_x, next_cap_y)
+            if sy_next >= resolution[1] - 5:
+                # NEXT mapped to the very bottom edge — the footer bar is
+                # below the detected screen boundary.  Use a known-good
+                # proportional position for the exam NEXT button.
+                sx_next = int(round(resolution[0] * 0.955))
+                sy_next = int(round(resolution[1] * 0.960))
+                logger.info(
+                    "NEXT button below screen boundary — using proportional "
+                    "position: pixel=(%d,%d)",
+                    sx_next, sy_next,
+                )
             gc_next, gr_next = _screen_to_grid(sx_next, sy_next)
             gm.positions["NEXT"] = (gc_next, gr_next)
             gm.pixel_positions["NEXT"] = (sx_next, sy_next)

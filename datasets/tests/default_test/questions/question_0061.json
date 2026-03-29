@@ -1,0 +1,12 @@
+{
+  "question_id": 61,
+  "canonical_text": "how many integers between 1 and 200 are divisible by both 4 and 6 but not 8||10|14|17|8",
+  "option_a": "17",
+  "option_b": "10",
+  "option_c": "14",
+  "option_d": "8",
+  "option_e": "",
+  "correct_answer": "8",
+  "answer_letter": "D",
+  "version": 1
+}

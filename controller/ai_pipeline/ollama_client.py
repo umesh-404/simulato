@@ -64,9 +64,36 @@ def _check_needs_scroll_ocr_heuristic(image_path: Path) -> tuple[bool, float]:
         if result is None or not result.words:
             return (False, 0.0)
 
-        # Exclude bottom-bar area (NEXT/CLEAR) from truncation scoring.
-        # Matches ExamLayoutDetector's default bottom bar fraction.
-        bottom_bar_frac = 0.08
+        # --- Option-completeness veto ---
+        # If the OptionDetector already found 3+ radio buttons, the answer
+        # panel is fully visible and scrolling is almost certainly unnecessary.
+        # This prevents false-positive scroll when option text sits near the
+        # bottom of the image but all content is actually visible.
+        try:
+            from controller.capture_pipeline.option_detector import OptionDetector
+            from controller.capture_pipeline.exam_layout import ExamLayoutDetector
+
+            layout_det = ExamLayoutDetector()
+            import cv2
+            img = cv2.imread(str(image_path))
+            if img is not None:
+                layout_res = layout_det.detect(img)
+                if layout_res is not None and layout_res.answer_panel is not None:
+                    opt_det = OptionDetector()
+                    opt_map = opt_det.crop_and_detect(img, layout_res.answer_panel)
+                    if opt_map is not None and len(opt_map.options) >= 3:
+                        logger.info(
+                            "OCR scroll heuristic VETOED: %d options already detected — no scroll needed",
+                            len(opt_map.options),
+                        )
+                        return (False, 0.95)
+        except Exception:
+            pass   # If option detection fails, continue with OCR heuristic.
+
+        # Exclude bottom-bar area (NEXT/CLEAR/Prev buttons) from truncation
+        # scoring.  Use a generous 12% to avoid counting the navigation bar
+        # and bottom-most whitespace as clipped content.
+        bottom_bar_frac = 0.12
         panel_end_y = int(result.image_h * (1.0 - bottom_bar_frac))
         question_words = [w for w in result.words if w.cy < panel_end_y]
         if len(question_words) < 5:
@@ -167,7 +194,7 @@ def check_needs_scroll(image_path: Path) -> bool:
     # Step 1: Fast OCR heuristic (deterministic; helps avoid slow Ollama calls).
     if OCR_LAYOUT_PRIMARY_ENABLED:
         needs_scroll, conf = _check_needs_scroll_ocr_heuristic(image_path)
-        if conf >= 0.65:
+        if conf >= 0.80:
             logger.info("OCR scroll heuristic used: needs_scroll=%s conf=%.2f", needs_scroll, conf)
             return needs_scroll
         if conf > 0.0:

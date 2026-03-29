@@ -1,0 +1,12 @@
+{
+  "question_id": 65,
+  "canonical_text": "in a college of 1335 students 60 are boys. find the number of girls and the number of boys in the college.||534 801|691 404|802 333|924 221",
+  "option_a": "924, 221",
+  "option_b": "802, 333",
+  "option_c": "691, 404",
+  "option_d": "534, 801",
+  "option_e": "",
+  "correct_answer": "534, 801",
+  "answer_letter": "D",
+  "version": 1
+}

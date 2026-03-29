@@ -238,6 +238,7 @@ class SystemController:
         )
         self._workflow.set_test_context(test_name)
         self._workflow.set_capture_callback(self._request_capture)
+        self._workflow.set_recalibration_callback(self._broadcast_recalibration_needed)
         self._workflow.set_ai_provider(self._active_ai_provider)
 
         self._sm.transition_to(SystemState.RUNNING, reason=f"start_test:{test_name}")
@@ -291,6 +292,16 @@ class SystemController:
         self._active_ai_provider = provider
         if self._workflow:
             self._workflow.set_ai_provider(provider)
+
+        # Persist the change to .env so it's remembered across restarts
+        try:
+            from dotenv import set_key
+            from controller.config import PROJECT_ROOT
+            env_path = PROJECT_ROOT / ".env"
+            set_key(str(env_path), "DEFAULT_AI_PROVIDER", provider)
+        except Exception as e:
+            logger.error("Failed to persist AI provider to .env: %s", e)
+
         logger.info("AI provider switched to: %s", provider)
         return {"status": "ai_provider_set", "active_ai_provider": provider}
 
@@ -450,6 +461,30 @@ class SystemController:
             logger.info("Capture requested from phone")
         else:
             logger.warning("Event loop not available — cannot request capture")
+
+    def _broadcast_recalibration_needed(self) -> None:
+        """Broadcast recalibration-needed alert to remote control devices.
+
+        Called by the workflow engine when click verification fails with
+        large drift.  The pipeline is already PAUSED at this point.
+        """
+        import asyncio
+        from controller.mobile_api import api_server
+        if api_server._event_loop:
+            asyncio.run_coroutine_threadsafe(
+                api_server.registry.broadcast_to_role("remote_control", {
+                    "type": "ALERT",
+                    "payload": {
+                        "alert_type": "CALIBRATION_REQUIRED",
+                        "message": (
+                            "Click verification failed due to coordinate drift. "
+                            "Press CALIBRATE to recalibrate, then CONTINUE to resume."
+                        ),
+                    },
+                }),
+                api_server._event_loop,
+            )
+            logger.info("Recalibration alert broadcast to remote control device(s)")
 
     # ------------------------------------------------------------------
     # Calibration execution
