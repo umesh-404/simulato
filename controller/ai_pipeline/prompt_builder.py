@@ -1,12 +1,12 @@
 """
-Prompt builder for AI Vision API (Grok / Gemini).
+Prompt builder for Gemini Vision API.
 
 Constructs the system and user prompts used when sending
-stitched question images to the AI model.
+exam question images to the AI model.
 
-Enforces a JSON system prompt explicitly to avoid reliance on
-strict structured outputs API decoding (which currently breaks
-OCR nested fields on some fast models like Grok-4-fast).
+The AI returns ONLY the answer letter (A-E) in a minimal
+JSON object: {"answer": "C"}. This minimises output tokens
+for maximum speed.
 """
 
 from controller.utils.logger import get_logger
@@ -14,7 +14,7 @@ from controller.utils.logger import get_logger
 logger = get_logger("prompt_builder")
 
 # ---------------------------------------------------------------------------
-# System prompt — format + behavioural rules
+# System prompt — reasoning + letter-only output
 # ---------------------------------------------------------------------------
 
 SYSTEM_PROMPT = """\
@@ -24,73 +24,105 @@ INPUT: A screenshot of an exam question. The image may be a single capture or a 
 
 LAYOUT: The exam screen has two panels:
 - LEFT PANEL: Question text
-- RIGHT PANEL: Answer options, each preceded by a round radio circle/bubble stacked top to bottom
+- RIGHT PANEL: Answer options, each preceded by a round radio circle/bubble stacked top to bottom. Map them A, B, C, D, E from top to bottom.
 
 PROCESS (execute in this order):
-STEP 1 — READ: Extract the full question text verbatim from the left panel.
-STEP 2 — EXTRACT OPTIONS: Identify every radio circle in the right panel. For each circle, extract the text next to it. Map them A, B, C, D, E top-to-bottom regardless of whether letters are printed on screen.
-STEP 3 — REASON AND SOLVE: This is the most critical step. Apply your expert knowledge to actually solve the question:
-   - Read the question carefully and understand what is being asked.
-   - Evaluate each option against the question using facts, logic, or calculation.
-   - Eliminate wrong options one by one with reasoning.
+STEP 1 — READ: Read the full question from the left panel and all options from the right panel.
+STEP 2 — REASON AND SOLVE: Apply your expert knowledge to solve the question:
+   - Understand what is being asked.
+   - Evaluate each option using facts, logic, or calculation.
+   - Eliminate wrong options one by one.
    - Select the ONE option that is objectively correct.
-   - DO NOT guess. DO NOT pick the first plausible option. THINK IT THROUGH.
-STEP 4 — OUTPUT: Return ONLY the raw JSON object below.
+   - DO NOT guess. THINK IT THROUGH.
+STEP 3 — OUTPUT: Return ONLY the raw JSON object with JUST the answer letter.
 
-REQUIRED JSON STRUCTURE:
-{
-  "question": "<full question text>",
-  "options": {
-    "A": "<option A text>",
-    "B": "<option B text>",
-    "C": "<option C text>",
-    "D": "<option D text>",
-    "E": "<option E text>"
-  },
-  "answer": "<A/B/C/D/E>",
-  "answer_content": "<exact text of the correct option>"
-}
+REQUIRED JSON OUTPUT:
+{"answer": "<A/B/C/D/E>"}
 
 CRITICAL RULES:
-• Extract EXACT text — do not paraphrase, summarize, or auto-complete.
-• Ignore diagonal watermarks; read what you can see next to each radio circle. NEVER return an empty option if any text is visible.
-• Unused option keys (when fewer than 5 options exist) must be set to "".
-• "answer" MUST be a single letter with non-empty option text. NEVER select a key you set to "".
-• "answer_content" MUST exactly match options[answer].
-• Output ONLY the raw JSON. Do NOT wrap in ```json codeblocks.
+• "answer" MUST be exactly one letter: A, B, C, D, or E.
+• Output ONLY the raw JSON object. No explanations, no markdown, no codeblocks.
+"""
+
+# System prompt variant when a cropped answer panel is also provided.
+SYSTEM_PROMPT_WITH_PANEL = """\
+You are an expert exam-question solver with deep knowledge across all academic subjects.
+
+INPUT: You are given TWO images:
+1. FIRST IMAGE — The full exam screenshot with question on the LEFT panel and options on the RIGHT panel.
+2. SECOND IMAGE — A zoomed-in crop of ONLY the answer options panel (right side). Use this to read option texts more clearly.
+
+LAYOUT: Options are stacked top to bottom, each preceded by a round radio circle. Map them A, B, C, D, E from top to bottom.
+
+PROCESS (execute in this order):
+STEP 1 — READ: Read the question from the FIRST image (left panel). Read option texts from the SECOND image (zoomed answer panel) for maximum clarity.
+STEP 2 — REASON AND SOLVE: Apply your expert knowledge to solve the question:
+   - Understand what is being asked.
+   - Evaluate each option using facts, logic, or calculation.
+   - Eliminate wrong options one by one.
+   - Select the ONE option that is objectively correct.
+   - DO NOT guess. THINK IT THROUGH.
+STEP 3 — OUTPUT: Return ONLY the raw JSON object with JUST the answer letter.
+
+REQUIRED JSON OUTPUT:
+{"answer": "<A/B/C/D/E>"}
+
+CRITICAL RULES:
+• "answer" MUST be exactly one letter: A, B, C, D, or E.
+• Output ONLY the raw JSON object. No explanations, no markdown, no codeblocks.
 """
 
 # ---------------------------------------------------------------------------
 # User prompt — kept minimal; the image carries the context
 # ---------------------------------------------------------------------------
 
-USER_PROMPT = "Analyze this exam question screenshot. Return ONLY valid JSON."
+USER_PROMPT = "Solve this exam question. Return ONLY valid JSON with just the answer letter."
 
 USER_PROMPT_STITCHED = (
     "This image is a vertically stitched composite of two overlapping captures "
     "(the exam screen was scrolled to reveal more content). Treat it as a single "
     "continuous question. Deduplicate any repeated text or options. "
-    "Return ONLY valid JSON."
+    "Return ONLY valid JSON with just the answer letter."
+)
+
+USER_PROMPT_WITH_PANEL = (
+    "The FIRST image is the full exam screenshot. "
+    "The SECOND image is a zoomed-in crop of the answer options panel for easier reading. "
+    "Solve the question. Return ONLY valid JSON with just the answer letter."
 )
 
 
-def build_grok_messages(
+def build_ai_messages(
     image_base64: str,
     ocr_context: str = "",
     is_stitched: bool = False,
+    panel_image_base64: str = "",
 ) -> list[dict]:
     """
-    Build the messages array for the Grok/Gemini Vision API request.
+    Build the messages array for the Gemini Vision API request.
 
     Args:
         image_base64: Base64-encoded image string.
-        ocr_context: Ignored — OCR context is not sent to AI (noisy OCR degrades accuracy).
+        ocr_context: Ignored — kept for call-site compatibility.
         is_stitched: True if the image is a multi-frame stitched composite.
+        panel_image_base64: Optional base64-encoded cropped answer panel image.
+            When provided, both images are sent in a single call for improved
+            option readability (especially through watermarks).
 
     Returns:
         List of message dicts ready for the API payload.
     """
-    prompt_text = USER_PROMPT_STITCHED if is_stitched else USER_PROMPT
+    # Choose prompt based on whether we have a panel crop
+    if panel_image_base64:
+        prompt_text = USER_PROMPT_WITH_PANEL
+        system_prompt = SYSTEM_PROMPT_WITH_PANEL
+    elif is_stitched:
+        prompt_text = USER_PROMPT_STITCHED
+        system_prompt = SYSTEM_PROMPT
+    else:
+        prompt_text = USER_PROMPT
+        system_prompt = SYSTEM_PROMPT
+
     user_content = [
         {"type": "text", "text": prompt_text},
         {
@@ -101,138 +133,31 @@ def build_grok_messages(
         },
     ]
 
+    # Append cropped answer panel as second image
+    if panel_image_base64:
+        user_content.append({
+            "type": "image_url",
+            "image_url": {
+                "url": f"data:image/jpeg;base64,{panel_image_base64}",
+            },
+        })
+
     messages = [
         {
             "role": "system",
-            "content": SYSTEM_PROMPT,
+            "content": system_prompt,
         },
         {
             "role": "user",
             "content": user_content,
         },
     ]
-    logger.debug("Built AI messages (image size: %d chars, stitched: %s)", len(image_base64), is_stitched)
+    logger.debug(
+        "Built AI messages (image size: %d chars, stitched: %s, panel_crop: %s)",
+        len(image_base64), is_stitched, bool(panel_image_base64),
+    )
     return messages
 
 
-def get_grok_response_schema() -> dict:
-    """
-    Return the response_format setting.
-
-    Due to a known capability bug in some fast models (e.g. grok-4-1-fast-non-reasoning) 
-    where strict json_schema decoding breaks vision extraction of nested object fields 
-    (resulting in empty option values), we fallback to standard "json_object" mode.
-    """
-    return {
-        "type": "json_object"
-    }
-
-
-# ---------------------------------------------------------------------------
-# Focused retry prompt — used when the model read the question but
-# returned empty options.  We send the full image PLUS a cropped
-# answer-panel image to give the model a zoomed-in view.
-# ---------------------------------------------------------------------------
-
-SYSTEM_PROMPT_OPTIONS_RETRY = """\
-You are an expert exam-question solver. You previously read the question but could not fully extract the answer options from the image.
-
-You are now given TWO images:
-1. FIRST IMAGE: The full exam screenshot.
-2. SECOND IMAGE: A cropped, zoomed-in view of ONLY the RIGHT PANEL (answer options area).
-
-PROCESS:
-STEP 1 — READ QUESTION: Extract the full question text from the FIRST image (left panel).
-STEP 2 — EXTRACT OPTIONS: Focus on the SECOND image. Identify every radio circle and extract the text next to it. Map to A, B, C, D, E top-to-bottom.
-STEP 3 — REASON AND SOLVE: This is critical. Use your expert knowledge to actually solve the question:
-   - Understand what is being asked.
-   - Evaluate each option using facts, logic, or calculation.
-   - Eliminate incorrect options with reasoning.
-   - Select the ONE objectively correct answer.
-   - DO NOT guess. THINK IT THROUGH.
-STEP 4 — OUTPUT: Return ONLY the raw JSON object.
-
-REQUIRED JSON STRUCTURE:
-{
-  "question": "<full question text>",
-  "options": {
-    "A": "<option A text>",
-    "B": "<option B text>",
-    "C": "<option C text>",
-    "D": "<option D text>",
-    "E": "<option E text>"
-  },
-  "answer": "<A/B/C/D/E>",
-  "answer_content": "<exact text of the correct option>"
-}
-
-CRITICAL RULES:
-• Extract option texts from the SECOND (cropped) image. Extract what you CAN read past watermarks. NEVER return empty options if any text is visible near a radio circle.
-• If fewer than 5 options exist, set unused keys to "".
-• "answer" MUST be a single letter with non-empty option text.
-• "answer_content" MUST match options[answer] exactly.
-• Output ONLY the raw JSON object. Do NOT wrap in ```json codeblocks.
-"""
-
-
-def build_grok_messages_with_panel_crop(
-    full_image_base64: str,
-    panel_image_base64: str,
-    question_text: str = "",
-    ocr_context: str = "",
-) -> list[dict]:
-    """
-    Build messages for the options-focused retry attempt.
-
-    Sends both the full exam screenshot and a cropped answer panel image
-    so the model gets a zoomed-in view of the option texts.
-
-    Args:
-        full_image_base64: Base64-encoded full exam image.
-        panel_image_base64: Base64-encoded cropped answer panel image.
-        question_text: The question text extracted from the first attempt.
-        ocr_context: Optional raw OCR text for context.
-
-    Returns:
-        List of message dicts ready for the API payload.
-    """
-    user_content = [
-        {
-            "type": "text",
-            "text": (
-                f"The question from the exam is:\n\"{question_text}\"\n\n"
-                "Focus on the SECOND image (cropped answer panel) to read the option texts. "
-                "Return ONLY valid JSON."
-            ),
-        },
-    ]
-
-    # Full image first  (OCR context intentionally omitted — noisy OCR degrades AI accuracy)
-    user_content.append({
-        "type": "image_url",
-        "image_url": {
-            "url": f"data:image/jpeg;base64,{full_image_base64}",
-        },
-    })
-
-    # Cropped answer panel second (zoomed in)
-    user_content.append({
-        "type": "image_url",
-        "image_url": {
-            "url": f"data:image/jpeg;base64,{panel_image_base64}",
-        },
-    })
-
-    messages = [
-        {
-            "role": "system",
-            "content": SYSTEM_PROMPT_OPTIONS_RETRY,
-        },
-        {
-            "role": "user",
-            "content": user_content,
-        },
-    ]
-    logger.debug("Built options-retry messages (full=%d chars, panel=%d chars)",
-                 len(full_image_base64), len(panel_image_base64))
-    return messages
+# Backward-compatible alias
+build_grok_messages = build_ai_messages

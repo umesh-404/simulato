@@ -18,8 +18,8 @@ class ExecutionTimer:
     Context manager that measures wall-clock elapsed time.
 
     Usage:
-        with ExecutionTimer("grok_api_call") as t:
-            result = call_grok(...)
+        with ExecutionTimer("gemini_api_call") as t:
+            result = call_gemini(...)
         print(t.elapsed_ms)
     """
 

@@ -206,7 +206,7 @@ Reliance on stored option letters (A/B/C/D) is forbidden.
 
 ## LAW 9 --- AI RESPONSE VALIDATION
 
-The cloud AI (Grok/Gemini) is the **sole source of truth** for answers
+The cloud AI (Vertex AI Gemini) is the **sole source of truth** for answers
 in the current pipeline. Database-stored answers are not consulted.
 
 The AI response must be validated for correct JSON structure before any
@@ -318,7 +318,7 @@ The system is designed to operate within a local network environment.
 
 Internet access is required only for:
 
--   AI API calls (e.g., Grok Cloud or Ollama Local)
+-   AI API calls (e.g., Vertex AI or Ollama Local)
 
 All other components must function locally.
 

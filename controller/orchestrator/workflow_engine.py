@@ -9,14 +9,13 @@ Architecture Spec Section 17:
     3. Detect scrolling requirement
     4. Capture additional frames if needed
     5. Stitch frames into composite image
-    6. Send to Grok AI
+    6. Send to Gemini AI
     7. Parse response
-    8. Run answer decision engine
-    9. Handle conflicts if any
-    10. Dispatch click command
-    11. Verify click
-    12. Click NEXT
-    13. Log everything
+    8. Build answer decision
+    9. Dispatch click command
+    10. Verify click
+    11. Click NEXT
+    12. Log everything
 
 Each step is logged and artifacts are saved for replay (Canonical Law 2, 11).
 """
@@ -28,24 +27,19 @@ import concurrent.futures
 from pathlib import Path
 from typing import Optional
 
-from controller.ai_pipeline.grok_client import query_grok, GrokAPIError
 from controller.ai_pipeline.gemini_client import query_gemini, GeminiAPIError
 
-from controller.ai_pipeline.response_parser import GrokResponse, ParseError
+from controller.ai_pipeline.response_parser import AIResponse, ParseError
 from controller.config import (
     OCR_LAYOUT_PRIMARY_ENABLED,
-    GROK_MODEL,
     GEMINI_MODEL,
-    DEFAULT_AI_PROVIDER,
-    GROK_API_KEY,
-    GEMINI_API_KEY,
     VERIFY_FRAME_TIMEOUT_SECONDS,
 )
 from controller.answer_engine.decision_engine import (
     AnswerDecision,
     DecisionOutcome,
 )
-from controller.answer_engine.option_matcher import match_option_by_content
+
 from controller.alerts.alert_manager import AlertManager, AlertType, OperatorDecision
 from controller.capture_pipeline.image_receiver import ImageReceiver
 from controller.capture_pipeline.image_stitcher import ImageStitcher
@@ -122,16 +116,16 @@ class WorkflowEngine:
         self._is_waiting_verification_flag: bool = False
         self._request_capture_callback: Optional[callable] = None
         self._request_recalibration_callback: Optional[callable] = None
-        self._ai_provider: str = DEFAULT_AI_PROVIDER  # "grok" or "gemini"
+
         self._last_verification_timed_out: bool = False
         self._last_option_click_target_norm: tuple[float, float] | None = None
-        self._current_answer_text_for_click: str = ""
+
         self._last_dispatched_click_letter: str | None = None
         # When a click fails verification due to large drift, we pause and
         # request recalibration.  This stores the letter we need to retry
         # once the system resumes after recalibration.
         self._pending_recalib_retry_letter: str | None = None
-        self._pending_recalib_retry_answer_text: str = ""
+
 
         # Background thread pool for speculative early AI calls.
         # A single worker ensures at most one speculative call in flight.
@@ -147,18 +141,7 @@ class WorkflowEngine:
         """Set callback to request recalibration from the system controller."""
         self._request_recalibration_callback = callback
 
-    def set_ai_provider(self, provider: str) -> None:
-        """Set the active AI provider for primary question solving."""
-        provider = provider.lower()
-        if provider not in ("grok", "gemini"):
-            logger.error("Invalid AI provider: %s (must be 'grok' or 'gemini')", provider)
-            return
-        self._ai_provider = provider
-        logger.info("AI provider set to: %s", provider)
 
-    @property
-    def ai_provider(self) -> str:
-        return self._ai_provider
 
     @property
     def question_number(self) -> int:
@@ -196,7 +179,6 @@ class WorkflowEngine:
         self._latest_ocr_layout = None
         self._latest_interaction_ocr_layout = None
         self._latest_preprocessed_image_path = None
-        self._current_answer_text_for_click = ""
         self._last_dispatched_click_letter = None
         self._mapping_frame_data = None
         self._is_waiting_mapping_flag = False
@@ -243,8 +225,6 @@ class WorkflowEngine:
         retry_letter = self._pending_recalib_retry_letter
         if retry_letter is not None:
             self._pending_recalib_retry_letter = None
-            self._current_answer_text_for_click = self._pending_recalib_retry_answer_text
-            self._pending_recalib_retry_answer_text = ""
             logger.info(
                 "Resuming after recalibration — retrying click for option %s (question %d)",
                 retry_letter, self._question_number,
@@ -504,41 +484,35 @@ class WorkflowEngine:
 
             ai_response = None
             ai_model_used = ""
-            answer_text_for_click = ""
-            provider_used = ""
 
             # Step 6: Query AI
             # Collect the speculative early result (launched right after screen validation,
-            # before preprocessing/OCR/scroll). The speculative call fires grok internally
-            # with up to 2 retries × 30s each = ~61s max. We wait up to 70s to cover that.
-            # This applies for both stitched and non-stitched images — no reason to discard it.
-            SPECULATIVE_WAIT = 70  # seconds — covers grok's full 2-retry cycle (2×30+1s)
+            # before preprocessing/OCR/scroll). The speculative call fires the primary AI
+            # internally with up to 2 retries × 60s each = ~121s max (Gemini 2.5 Flash).
+            # We wait up to 130s to cover that full retry cycle.
+            # This applies for both stitched and non-stitched images.
+            SPECULATIVE_WAIT = 65  # seconds — covers Gemini non-reasoning 2-retry cycle (2×30+5s)
             if speculative_future is not None:
                 try:
-                    spec_response, spec_model, spec_provider = speculative_future.result(
+                    spec_response, spec_model = speculative_future.result(
                         timeout=SPECULATIVE_WAIT,
                     )
                     ai_response = spec_response
                     ai_model_used = spec_model
-                    provider_used = spec_provider
                     self._api_calls += 1
                     logger.info(
-                        "Using speculative AI result (provider=%s, model=%s, answer=%s%s)",
-                        spec_provider, spec_model, ai_response.answer,
+                        "Using speculative AI result (model=%s, answer=%s%s)",
+                        spec_model, ai_response.answer,
                         " [stitched-image-was-sent-separately]" if is_stitched else "",
                     )
                     self._log_event("ai_response", {
-                        "provider": provider_used,
                         "model": ai_model_used,
-                        "question": ai_response.question[:100],
                         "answer": ai_response.answer,
-                        "answer_content": ai_response.answer_content[:100],
                         "speculative": True,
                     })
-                    self._save_ai_response(ai_response, ai_model_used)
                 except Exception as spec_err:
                     logger.warning(
-                        "Speculative AI call did not complete in time (%s) — falling back to standard call",
+                        "Speculative AI call did not complete in time (%s) — falling back to standard Gemini call",
                         spec_err,
                     )
                     ai_response = None  # fall through to standard call below
@@ -552,7 +526,7 @@ class WorkflowEngine:
                     ai_response.answer,
                 )
                 # Keep the speculative result as an emergency fallback, then try standard.
-                _speculative_fallback = (ai_response, ai_model_used, provider_used)
+                _speculative_fallback = (ai_response, ai_model_used)
                 ai_response = None
             else:
                 _speculative_fallback = None
@@ -560,51 +534,41 @@ class WorkflowEngine:
             # Standard AI call: used for scroll/stitched cases or when speculative failed.
             if ai_response is None:
                 try:
-                    ai_response, ai_model_used, provider_used = self._query_primary_with_fallback(stitched_path, is_stitched=is_stitched)
+                    ai_response, ai_model_used = self._query_gemini(stitched_path, is_stitched=is_stitched)
                     self._api_calls += 1
                     self._log_event("ai_response", {
-                        "provider": provider_used,
                         "model": ai_model_used,
-                        "question": ai_response.question[:100],
                         "answer": ai_response.answer,
-                        "answer_content": ai_response.answer_content[:100],
                         "speculative": False,
                     })
-                    self._save_ai_response(ai_response, ai_model_used)
-                except (GrokAPIError, GeminiAPIError, ParseError) as e:
+                except (GeminiAPIError, ParseError) as e:
                     # Standard call failed. Last-resort: check if speculative future
                     # has since completed (it runs independently in the executor thread).
-                    # This prevents crashes when grok is slow but eventually returns.
                     recovered = False
                     if speculative_future is not None and speculative_future.done():
                         try:
-                            spec_response, spec_model, spec_provider = speculative_future.result(timeout=0)
+                            spec_response, spec_model = speculative_future.result(timeout=0)
                             ai_response = spec_response
                             ai_model_used = spec_model
-                            provider_used = spec_provider
                             self._api_calls += 1
                             recovered = True
                             logger.warning(
                                 "Standard call failed but speculative future completed — "
-                                "recovered with answer=%s (provider=%s)",
-                                ai_response.answer, spec_provider,
+                                "recovered with answer=%s",
+                                ai_response.answer,
                             )
                             self._log_event("ai_response", {
-                                "provider": provider_used,
                                 "model": ai_model_used,
-                                "question": ai_response.question[:100],
                                 "answer": ai_response.answer,
-                                "answer_content": ai_response.answer_content[:100],
                                 "speculative": True,
                                 "recovery": True,
                             })
-                            self._save_ai_response(ai_response, ai_model_used)
                         except Exception:
                             pass
 
                     # Fall back to speculative result cached from stitched case.
                     if not recovered and _speculative_fallback is not None:
-                        ai_response, ai_model_used, provider_used = _speculative_fallback
+                        ai_response, ai_model_used = _speculative_fallback
                         self._api_calls += 1
                         recovered = True
                         logger.warning(
@@ -612,15 +576,11 @@ class WorkflowEngine:
                             ai_response.answer,
                         )
                         self._log_event("ai_response", {
-                            "provider": provider_used,
                             "model": ai_model_used,
-                            "question": ai_response.question[:100],
                             "answer": ai_response.answer,
-                            "answer_content": ai_response.answer_content[:100],
                             "speculative": True,
                             "recovery": True,
                         })
-                        self._save_ai_response(ai_response, ai_model_used)
 
                     if not recovered:
                         self._sm.force_error(f"AI processing failed: {e}")
@@ -631,21 +591,13 @@ class WorkflowEngine:
                         self._log_event("ai_error", {"error": str(e)})
                         return None
 
-            # Step 7: Build decision directly from AI response (DB matching disabled).
+            # Step 7: Build decision directly from AI response.
             logger.info("Using AI answer directly: %s", ai_response.answer if ai_response else "None")
-            answer_text_for_click = (ai_response.answer_content if ai_response is not None else "") or ""
             decision = AnswerDecision(
                 outcome=DecisionOutcome.CLICK,
                 click_letter=ai_response.answer if ai_response is not None else None,
                 source="ai_direct",
             )
-            # Remap by live on-screen option content to handle shuffled options.
-            if decision.click_letter and ai_response is not None:
-                decision.click_letter = self._remap_letter_by_option_content(
-                    db_answer_text=ai_response.answer_content,
-                    fallback_letter=decision.click_letter,
-                )
-
 
             # Step 8: Handle outcome
             if decision.outcome == DecisionOutcome.CONFLICT:
@@ -667,17 +619,8 @@ class WorkflowEngine:
             if decision.click_letter:
                 self._refresh_interaction_targets_post_ai()
 
-                # Set expected option count on the interaction layout so the
-                # option detector trims phantom circles beyond the real count.
-                expected_options = self._compute_expected_option_count(ai_response)
-                if expected_options is not None:
-                    for layout_obj in (self._latest_interaction_ocr_layout, self._latest_ocr_layout):
-                        if layout_obj is not None and hasattr(layout_obj, 'set_max_options'):
-                            layout_obj.set_max_options(expected_options)
-
             # Step 9: Execute click
             if decision.click_letter:
-                self._current_answer_text_for_click = answer_text_for_click.strip()
                 self._execute_click_with_verification(decision.click_letter)
 
             if decision.click_letter:
@@ -1283,29 +1226,6 @@ class WorkflowEngine:
         """
         target_letter = letter.strip().upper()
         if OCR_LAYOUT_PRIMARY_ENABLED and self._latest_interaction_ocr_layout is not None:
-            resolved = self._latest_interaction_ocr_layout.locate_option_target_by_content(
-                self._current_answer_text_for_click,
-                target_letter,
-            )
-            if resolved is not None:
-                resolved_letter, ocr_target = resolved
-                if resolved_letter != target_letter:
-                    logger.info(
-                        "Content-locked remap on live frame: intended %s -> %s",
-                        target_letter,
-                        resolved_letter,
-                    )
-                logger.info("Using OCR-derived content-locked target for option %s", resolved_letter)
-                final_target = self._blend_with_calibration(resolved_letter, ocr_target)
-                self._last_option_click_target_norm = (float(final_target[0]), float(final_target[1]))
-                self._log_screen_coords_for_click(resolved_letter, float(final_target[0]), float(final_target[1]))
-                self._click.click_at_normalized(
-                    final_target[0],
-                    final_target[1],
-                    command=f"CLICK_{resolved_letter}",
-                )
-                return resolved_letter
-
             ocr_target = self._latest_interaction_ocr_layout.locate_option_target(target_letter)
             if ocr_target is not None:
                 logger.info("Using OCR-derived target for option %s", target_letter)
@@ -1492,46 +1412,6 @@ class WorkflowEngine:
         data["test_name"] = self._test_name
         self._event_log.log_event(event_type, data)
 
-    def _save_ai_response(self, response: GrokResponse, model_used: str) -> None:
-        """Save AI response JSON for replay."""
-        ai_dir = self._receiver.run_dir / "ai_responses"
-        ai_dir.mkdir(parents=True, exist_ok=True)
-        path = ai_dir / f"ai_response_{self._question_number:04d}.json"
-        data = {
-            "model": model_used,
-            "question": response.question,
-            "options": {
-                "A": response.options.A,
-                "B": response.options.B,
-                "C": response.options.C,
-                "D": response.options.D,
-                "E": response.options.E,
-            },
-            "answer": response.answer,
-            "answer_content": response.answer_content,
-        }
-        path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-        logger.debug("AI response saved: %s", path)
-
-    def _compute_expected_option_count(
-        self,
-        ai_response: Optional[GrokResponse],
-    ) -> Optional[int]:
-        """Determine expected option count from the AI response.
-
-        Returns 4 if option E is empty/absent, 5 if present, or None if
-        the count cannot be determined.
-        """
-        if ai_response is not None:
-            try:
-                opt_e = (ai_response.options.E or "").strip()
-                if not opt_e:
-                    logger.info("AI response has empty option E — expecting 4 options")
-                    return 4
-                return 5
-            except Exception:
-                pass
-        return None
 
 
     def _compute_image_phash(self, image_path: Path, hash_size: int = 8) -> str | None:
@@ -1565,121 +1445,50 @@ class WorkflowEngine:
     def _speculative_ai_query(
         self,
         raw_image_path: Path,
-    ) -> tuple[GrokResponse, str, str]:
-        """Run the AI query speculatively in a background thread.
+    ) -> tuple[AIResponse, str]:
+        """Run the Gemini AI query speculatively in a background thread.
 
         Uses the raw captured image (before preprocessing/stitching) with
-        no OCR context.  The vision models can still read the question and
+        no OCR context.  The vision model can still read the question and
         options directly from the raw screenshot.
 
         Returns:
-            (GrokResponse, model_name, provider_name) — same as
-            _query_primary_with_fallback.
+            (AIResponse, model_name)
 
         Raises on any AI/parse error so that Future.result() surfaces it.
         """
-        if self._ai_provider == "gemini":
-            primary = ("gemini", GEMINI_MODEL, query_gemini, bool(GEMINI_API_KEY))
-            secondary = ("grok", GROK_MODEL, query_grok, bool(GROK_API_KEY))
-        else:
-            primary = ("grok", GROK_MODEL, query_grok, bool(GROK_API_KEY))
-            secondary = ("gemini", GEMINI_MODEL, query_gemini, bool(GEMINI_API_KEY))
 
-        provider_name, model_name, query_fn, enabled = primary
-        if not enabled:
-            raise ParseError(f"Primary AI provider '{provider_name}' is not configured")
+        logger.info(
+            "[Speculative] Querying Gemini (%s) with raw image",
+            GEMINI_MODEL,
+        )
+        response = query_gemini(raw_image_path, ocr_context="", is_stitched=False)
+        logger.info(
+            "[Speculative] Gemini response received: answer=%s",
+            response.answer,
+        )
+        return response, GEMINI_MODEL
 
-        try:
-            logger.info(
-                "[Speculative] Querying cloud %s AI (%s) with raw image",
-                provider_name.capitalize(), model_name,
-            )
-            response = query_fn(raw_image_path, ocr_context="", is_stitched=False)
-            logger.info(
-                "[Speculative] AI response received: answer=%s",
-                response.answer,
-            )
-            return response, model_name, provider_name
-        except (GrokAPIError, GeminiAPIError, ParseError) as primary_error:
-            logger.warning(
-                "[Speculative] Primary provider '%s' failed: %s",
-                provider_name, primary_error,
-            )
-            fallback_name, fallback_model, fallback_fn, fallback_enabled = secondary
-            if not fallback_enabled:
-                raise primary_error
-            logger.info(
-                "[Speculative] Falling back to cloud %s AI (%s)",
-                fallback_name.capitalize(), fallback_model,
-            )
-            response = fallback_fn(raw_image_path, ocr_context="", is_stitched=False)
-            logger.info(
-                "[Speculative] Fallback AI response received: answer=%s",
-                response.answer,
-            )
-            return response, fallback_model, fallback_name
-
-    def _query_primary_with_fallback(
+    def _query_gemini(
         self,
         stitched_path: Path,
         is_stitched: bool = False,
-    ) -> tuple[GrokResponse, str, str]:
+    ) -> tuple[AIResponse, str]:
         """
-        Query selected cloud provider first, then fallback once to the other
-        provider if available and primary fails.
-        """
-        ocr_context = ""
-        if self._latest_ocr_layout is not None:
-            ocr_context = self._latest_ocr_layout.full_text
+        Query Gemini AI with the stitched/processed image.
 
-        if self._ai_provider == "gemini":
-            primary = ("gemini", GEMINI_MODEL, query_gemini, bool(GEMINI_API_KEY))
-            secondary = ("grok", GROK_MODEL, query_grok, bool(GROK_API_KEY))
-        else:
-            primary = ("grok", GROK_MODEL, query_grok, bool(GROK_API_KEY))
-            secondary = ("gemini", GEMINI_MODEL, query_gemini, bool(GEMINI_API_KEY))
+        Returns:
+            (AIResponse, model_name)
 
-        provider_name, model_name, query_fn, enabled = primary
-        if not enabled:
-            raise ParseError(f"Primary AI provider '{provider_name}' is not configured")
-        try:
-            logger.info("Querying cloud %s AI (%s) with %d chars of OCR context", provider_name.capitalize(), model_name, len(ocr_context))
-            return query_fn(stitched_path, ocr_context=ocr_context, is_stitched=is_stitched), model_name, provider_name
-        except (GrokAPIError, GeminiAPIError, ParseError) as primary_error:
-            logger.warning("Primary provider '%s' failed: %s", provider_name, primary_error)
-            fallback_name, fallback_model, fallback_fn, fallback_enabled = secondary
-            if not fallback_enabled:
-                raise primary_error
-            logger.info("Falling back to cloud %s AI (%s) with %d chars of OCR context", fallback_name.capitalize(), fallback_model, len(ocr_context))
-            return fallback_fn(stitched_path, ocr_context=ocr_context, is_stitched=is_stitched), fallback_model, fallback_name
+        Raises:
+            GeminiAPIError: on HTTP-level failures.
+            ParseError: on unparseable responses.
+        """
+        logger.info("Querying Gemini AI (%s)", GEMINI_MODEL)
+        response = query_gemini(stitched_path, ocr_context="", is_stitched=is_stitched)
+        return response, GEMINI_MODEL
 
-    def _remap_letter_by_option_content(self, db_answer_text: str, fallback_letter: str) -> str:
-        """
-        Map DB/AI answer text to current on-screen option content.
-        This keeps clicks correct when options are shuffled.
-        """
-        try:
-            # Prefer the latest interaction frame map so letter mapping and click
-            # targeting use the same live on-screen source of truth.
-            layout_source = self._latest_interaction_ocr_layout or self._latest_ocr_layout
-            if layout_source is None:
-                return fallback_letter
-            option_map = layout_source.get_option_map()
-            if option_map is None or not option_map.options:
-                return fallback_letter
-            current_options = {opt.label: (opt.text or "") for opt in option_map.options}
-            match = match_option_by_content(db_answer_text or "", current_options)
-            if match.found and match.matched_letter:
-                logger.info(
-                    "Remapped answer by on-screen content: %s -> %s (confidence=%s)",
-                    fallback_letter,
-                    match.matched_letter,
-                    match.confidence,
-                )
-                return match.matched_letter
-            return fallback_letter
-        except Exception:
-            return fallback_letter
+
 
     def _question_panel_text_truncated(self, ocr_res: OCRLayoutResult) -> bool:
         """

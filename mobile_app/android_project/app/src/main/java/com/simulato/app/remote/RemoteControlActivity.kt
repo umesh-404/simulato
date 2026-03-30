@@ -4,7 +4,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.View
-import android.widget.AdapterView
+
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -25,7 +25,6 @@ class RemoteControlActivity : AppCompatActivity() {
     private lateinit var heartbeatManager: HeartbeatManager
     private var isRegistered = false
     @Volatile private var isRegistering = false
-    private var suppressSpinnerCallback = true  // Prevent initial trigger
     private var pendingCommand: String? = null
     private val statusHandler = Handler(Looper.getMainLooper())
     private val statusRunnable = object : Runnable {
@@ -69,48 +68,9 @@ class RemoteControlActivity : AppCompatActivity() {
         binding.btnSkipQuestion.setOnClickListener { sendDecision(Constants.OperatorDecisions.SKIP_QUESTION) }
         binding.btnUseDb.setOnClickListener { sendDecision(Constants.OperatorDecisions.USE_DATABASE_ANSWER) }
         binding.btnUseAi.setOnClickListener { sendDecision(Constants.OperatorDecisions.USE_AI_ANSWER) }
-
-        setupAiProviderSpinner()
         registerDevice()
     }
 
-    private fun setupAiProviderSpinner() {
-        binding.spinnerAiProvider.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                if (suppressSpinnerCallback) {
-                    suppressSpinnerCallback = false
-                    return
-                }
-                val selected = parent?.getItemAtPosition(position).toString().lowercase()
-                setAiProvider(selected)
-            }
-
-            override fun onNothingSelected(parent: AdapterView<*>?) {
-                // Dropdown always has a selection — this won't fire
-            }
-        }
-    }
-
-    private fun setAiProvider(provider: String) {
-        if (!isRegistered) {
-            Toast.makeText(this, "Not registered", Toast.LENGTH_SHORT).show()
-            return
-        }
-        binding.txtAiProviderStatus.text = "Switching to $provider..."
-        apiClient.sendCommandWithPayload(
-            Constants.Commands.SET_AI_PROVIDER,
-            mapOf("provider" to provider)
-        ) { success, response ->
-            runOnUiThread {
-                if (isDestroyed) return@runOnUiThread
-                binding.txtAiProviderStatus.text = if (success) {
-                    "Provider: $provider"
-                } else {
-                    "Switch failed: $response"
-                }
-            }
-        }
-    }
 
     private fun registerDevice(onRegistered: (() -> Unit)? = null) {
         if (isRegistering) return
@@ -220,14 +180,12 @@ class RemoteControlActivity : AppCompatActivity() {
                         val payload = obj.getAsJsonObject("payload")
                         val state = payload?.get("system_state")?.asString ?: "UNKNOWN"
                         val test = payload?.get("active_test")?.asString ?: "—"
-                        val provider = payload?.get("active_ai_provider")?.asString ?: "—"
                         val qn = payload?.get("question_number")?.asInt ?: 0
                         val apiCalls = payload?.get("api_calls")?.asInt ?: 0
                         val cacheHits = payload?.get("cache_hits")?.asInt ?: 0
                         val imageHashHits = payload?.get("image_hash_hits")?.asInt ?: 0
                         "state=$state\n" +
                             "test=$test\n" +
-                            "provider=$provider\n" +
                             "question=$qn api_calls=$apiCalls\n" +
                             "cache_hits=$cacheHits image_hash_hits=$imageHashHits"
                     } catch (_: Exception) {

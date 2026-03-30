@@ -80,7 +80,7 @@ class ImageUploadRequest(BaseModel):
 class StatusResponse(BaseModel):
     system_state: str
     active_test: Optional[str] = None
-    active_ai_provider: str = "gemini"
+
     question_number: int = 0
     api_calls: int = 0
     connected_devices: list[str] = []

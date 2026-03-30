@@ -1,17 +1,16 @@
 """
 AI Vision API response parser.
 
-Validates and extracts structured data from the AI response JSON.
-Ensures conformance to the expected schema:
+Extracts the answer letter (A-E) from the AI response.
 
-{
-  "question": str,
-  "options": {"A": str, "B": str, "C": str, "D": str, "E": str},
-  "answer": str,          # letter A-E
-  "answer_content": str   # text of the chosen option
-}
+The AI returns a minimal JSON object:  {"answer": "C"}
 
-Returns a validated Pydantic model or raises on malformed responses.
+The parser handles edge cases:
+- JSON wrapped in markdown fences
+- Raw letter without JSON wrapping
+- Extra fields returned by the model (silently ignored)
+
+Returns a validated AIResponse or raises ParseError.
 """
 
 import json
@@ -25,33 +24,45 @@ from controller.utils.logger import get_logger
 logger = get_logger("response_parser")
 
 
-class GrokResponseOptions(BaseModel):
-    A: str
-    B: str
+# ---------------------------------------------------------------------------
+# Response model — kept with backward-compatible fields so downstream
+# code that accesses .question / .options / .answer_content doesn't crash.
+# Only .answer is actively populated by the parser.
+# ---------------------------------------------------------------------------
+
+class AIResponseOptions(BaseModel):
+    A: str = ""
+    B: str = ""
     C: str = ""
     D: str = ""
     E: str = ""
 
 
-class GrokResponse(BaseModel):
-    question: str
-    options: GrokResponseOptions
+class AIResponse(BaseModel):
+    question: str = ""
+    options: AIResponseOptions = AIResponseOptions()
     answer: str
-    answer_content: str
+    answer_content: str = ""
 
     @field_validator("answer")
     @classmethod
     def validate_answer_letter(cls, v: str) -> str:
         v = v.strip().upper()
-        # Allow empty string through — recovery logic in parse_grok_response
-        # handles remapping when the model returns an empty answer.
-        if v and v not in ("A", "B", "C", "D", "E"):
+        if not v:
+            raise ValueError("answer is empty")
+        # Take only the first character — models sometimes return "C - explanation"
+        if len(v) > 1:
+            first_char = v[0]
+            if first_char in ("A", "B", "C", "D", "E"):
+                return first_char
+        if v not in ("A", "B", "C", "D", "E"):
             raise ValueError(f"answer must be A, B, C, D, or E — got '{v}'")
         return v
 
 
-class GrokErrorResponse(BaseModel):
-    error: str
+# Backward-compatible aliases so existing imports don't break
+GrokResponse = AIResponse
+GrokResponseOptions = AIResponseOptions
 
 
 class ParseError(Exception):
@@ -77,105 +88,81 @@ def _extract_json_from_text(text: str) -> str:
     return text
 
 
-def _get_non_empty_options(options: GrokResponseOptions) -> dict[str, str]:
-    """Return only the options that have non-empty text."""
-    all_opts = {"A": options.A, "B": options.B, "C": options.C, "D": options.D, "E": options.E}
-    return {k: v for k, v in all_opts.items() if v.strip()}
-
-
-def parse_grok_response(raw_text: str) -> GrokResponse:
+def _extract_bare_letter(text: str) -> Optional[str]:
     """
-    Parse raw AI API response text into a validated GrokResponse.
+    Try to extract a bare answer letter from text that isn't valid JSON.
+    Handles cases like: "C", "The answer is B", "A\n", etc.
+    """
+    text = text.strip().upper()
+    # Exact single letter
+    if text in ("A", "B", "C", "D", "E"):
+        return text
+    # First character is a valid letter followed by non-alpha
+    if len(text) >= 1 and text[0] in ("A", "B", "C", "D", "E"):
+        if len(text) == 1 or not text[1].isalpha():
+            return text[0]
+    return None
+
+
+def parse_ai_response(raw_text: str) -> AIResponse:
+    """
+    Parse raw AI API response text into a validated AIResponse.
+
+    Expects minimal JSON: {"answer": "C"}
+    Also handles extra fields (question, options, etc.) gracefully —
+    they are accepted but not required.
 
     Args:
         raw_text: The raw text content from the API response.
 
     Returns:
-        Validated GrokResponse object.
+        Validated AIResponse with answer letter.
 
     Raises:
         ParseError: If the response is malformed or fails validation.
     """
     json_str = _extract_json_from_text(raw_text)
 
+    # Try JSON parse first
     try:
         data = json.loads(json_str)
-    except json.JSONDecodeError as e:
-        logger.error("JSON parse failed: %s | raw: %s", e, raw_text[:200])
-        raise ParseError(f"Invalid JSON from AI: {e}") from e
+    except json.JSONDecodeError:
+        # Not valid JSON — try extracting a bare letter
+        bare = _extract_bare_letter(raw_text)
+        if bare:
+            logger.info("Extracted bare answer letter from non-JSON response: %s", bare)
+            return AIResponse(answer=bare)
+        logger.error("JSON parse failed and no bare letter found | raw: %s", raw_text[:200])
+        raise ParseError(f"Invalid JSON from AI and no bare letter found: {raw_text[:100]}")
 
+    # Handle error responses
     if "error" in data and len(data) == 1:
-        error_resp = GrokErrorResponse(**data)
-        logger.warning("AI returned error response: %s", error_resp.error)
-        raise ParseError(f"AI error: {error_resp.error}")
+        logger.warning("AI returned error response: %s", data["error"])
+        raise ParseError(f"AI error: {data['error']}")
 
+    # Ensure "answer" key exists
+    if "answer" not in data:
+        # Try to find letter in any field value
+        for v in data.values():
+            if isinstance(v, str):
+                bare = _extract_bare_letter(v)
+                if bare:
+                    logger.warning("No 'answer' key — extracted letter '%s' from field value", bare)
+                    return AIResponse(answer=bare)
+        raise ParseError(f"No 'answer' key in AI response: {json.dumps(data)[:200]}")
+
+    # Build response — extra fields (question, options, etc.) are accepted
+    # by AIResponse's default values and won't cause errors
     try:
-        response = GrokResponse(**data)
+        response = AIResponse(**{k: v for k, v in data.items()
+                                   if k in AIResponse.model_fields})
     except Exception as e:
         logger.error("Schema validation failed: %s | data: %s", e, json.dumps(data)[:300])
-        raise ParseError(f"Response schema validation failed: {e}") from e
+        raise ParseError(f"Response validation failed: {e}") from e
 
-    # -----------------------------------------------------------------------
-    # Validate: answer letter must correspond to a non-empty option.
-    # If the model picked a letter with empty text but provided non-empty
-    # options, try to auto-correct by matching answer_content against them.
-    # -----------------------------------------------------------------------
-    declared_content = getattr(response.options, response.answer, "")
-    non_empty = _get_non_empty_options(response.options)
-
-    if not declared_content.strip():
-        # Model chose an option it left empty — this is an error from the model.
-        # Attempt recovery: if answer_content matches a non-empty option, remap.
-        if response.answer_content.strip() and non_empty:
-            for letter, text in non_empty.items():
-                if text.strip() == response.answer_content.strip():
-                    logger.warning(
-                        "Auto-correcting answer from '%s' (empty) to '%s' based on answer_content match",
-                        response.answer, letter,
-                    )
-                    response.answer = letter
-                    declared_content = text
-                    break
-            else:
-                # answer_content doesn't match any option text exactly — pick the
-                # first non-empty option as a last-resort (we'll log the issue).
-                first_letter = next(iter(non_empty))
-                logger.warning(
-                    "Answer '%s' has empty option text and answer_content '%s' "
-                    "doesn't match any option. Remapping to first non-empty option '%s'.",
-                    response.answer, response.answer_content[:60], first_letter,
-                )
-                response.answer = first_letter
-                response.answer_content = non_empty[first_letter]
-                declared_content = response.answer_content
-        elif non_empty:
-            # No answer_content provided but there are non-empty options
-            first_letter = next(iter(non_empty))
-            logger.warning(
-                "Answer '%s' has empty option text. Remapping to first non-empty option '%s'.",
-                response.answer, first_letter,
-            )
-            response.answer = first_letter
-            response.answer_content = non_empty[first_letter]
-            declared_content = response.answer_content
-        else:
-            # All options are empty — unreadable image
-            raise ParseError(
-                "All option texts are empty — image appears unreadable to AI"
-            )
-
-    # Ensure answer_content matches the authoritative option text
-    if response.answer_content.strip() != declared_content.strip():
-        logger.warning(
-            "answer_content mismatch: answer=%s, options[%s]='%s', answer_content='%s'. "
-            "Using options[%s] as authoritative.",
-            response.answer, response.answer, declared_content[:80],
-            response.answer_content[:80], response.answer,
-        )
-        response.answer_content = declared_content
-
-    logger.info(
-        "Parsed AI response: answer=%s, question_length=%d, non_empty_options=%d",
-        response.answer, len(response.question), len(non_empty),
-    )
+    logger.info("Parsed AI response: answer=%s", response.answer)
     return response
+
+
+# Backward-compatible alias
+parse_grok_response = parse_ai_response

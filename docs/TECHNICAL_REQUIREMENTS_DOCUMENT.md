@@ -220,7 +220,7 @@ AI models used (Tiered Strategy):
 
 -   **Primary Solver (selectable at runtime):**
     -   Cloud AI (Gemini 2.5 Flash) -> Default. OpenAI-compatible endpoint.
-    -   Cloud AI (Grok Vision API) -> Enforced JSON Schema via `response_format`.
+    -   Cloud AI (Vertex AI Gemini) -> Enforced JSON Schema via `response_format`.
 -   **Auxiliary Analyst:** Local AI (Ollama / qwen2.5vl:7b) -> Vision-language classification for screen state.
 
 Capabilities:
@@ -446,7 +446,7 @@ Question processing pipeline:
 
 1.  Capture and stitch question image
 2.  Run OCR layout pass on stitched image
-3.  Call cloud AI (Grok/Gemini) with image + OCR context
+3.  Call cloud AI (Vertex AI Gemini) with image + OCR context
 4.  Parse structured JSON response
 5.  Remap AI answer letter to live on-screen option content
 6.  Dispatch click via Raspberry Pi

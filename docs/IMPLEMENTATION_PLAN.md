@@ -97,7 +97,7 @@ The following structure is the authoritative project layout (see REPOSITORY_STRU
         config.py
         orchestrator/          (state_machine, system_controller, workflow_engine)
         capture_pipeline/      (image_receiver, stitcher, scroll_detector, screen_validator, change_detector, preprocessor, ocr_layout_analyzer, exam_layout, option_detector)
-        ai_pipeline/           (grok_client, gemini_client, ollama_client, aux_prompts, response_parser, prompt_builder)
+        ai_pipeline/           (Gemini_client, gemini_client, ollama_client, aux_prompts, response_parser, prompt_builder)
         question_engine/       (question_matcher, canonicalizer, hash_engine, embedding_matcher)
         answer_engine/         (option_matcher, decision_engine, conflict_handler)
         hardware_control/      (pi_client, click_dispatcher, verification_engine)
@@ -269,9 +269,9 @@ Similarity threshold:
 
 ------------------------------------------------------------------------
 
-# 10. Phase 6 --- Grok Vision Integration
+# 10. Phase 6 --- Vertex AI Gemini Integration
 
-Create grok_client.py.
+Create Gemini_client.py.
 
 Responsibilities:
 
@@ -536,7 +536,7 @@ Steps:
 2.  configure Raspberry Pi (run `sudo python3 HIDPi/HIDPi_Setup.py`, reboot)
 3.  install Simulato Android APK on both phones
 4.  connect all five devices to the same WiFi network
-5.  create `.env` configuration file on PC with `PI_HOST` and `GROK_API_KEY`
+5.  create `.env` configuration file on PC with `PI_HOST`, `GCP_PROJECT_ID`, and `GCP_LOCATION`
 6.  start Pi listener (`scripts/start_pi.sh`)
 7.  start controller (`start.bat` on Windows or `scripts/start_controller.sh` on Linux)
 8.  enter PC IP in both phone apps, assign device roles (one Capture, one Remote Control)

@@ -62,7 +62,7 @@ All implementation follows:
       `AI_API_MAX_RETRIES` (default 2),
       `AI_API_BACKOFF_BASE_SECONDS` (default 1.0)
 - [x] Verification frame timeout: `VERIFY_FRAME_TIMEOUT_SECONDS` (default 18)
-- [x] Default AI provider: `DEFAULT_AI_PROVIDER` (default "gemini")
+- [x] Default AI provider: Enforced Vertex AI (Gemini 2.5 Flash)
 - [x] `controller/utils/logger.py` — file + console logging, structured EventLogger (JSONL)
 - [x] `controller/utils/timer.py` — context-manager execution timer
 - [x] `controller/utils/text_normalizer.py` — Unicode NFC, lowercase, whitespace collapse, numeric normalization
@@ -114,16 +114,16 @@ All implementation follows:
 - [x] `embedding_to_bytes()` / `bytes_to_embedding()` for SQLite BLOB storage
 - [x] `find_best_match()` with configurable threshold (default 0.92)
 
-## 3.6 Cloud AI Integration — Grok Vision (Phase 5)
+## 3.6 Cloud AI Integration — Vertex AI Gemini (Phase 5)
 
 - [x] `controller/ai_pipeline/prompt_builder.py`
 - [x] System prompt engineered for exact JSON output with `answer_content` field
 - [x] Vision API message format with base64 image
 - [x] `controller/ai_pipeline/response_parser.py`
-- [x] Pydantic models: `GrokResponse`, `GrokResponseOptions`, `GrokErrorResponse`
+- [x] Pydantic models: `GeminiResponse`, `GeminiResponseOptions`, `GeminiErrorResponse`
 - [x] JSON extraction from markdown-fenced or prose-wrapped responses
 - [x] `answer_content` cross-validation against `options[answer]`
-- [x] `controller/ai_pipeline/grok_client.py`
+- [x] `controller/ai_pipeline/Gemini_client.py`
 - [x] `temperature: 0` for deterministic output (Canonical Law 1)
 - [x] **Structured Outputs (`response_format`)** with strict JSON Schema (Zero-parse-failure design)
 - [x] **Primary Solver Role:** Exclusively responsible for question OCR and reasoning
@@ -136,9 +136,9 @@ All implementation follows:
 - [x] `controller/ai_pipeline/gemini_client.py`
 - [x] OpenAI-compatible endpoint (generativelanguage.googleapis.com)
 - [x] `temperature: 0` for deterministic output (Canonical Law 1)
-- [x] Shares prompt builder and response parser with Grok client
-- [x] **Default Primary Solver:** Selectable at runtime via `SET_AI_PROVIDER` command
-- [x] Retry with exponential backoff (matches Grok retries)
+- [x] Shares prompt builder and response parser with Gemini client
+- [x] **Default Primary Solver:** Selectable at runtime via `` command
+- [x] Retry with exponential backoff (matches Gemini retries)
 - [x] Safe error raise when `MAX_RETRIES=0` (no `raise None` crash)
 - [x] API key from environment variable
 
@@ -175,7 +175,7 @@ All implementation follows:
 - [x] Conflict payload with both answers and question ID
 - [x] `controller/answer_engine/decision_engine.py`
 - [x] None-safe `db_answer` slicing in conflict messages
-- [x] **DB-first path:** DB answer → conflict check → option match → click (no Grok/Gemini call when a DB match exists)
+- [x] **DB-first path:** DB answer → conflict check → option match → click (no Vertex AI Gemini call when a DB match exists)
 - [x] **Image-hash fast path:** pHash match → use cached answer letter directly (no AI call at all)
 - [x] New question path: AI answer → store question → click
 - [x] Conflict path: raise conflict for operator intervention
@@ -301,7 +301,7 @@ All implementation follows:
 - [x] `POST /api/register` — device registration with role
 - [x] `POST /api/heartbeat` — heartbeat acknowledgement
 - [x] `POST /api/upload_image` — image upload from capture phone
-- [x] `POST /api/command` — remote commands (CALIBRATE, START, CONTINUE, PAUSE, STOP, STATUS, SET_AI_PROVIDER)
+- [x] `POST /api/command` — remote commands (CALIBRATE, START, CONTINUE, PAUSE, STOP, STATUS, )
 - [x] `POST /api/operator_decision` — operator conflict resolution
 - [x] `GET /api/status` — system status query
 - [x] `WS /ws/{device_id}` — WebSocket for real-time alerts + heartbeats
@@ -329,7 +329,7 @@ All implementation follows:
 
 - [x] `controller/orchestrator/system_controller.py`
 - [x] Wires all subsystems: state machine, DB, alerts, Pi, click dispatcher, verification
-- [x] Command routing: CALIBRATE, START, CONTINUE, PAUSE, STOP, STATUS, SET_AI_PROVIDER
+- [x] Command routing: CALIBRATE, START, CONTINUE, PAUSE, STOP, STATUS, 
 - [x] Image routing to workflow engine
 - [x] Operator decision handling with conflict resolution
 - [x] USE_DATABASE_ANSWER / USE_AI_ANSWER execute the actual click
@@ -350,9 +350,9 @@ All implementation follows:
 - [x] Image preprocessing
 - [x] **OCR layout pass** (primary click-targeting, deterministic, runs on every processed frame)
 - [x] **Image-hash (pHash) DB-first lookup** — bypasses AI call entirely when a previously seen image is captured
-- [x] **Tiered AI Integration:** Grok (Cloud) and Gemini (Cloud) as selectable primary solvers, Ollama (Local/Qwen) as auxiliary analyst
+- [x] **Tiered AI Integration:** Gemini (Cloud) and Gemini (Cloud) as selectable primary solvers, Ollama (Local/Qwen) as auxiliary analyst
 - [x] **Cloud-provider failover:** if the selected primary provider fails (transport/parse), workflow retries once with the alternate provider before raising AI_PARSE_FAILURE
-- [x] **Runtime AI Provider Switching:** `SET_AI_PROVIDER` command from Remote Control phone dropdown
+- [x] **Runtime AI Provider Switching:** `` command from Remote Control phone dropdown
 - [x] **Local AI Task Suite:** Scroll verification (initial + each scroll frame), answer state checking using dedicated verification captures, NEXT button localization, screen classification (QUESTION/LOGIN/ERROR/OTHER) with timeout+cooldown safeguards
 - [x] **Click targeting hierarchy:** OCR layout (primary) → Local Qwen assist (secondary); **no** silent fallback to static calibrated pixels for options — if both fail, error + operator alert (`_click_option_best_target`)
 - [x] Dedicated post-AI mapping recapture before click dispatch to refresh live option/NEXT targets
@@ -407,7 +407,7 @@ All implementation follows:
 
 | # | Law | Status | Implementation |
 |---|-----|--------|---------------|
-| 1 | Deterministic Execution | PASS | temperature=0 on Grok/Gemini, seed=42 on Ollama, no randomness, deterministic canonicalization |
+| 1 | Deterministic Execution | PASS | temperature=0 on Vertex AI Gemini, seed=42 on Ollama, no randomness, deterministic canonicalization |
 | 2 | Replayability | PASS | EventLogger JSONL, screenshots, AI responses saved per run |
 | 3 | External Interaction Only | PASS | Camera + USB HID only, no exam software modification |
 | 4 | Distributed System Model | PASS | All decisions on PC, Pi executes only, phones capture/control |
@@ -421,7 +421,7 @@ All implementation follows:
 | 12 | Failure Visibility | PASS | Failures halt + alert + remote notification |
 | 13 | Controller Authority | PASS | All orchestration on Main Control PC |
 | 14 | System State Explicitness | PASS | 6 states, logged transitions, IDLE → RUNNING allowed |
-| 15 | Network Usage | PASS | Only Grok/Gemini API uses internet, all else local |
+| 15 | Network Usage | PASS | Only Vertex AI Gemini API uses internet, all else local |
 
 ---
 
@@ -451,7 +451,7 @@ All implementation follows:
 
 # 6. SPECIFICATION UPDATES APPLIED
 
-- [x] Added `answer_content` field to Grok response schema in all docs
+- [x] Added `answer_content` field to Gemini response schema in all docs
 - [x] Simplified networking model — all devices join any shared WiFi network
 - [x] Updated REPOSITORY_STRUCTURE.md to match actual codebase (~120 files)
 - [x] Updated IMPLEMENTATION_PLAN.md (folder structure, minSdk 26, deployment steps)
@@ -479,7 +479,7 @@ All implementation follows:
 - [x] **Critical:** Replaced hardcoded 25% `min_row_y` filter with calibration-guided filter — old filter was killing option A which sits at 22% of panel height
 - [x] **Medium:** Fixed alert resolution ordering in `system_controller.py` — alert is now resolved only after confirming ERROR state
 - [x] **Medium:** Added None-safety guards in `decision_engine.py` and `conflict_handler.py` for missing DB/AI answer strings
-- [x] **Medium:** Fixed `raise None` crash in `grok_client.py` and `gemini_client.py` when `MAX_RETRIES=0`
+- [x] **Medium:** Fixed `raise None` crash in `Gemini_client.py` and `gemini_client.py` when `MAX_RETRIES=0`
 - [x] **Medium:** Fixed replay engine crash on events with missing `question_number`
 - [x] **Medium:** Added `schema.sql` existence guard in `db_manager.py`
 - [x] **Medium:** Fixed ambiguous `created_at` column in near-hash JOIN query in `db_manager.py`
@@ -489,11 +489,11 @@ All implementation follows:
 
 ## 6.2 Updates (v1.4.1) — Pipeline Stability & Targeting
 
-- [x] **Critical:** Integrated **OCR Context Injection**. Tesseract raw OCR transcript is injected alongside the base64 image into the Grok/Gemini vision prompts. This successfully prevents "blind hallucination" math word problems caused by aggressive watermarks.
+- [x] **Critical:** Integrated **OCR Context Injection**. Tesseract raw OCR transcript is injected alongside the base64 image into the Vertex AI Gemini vision prompts. This successfully prevents "blind hallucination" math word problems caused by aggressive watermarks.
 - [x] **Critical:** Redesigned `workflow_engine._blend_with_calibration()` to use a **Split-Axis Strategy**. X-axis coordinate blends heavily use pure calibration (since the radio-column is perfectly stable across questions). Y-axis uses mostly live OCR layout detection (as Y shifts per question text length), with a >120px sanity fallback threshold.
 - [x] **Critical:** Documented and shipped **perspective-aware `transform`** in `config/grid_map.json` — naive `scale_y = screen_h / capture_h` with zero offset caused systematic vertical mis-clicks (e.g. one option row low) when the capture phone views the laptop at an angle; `click_at_normalized` now benefits from tuned `scale_y` / `offset_y` (and matching `scale_x` where needed).
 - [x] **Medium:** `coordinate_solver.calibrate_from_screenshot` — replaced broad `except Exception` around transform reuse with `_try_reuse_transform_from_disk()`; reuse triggers on non-zero offsets **or** material scale drift from naive ratios (preserves scale-only corrections).
-- [x] **Low:** Removed redundant Anti-Hallucination "Reasoning Steps" requirement from Grok prompt; OCR context proved sufficient while lowering latency and parser complexity.
+- [x] **Low:** Removed redundant Anti-Hallucination "Reasoning Steps" requirement from Gemini prompt; OCR context proved sufficient while lowering latency and parser complexity.
 
 ---
 

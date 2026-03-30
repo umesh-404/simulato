@@ -50,7 +50,7 @@ simulato/
 │   │
 │   ├── ai_pipeline/
 │   │   ├── __init__.py
-│   │   ├── grok_client.py
+│   │   ├── Gemini_client.py
 │   │   ├── gemini_client.py
 │   │   ├── ollama_client.py           # [NEW] Dedicated Local AI (Qwen) task client
 │   │   ├── aux_prompts.py            # [NEW] Task-specific prompts for Ollama auxiliary tasks

@@ -27,7 +27,7 @@ from controller.hardware_control.verification_engine import VerificationEngine
 from controller.mobile_api.api_server import queue_alert_for_broadcast
 from controller.orchestrator.state_machine import StateMachine, SystemState, InvalidTransitionError
 from controller.orchestrator.workflow_engine import WorkflowEngine
-from controller.config import DEFAULT_AI_PROVIDER
+
 from controller.replay.run_loader import create_run, RunContext
 from controller.utils.logger import get_logger, EventLogger
 from database.db_manager import DatabaseManager
@@ -57,7 +57,7 @@ class SystemController:
         self._last_conflict_decision: Optional[dict] = None
         self._calibration_pending: bool = False
         self._state_before_calibration: Optional[SystemState] = None
-        self._active_ai_provider: str = DEFAULT_AI_PROVIDER
+
         self._pending_start_payload: Optional[dict] = None
         self._pending_resume_after_calibration: bool = False
         self._timers: list[threading.Timer] = []
@@ -88,7 +88,7 @@ class SystemController:
         return {
             "system_state": self._sm.state.value,
             "active_test": self._test_name,
-            "active_ai_provider": self._active_ai_provider,
+
             "question_number": self._workflow.question_number if self._workflow else 0,
             "api_calls": self._workflow.api_calls if self._workflow else 0,
         }
@@ -130,7 +130,7 @@ class SystemController:
             "PAUSE": self._handle_pause,
             "STOP": self._handle_stop,
             "STATUS": self._handle_status,
-            "SET_AI_PROVIDER": self._handle_set_ai_provider,
+
         }
 
         handler = handlers.get(command)
@@ -236,7 +236,7 @@ class SystemController:
         self._workflow.set_test_context(test_name)
         self._workflow.set_capture_callback(self._request_capture)
         self._workflow.set_recalibration_callback(self._broadcast_recalibration_needed)
-        self._workflow.set_ai_provider(self._active_ai_provider)
+
 
         self._sm.transition_to(SystemState.RUNNING, reason=f"start_test:{test_name}")
         logger.info("Test started: %s (run: %s)", test_name, self._run_ctx.run_id)
@@ -281,26 +281,7 @@ class SystemController:
     def _handle_status(self, payload: dict) -> dict:
         return self.get_status()
 
-    def _handle_set_ai_provider(self, payload: dict) -> dict:
-        """Switch the active AI provider at runtime."""
-        provider = payload.get("provider", "").lower()
-        if provider not in ("grok", "gemini"):
-            return {"error": f"Invalid provider: '{provider}'. Must be 'grok' or 'gemini'."}
-        self._active_ai_provider = provider
-        if self._workflow:
-            self._workflow.set_ai_provider(provider)
 
-        # Persist the change to .env so it's remembered across restarts
-        try:
-            from dotenv import set_key
-            from controller.config import PROJECT_ROOT
-            env_path = PROJECT_ROOT / ".env"
-            set_key(str(env_path), "DEFAULT_AI_PROVIDER", provider)
-        except Exception as e:
-            logger.error("Failed to persist AI provider to .env: %s", e)
-
-        logger.info("AI provider switched to: %s", provider)
-        return {"status": "ai_provider_set", "active_ai_provider": provider}
 
     # ------------------------------------------------------------------
     # Image processing entry point

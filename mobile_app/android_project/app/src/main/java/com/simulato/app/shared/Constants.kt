@@ -30,7 +30,7 @@ object Constants {
         const val PAUSE = "PAUSE"
         const val STOP = "STOP"
         const val STATUS = "STATUS"
-        const val SET_AI_PROVIDER = "SET_AI_PROVIDER"
+
     }
 
     object OperatorDecisions {

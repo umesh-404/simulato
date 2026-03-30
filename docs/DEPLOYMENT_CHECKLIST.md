@@ -45,7 +45,7 @@ sudo ./start_pi.sh
 
 - [x] Ollama installed (https://ollama.com/download)
 - [x] Tesseract OCR installed and on PATH (or `TESSERACT_CMD` set in `.env`)
-- [x] `.env` file configured with `GROK_API_KEY` or `GEMINI_API_KEY`, and `PI_HOST`
+- [x] `.env` file configured with `GCP_PROJECT_ID` and `GCP_LOCATION`, and `PI_HOST`
 - [x] Python virtual environment activated
 - [x] Dependencies installed (`pip install -r requirements.txt`)
 - [x] Controller running via `start.bat` (auto-starts Ollama + auto-pulls model + starts server)
@@ -108,7 +108,7 @@ python scripts/calibrate_scroll.py
 - [ ] All devices connected to the same WiFi network
 - [ ] PC → Pi ping OK
 - [ ] Phone → PC ping OK
-- [ ] Cloud AI API reachable from PC (Gemini or Grok, depending on active provider) OR Local AI running (if using Ollama)
+- [ ] Cloud AI API reachable from PC (Gemini or Gemini, depending on active provider) OR Local AI running (if using Ollama)
 
 ## 9. Pre-Run Verification
 

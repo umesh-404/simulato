@@ -32,7 +32,7 @@ pip install -r requirements.txt
 2. Run the installer
 3. That's it — `start.bat` will auto-pull the model on first run
 
-> **What does Ollama do?** It runs a small vision AI model (Qwen 2.5 VL) locally on your PC for auxiliary tasks: detecting if scrolling is needed, verifying clicks landed correctly, and checking if the screen shows a question or an error page. This is NOT the AI that answers questions — that's Grok/Gemini in the cloud.
+> **What does Ollama do?** It runs a small vision AI model (Qwen 2.5 VL) locally on your PC for auxiliary tasks: detecting if scrolling is needed, verifying clicks landed correctly, and checking if the screen shows a question or an error page. This is NOT the AI that answers questions — that's Vertex AI Gemini in the cloud.
 
 ### 1.2.1 Install OCR Engine (Tesseract)
 OCR is used as the primary layout detector for click targeting.
@@ -47,12 +47,11 @@ tesseract --version
 ### 1.3 Configure API Keys
 Edit the `.env` file in the project root:
 ```env
-# Pick one or both cloud AI providers:
-GROK_API_KEY=your-grok-api-key-here
-GEMINI_API_KEY=your-gemini-api-key-here
+# Vertex AI Configuration:
+GCP_PROJECT_ID=your-gcp-project-id
+GCP_LOCATION=us-central1
 
 # Which one to use by default:
-DEFAULT_AI_PROVIDER=gemini
 
 # Pi's IP on your WiFi network:
 PI_HOST=192.168.1.xxx
@@ -198,7 +197,7 @@ If scroll needed → Pi scrolls → phone recaptures → stitch frames
 Check DB: have we seen this question before?
         ↓
 If DB hit → use cached answer (skip cloud AI call)
-If new → send to Grok/Gemini AI → get answer
+If new → send to Vertex AI Gemini AI → get answer
         ↓
 Controller requests one fresh post-AI mapping frame for live option-row mapping
         ↓
@@ -263,7 +262,7 @@ When the AI gives a different answer than what's in the database:
 | Correct option clicked but system still says verification failed | Verification checks the exact click target and falls back to a panel-wide highlight scan. On failure it retries the same option once with fresh detection. If this persists, inspect the verification debug crop for highlight visibility and reduce glare/blur. |
 | NEXT click skips a question | NEXT verification uses multi-tier thresholds (q-panel diff + pHash + combined signals). Fixed in v1.4.0 — if it recurs, check logs for `NEXT verify` threshold values. |
 | Local AI responses are slow | Normal for first query (~5s). Subsequent queries are faster |
-| Cloud AI fails | Check API keys in `.env` for both Gemini and Grok. Controller now auto-falls back to alternate cloud provider once before alerting |
+| Cloud AI fails | Check Application Default Credentials (ADC) and project settings. Controller now auto-falls back to alternate cloud provider once before alerting |
 
 ---
 

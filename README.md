@@ -46,12 +46,12 @@ Ensure the following 5 devices are connected to the **same WiFi network**:
 3. **Set API Keys and Configure AI:**
    - **Cloud AI Keys (at least one required):**
      - **Gemini** (default primary): Get a key from [aistudio.google.com](https://aistudio.google.com/).
-     - **Grok** (alternate primary): Get a key from [console.x.ai](https://console.x.ai/).
+     - **Gemini** (alternate primary): Get a key from [console.x.ai](https://console.x.ai/).
    - **Tesseract OCR:** Download from [github.com/UB-Mannheim/tesseract](https://github.com/UB-Mannheim/tesseract/wiki). Ensure `tesseract` is on PATH or set `TESSERACT_CMD` in `.env`.
    - **Configuration:** Edit `.env` in the project root:
      ```env
-     GROK_API_KEY=xai-your-api-key
-     GEMINI_API_KEY=your-gemini-key
+     GCP_PROJECT_ID=xai-your-api-key
+     GCP_LOCATION=your-gemini-key
      DEFAULT_AI_PROVIDER=gemini
      PI_HOST=192.168.1.xxx
      ```
@@ -95,7 +95,7 @@ Now that everything is running and talking to the Mother PC:
    - This starts (or resumes) the run from the controller.
 4. **Capture → screen coordinate mapping:** Option clicks use **normalized** targets from live detection (`click_at_normalized`). The mapping from capture pixels to exam-screen pixels uses the `transform` block in `config/grid_map.json` (`scale_x`, `scale_y`, `offset_x`, `offset_y`). A naive linear scale (`screen_resolution / capture_resolution`) is wrong when the phone photographs the laptop at an angle; a small affine-style correction (for example adjusted `scale_y` and `offset_y`) fixes systematic “one row below” mis-clicks. Re-running calibration **preserves** a non-naive transform already on disk so you do not lose a tuned mapping. See [`docs/SETUP_GUIDE.md`](docs/SETUP_GUIDE.md) troubleshooting for details.
 5. During the run:
-   - For each question it captures, preprocesses, stitches frames if scrolling was needed, and **always sends the composite image directly to the cloud AI** (Grok/Gemini).
+   - For each question it captures, preprocesses, stitches frames if scrolling was needed, and **always sends the composite image directly to the cloud AI** (Vertex AI Gemini).
    - It uses OCR + adaptive radio-circle detection (HoughCircles with 8-strip scan up to 16% panel width) as primary option targeting, with calibration-anchored A..E mapping to prevent row-shift mistakes when only a subset of options is visible.
    - Calibration-guided filtering removes "Answer here" header phantoms using the actual calibrated option-A position, while upward Y-bias corrects for camera perspective.
    - NEXT targeting uses a layered strategy: layout `next_button` rect center (primary), bottom-bar color-shape detection (blue/green button), OCR "next" word anchor, then layout/grid fallback.
@@ -110,6 +110,6 @@ Now that everything is running and talking to the Mother PC:
 - **AI-Direct Pipeline:** Database matching, image-hash lookups, and OCR pre-checks have been fully eliminated from the question-processing pipeline. Every stitched image is now sent directly to the cloud AI immediately after capture. This removes latency from DB queries and eliminates false cache hits that previously caused wrong answers to be reused.
 - **False-Positive Scroll Fix (Structural Path):** The structural scroll detector's `_question_panel_text_truncated` heuristic now filters out navigation/status words ("Marks", "Negative", "View More", "Prev", "Next") and raised its threshold from 2 → 3 words. An option-completeness veto (3+ radio buttons visible → no scroll needed) was added to the structural path.
 - **Stitched-Image AI Prompting:** The system prompt explicitly instructs the AI that stitched composite images may contain overlapping frames; a separate `USER_PROMPT_STITCHED` is used when the image spans multiple captures, telling the AI to deduplicate repeated content.
-- **AI Anti-Hallucination via OCR Injection:** Tesseract's full-screen word transcript is automatically extracted and appended as context alongside the screenshot in all Grok/Gemini prompts.
+- **AI Anti-Hallucination via OCR Injection:** Tesseract's full-screen word transcript is automatically extracted and appended as context alongside the screenshot in all Vertex AI Gemini prompts.
 - **Split-Axis Coordinate Targeting:** Clicks blend calibration data (X-axis) and live OCR detection (Y-axis) dynamically, with a fallback to pure calibration if live detection drifts >120 px.
 - **Perspective-aware `grid_map.json` transform:** Runtime option clicks map normalized capture coordinates through `GridMap.capture_to_screen_pixel()` using `scale_*` and `offset_*`, correcting systematic vertical mis-clicks from angled camera photography.

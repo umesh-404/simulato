@@ -138,7 +138,7 @@ Responsibilities:
 -   detect question boundaries
 -   detect scrolling requirements
 -   stitch image segments
--   call Cloud AI (Grok/Gemini) for question solving — **always, for every question**
+-   call Cloud AI (Vertex AI Gemini) for question solving — **always, for every question**
 -   call Local AI (Ollama/Qwen) for auxiliary screen analysis (scroll/answer verification)
 -   process structured AI responses (via `response_format`)
 -   determine answer actions from AI response
@@ -408,8 +408,8 @@ Every question is sent directly to the cloud AI — there is no database pre-che
 or image-hash cache layer in the processing path.
 
 1.  **Primary Solver (Cloud AI):**
-    -   **Grok Vision** (default primary): xAI's fast vision model with Structured Outputs.
-    -   **Gemini 2.5 Flash** (fallback): Google's vision model, automatically engaged if Grok fails parsing or transport.
+    -   **Vertex AI Gemini** (default primary): xAI's fast vision model with Structured Outputs.
+    -   **Gemini 2.5 Flash** (fallback): Google's vision model, automatically engaged if Gemini fails parsing or transport.
     The primary solver is fed the stitched question image along with an **OCR Text Injection** (a complete raw transcript of all text extracted by Tesseract). This forces the LLM to ground its reasoning on the actual pixels, virtually eliminating hallucinated answers when watermarks degrade visual clarity.
     When the image is a multi-frame stitched composite, a dedicated `USER_PROMPT_STITCHED` message explicitly tells the AI to treat it as a single continuous question and deduplicate any repeated content.
 
@@ -434,7 +434,7 @@ Processing steps:
 
 1.  capture and stitch question image
 2.  run OCR layout pass
-3.  call Primary Solver (Grok/Gemini) with image + OCR context
+3.  call Primary Solver (Vertex AI Gemini) with image + OCR context
 4.  parse structured JSON response
 5.  remap AI answer letter to live on-screen option content (handles shuffled options)
 
@@ -597,7 +597,7 @@ Local communications:
 
 Internet communication used for:
 
--   Grok Vision API requests (api.x.ai)
+-   Vertex AI Gemini requests (api.x.ai)
 -   Gemini Vision API requests (generativelanguage.googleapis.com)
 
 All other operations occur locally.

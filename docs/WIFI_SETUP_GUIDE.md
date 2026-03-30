@@ -4,7 +4,7 @@
 
 Simulato requires all five devices to be connected to the **same WiFi network**. Any network will work — home router, mobile hotspot, campus WiFi, or portable router. There is no requirement for DHCP configuration, static IPs, or a dedicated network.
 
-The only external connection is outbound HTTPS from the Main Control PC to the Cloud Grok API (if using Cloud AI instead of Local Ollama).
+The only external connection is outbound HTTPS from the Main Control PC to the Vertex AI Gemini (if using Cloud AI instead of Local Ollama).
 
 ## Network Model
 
@@ -59,7 +59,7 @@ Create a `.env` file in the project root with the following configuration:
 ```env
 PI_HOST=<pi_ip_address>
 PI_PORT=9000
-GROK_API_KEY=your_key_here
+GCP_PROJECT_ID=your-gcp-project-id
 OLLAMA_MODEL=qwen2.5vl:7b-q4_K_M
 ```
 

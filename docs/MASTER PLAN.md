@@ -86,8 +86,8 @@ Responsibilities:
 -   Use Local AI (Ollama/Qwen) to detect if scrolling is required
 -   Capture additional frames if necessary
 -   Stitch frames into a composite question image
--   Send images to primary AI Vision API (Cloud Grok) for solving
--   Receive structured JSON response (enforced via JSON Schema for Grok)
+-   Send images to primary AI Vision API (Vertex AI) for solving
+-   Receive structured JSON response (enforced via JSON Schema for Gemini)
 -   Normalize question text
 -   Compute question hashes
 -   Run similarity matching
@@ -370,7 +370,7 @@ This ensures the entire question is visible to the model.
 
 # 12. AI Vision Processing
 
-The stitched image is sent to the configured AI API (Grok or Ollama).
+The stitched image is sent to the configured AI API (Gemini or Ollama).
 
 Expected JSON response:
 
@@ -389,7 +389,7 @@ Expected JSON response:
 }
 ```
 
-For Cloud Grok API, the system uses **Structured Outputs** (JSON Schema) to guarantee valid results. For Local Ollama, JSON mode is enforced.
+For Vertex AI Gemini, the system uses **Structured Outputs** (JSON Schema) to guarantee valid results. For Local Ollama, JSON mode is enforced.
 
 PC extracts structured data and performs validation before proceeding.
 
@@ -552,7 +552,7 @@ Cached questions:
 Recommended build sequence:
 
 1.  PC controller
-2.  AI Vision API integration (Ollama / Grok)
+2.  AI Vision API integration (Ollama / Gemini)
 3.  Database + hashing + embeddings
 4.  Raspberry Pi HID interface
 5.  Capture phone app
