@@ -107,8 +107,8 @@ class OptionDetector:
     # Bottom margin: fraction of answer panel to skip (footer buttons).
     # The footer contains Clear/Prev/Next buttons whose circular shapes
     # can be misdetected as radio buttons (e.g. Clear button at y=2536).
-    # 18% excludes the entire footer bar safely.
-    BOTTOM_SKIP_FRAC = 0.18
+    # 12% excludes the footer bar while keeping option D/E visible.
+    BOTTOM_SKIP_FRAC = 0.12
 
     # Radio strip: left portion of the answer panel where circles live.
     # On wider panels (divider further left), the radio circles can be
@@ -149,7 +149,7 @@ class OptionDetector:
 
     # Radius consistency: reject circles whose radius differs from the
     # median by more than this factor (e.g. 2.0 means allow [median/2, median*2]).
-    RADIUS_TOLERANCE_FACTOR = 2.0
+    RADIUS_TOLERANCE_FACTOR = 2.5
 
     # X-alignment: reject clusters whose center_x differs from the
     # median cluster X by more than this many pixels.
@@ -157,8 +157,10 @@ class OptionDetector:
 
     # Spacing regularity: reject outlier clusters where the gap to
     # the nearest neighbour is < MIN_RATIO or > MAX_RATIO of the median gap.
-    SPACING_MIN_RATIO = 0.35
-    SPACING_MAX_RATIO = 2.2
+    # Relaxed ratios to handle non-uniform option heights.
+    # Multi-line answers can create 2.5x+ normal spacing between rows.
+    SPACING_MIN_RATIO = 0.25
+    SPACING_MAX_RATIO = 3.0
 
     # OCR text crop starts this many pixels right of the circle edge.
     TEXT_OFFSET_X_PX = 20
@@ -582,7 +584,16 @@ class OptionDetector:
     # ------------------------------------------------------------------
 
     def _find_circles(self, cv2, blurred: np.ndarray) -> list[tuple[int, int, int]]:
-        """Run HoughCircles: primary pass, then fallback if needed."""
+        """Run HoughCircles: primary pass first, fallback supplement if sparse.
+
+        The primary pass provides clean, high-confidence detections for most
+        images. If it returns fewer than 4 circles, the fallback pass runs
+        with more sensitive parameters and adds only circles at NEW Y
+        positions (not near any primary result) — this catches small/
+        low-contrast radio buttons at the bottom of the camera frame
+        without flooding the pipeline with watermark noise.
+        """
+        # Primary pass (higher selectivity)
         raw = cv2.HoughCircles(
             blurred, cv2.HOUGH_GRADIENT,
             dp=self.HOUGH_DP,
@@ -596,25 +607,43 @@ class OptionDetector:
         if raw is not None:
             result = np.round(raw[0]).astype(int).tolist()
             logger.debug("Primary HoughCircles: %d circles", len(result))
-            return result
+        else:
+            result = []
+            logger.debug("Primary HoughCircles found nothing")
 
-        logger.debug("Primary HoughCircles found nothing — trying fallback")
-        raw = cv2.HoughCircles(
-            blurred, cv2.HOUGH_GRADIENT,
-            dp=self.HOUGH_FALLBACK_DP,
-            minDist=self.HOUGH_FALLBACK_MIN_DIST,
-            param1=self.HOUGH_FALLBACK_PARAM1,
-            param2=self.HOUGH_FALLBACK_PARAM2,
-            minRadius=self.HOUGH_FALLBACK_MIN_RADIUS,
-            maxRadius=self.HOUGH_FALLBACK_MAX_RADIUS,
-        )
+        # Only try fallback if primary returned few results (< 4 viable
+        # circles suggest some options are being missed). Cap fallback
+        # additions to avoid overwhelming filters with noise.
+        MAX_FALLBACK_ADD = 6
+        if len(result) < 4:
+            raw_fb = cv2.HoughCircles(
+                blurred, cv2.HOUGH_GRADIENT,
+                dp=self.HOUGH_FALLBACK_DP,
+                minDist=self.HOUGH_FALLBACK_MIN_DIST,
+                param1=self.HOUGH_FALLBACK_PARAM1,
+                param2=self.HOUGH_FALLBACK_PARAM2,
+                minRadius=self.HOUGH_FALLBACK_MIN_RADIUS,
+                maxRadius=self.HOUGH_FALLBACK_MAX_RADIUS,
+            )
+            if raw_fb is not None:
+                fallback = np.round(raw_fb[0]).astype(int).tolist()
+                added = 0
+                for fc in fallback:
+                    if added >= MAX_FALLBACK_ADD:
+                        break
+                    is_dup = any(
+                        abs(fc[0] - rc[0]) < 30 and abs(fc[1] - rc[1]) < 30
+                        for rc in result
+                    )
+                    if not is_dup:
+                        result.append(fc)
+                        added += 1
+                if added > 0:
+                    logger.debug(
+                        "Fallback added %d circles (total %d)", added, len(result),
+                    )
 
-        if raw is not None:
-            result = np.round(raw[0]).astype(int).tolist()
-            logger.debug("Fallback HoughCircles: %d circles", len(result))
-            return result
-
-        return []
+        return result
 
     # ------------------------------------------------------------------
     # Circle validation filters
@@ -631,6 +660,11 @@ class OptionDetector:
         Watermark/text circles are scattered across the strip width.
         We find the dominant X band by histogramming circle X positions
         and keeping only circles near the densest bin.
+
+        Tie-breaking: when two X-bands have similar circle counts, we
+        evaluate both and prefer the band whose circles form a more
+        regular vertical spacing pattern (real radio buttons are evenly
+        spaced, watermark noise is randomly scattered).
         """
         if len(circles) < 4:
             return circles
@@ -642,26 +676,51 @@ class OptionDetector:
         n_bins = max(1, strip_width // bin_width)
         hist, bin_edges = np.histogram(xs, bins=n_bins, range=(0, strip_width))
 
-        # Find the bin with the most circles
-        peak_bin = int(np.argmax(hist))
-        peak_center = (bin_edges[peak_bin] + bin_edges[peak_bin + 1]) / 2
+        # Find top-2 histogram peaks for tie-breaking
+        sorted_bins = sorted(range(len(hist)), key=lambda i: hist[i], reverse=True)
 
-        # Accept circles within 50px of the peak center
-        # (radio buttons have some X variation but stay in a band)
+        def _y_spacing_cv(candidate_circles: list[tuple[int, int, int]]) -> float:
+            """Coefficient of variation of Y-gaps — lower is more regular."""
+            if len(candidate_circles) < 3:
+                return 999.0
+            ys = sorted(c[1] for c in candidate_circles)
+            gaps = [ys[i+1] - ys[i] for i in range(len(ys) - 1)]
+            if not gaps:
+                return 999.0
+            mean_gap = sum(gaps) / len(gaps)
+            if mean_gap < 1:
+                return 999.0
+            variance = sum((g - mean_gap) ** 2 for g in gaps) / len(gaps)
+            return (variance ** 0.5) / mean_gap
+
+        # Accept circles within 50px of a peak center
         tolerance = 50
-        kept = [c for c in circles if abs(c[0] - peak_center) <= tolerance]
+        best_kept = circles  # fallback: no filter
+        best_cv = 999.0
 
-        if len(kept) < 3:
+        for bin_idx in sorted_bins[:3]:  # check top-3 peaks
+            if hist[bin_idx] < 3:
+                continue
+            peak_center = (bin_edges[bin_idx] + bin_edges[bin_idx + 1]) / 2
+            kept = [c for c in circles if abs(c[0] - peak_center) <= tolerance]
+            if len(kept) < 3:
+                continue
+            cv = _y_spacing_cv(kept)
+            if cv < best_cv:
+                best_cv = cv
+                best_kept = kept
+
+        if len(best_kept) < 3:
             return circles
 
-        removed = len(circles) - len(kept)
+        removed = len(circles) - len(best_kept)
         if removed:
             logger.debug(
-                "X-column filter: kept %d/%d (peak_x=%.0f, tolerance=%d, "
+                "X-column filter: kept %d/%d (best_cv=%.2f, "
                 "strip_w=%d)",
-                len(kept), len(circles), peak_center, tolerance, strip_width,
+                len(best_kept), len(circles), best_cv, strip_width,
             )
-        return kept
+        return best_kept
 
     def _filter_by_radius(
         self, circles: list[tuple[int, int, int]],
@@ -755,7 +814,7 @@ class OptionDetector:
             return circles
 
         median_score = float(np.median(scores))
-        threshold = max(median_score * 0.2, 5.0)
+        threshold = max(median_score * 0.18, 2.5)
 
         kept = [c for c, s in zip(circles, scores) if s >= threshold]
 

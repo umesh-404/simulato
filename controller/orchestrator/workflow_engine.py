@@ -333,11 +333,9 @@ class WorkflowEngine:
                     return None
 
             # --- Speculative early AI call ---
-            # Fire the AI query with the raw image BEFORE preprocessing/OCR/scroll
-            # detection. If no scroll is needed, the AI response will already be
-            # waiting by the time we reach step 6, eliminating the ~2-5s blocking
-            # call. For scroll cases, this result is discarded and a proper call
-            # with the stitched image is made.
+            # Fire the AI query with the raw image BEFORE preprocessing/OCR.
+            # The AI response will already be waiting by the time local
+            # processing completes, eliminating the blocking API wait.
             speculative_future: Optional[concurrent.futures.Future] = None
             try:
                 speculative_future = self._ai_executor.submit(
@@ -347,151 +345,34 @@ class WorkflowEngine:
             except Exception as e:
                 logger.warning("Failed to launch speculative AI call: %s", e)
 
-            # Step 3: Detect scrolling and capture additional frames
-            # Panel-aware structural detection when layout is available.
-            needs_scroll = False
-            scroll_direction = "down"
-            try:
-                layout_for_scroll = None
-                scroll_ocr_res = None
-                if OCR_LAYOUT_PRIMARY_ENABLED and self._latest_ocr_layout is not None:
-                    layout_for_scroll = self._latest_ocr_layout.layout
-                if layout_for_scroll is None:
-                    fallback_layout_res = self._ocr.analyze(initial_preprocessed_path)
-                    scroll_ocr_res = fallback_layout_res
-                    layout_for_scroll = fallback_layout_res.layout if fallback_layout_res is not None else None
-                if layout_for_scroll is not None:
-                    dual = self._scroll_detector.detect_dual(image_path, layout_for_scroll)
-                    # Respect detector verdict; only override for clearly
-                    # truncated panels (confidence >= 0.35 strongly suggests
-                    # question text is cut off).
-                    needs_scroll = bool(dual.question.needs_scroll or dual.question.confidence >= 0.35)
-                    if not needs_scroll and scroll_ocr_res is not None:
-                        # Option-completeness veto: if the answer panel already
-                        # shows 3+ radio-button options, all content is visible
-                        # and the truncation heuristic should NOT override.
-                        options_veto = False
-                        try:
-                            import cv2
-                            from controller.capture_pipeline.option_detector import OptionDetector
-                            scroll_img = cv2.imread(str(image_path))
-                            if (scroll_img is not None
-                                    and layout_for_scroll is not None
-                                    and layout_for_scroll.answer_panel is not None):
-                                opt_det = OptionDetector()
-                                opt_map = opt_det.crop_and_detect(
-                                    scroll_img, layout_for_scroll.answer_panel,
-                                )
-                                if opt_map is not None and len(opt_map.options) >= 3:
-                                    logger.info(
-                                        "Scroll veto: %d options already visible in answer panel "
-                                        "— overriding truncation heuristic",
-                                        len(opt_map.options),
-                                    )
-                                    options_veto = True
-                        except Exception:
-                            pass
-                        if not options_veto:
-                            needs_scroll = self._question_panel_text_truncated(scroll_ocr_res)
-                    scroll_direction = "down" if needs_scroll else None
-                else:
-                    scroll_result = self._scroll_detector.detect(image_path)
-                    needs_scroll = scroll_result.needs_scroll
-                    scroll_direction = scroll_result.direction
-            except Exception:
-                scroll_result = self._scroll_detector.detect(image_path)
-                needs_scroll = scroll_result.needs_scroll
-                scroll_direction = scroll_result.direction
+            # Step 3: Preprocess the single captured frame.
+            # No scroll detection or stitching — the exam UI fits in one frame.
+            preprocessed_path = self._preprocessor.preprocess(image_path)
+            self._latest_preprocessed_image_path = preprocessed_path
+            is_stitched = False
 
-            frames = [image_path]
-            if needs_scroll:
-                self._log_event("scroll_detected", {"direction": scroll_direction})
-                additional = self._capture_scroll_frames(scroll_direction)
-                frames.extend(additional)
-
-            # Track whether the image sent to AI is a multi-frame stitch.
-            is_stitched = len(frames) > 1
-
-            # Step 4: Stitch (or copy single frame)
-            stitched_path = image_path.parent / f"stitched_{self._question_number:04d}.jpg"
-            self._stitcher.stitch(frames, stitched_path)
-
-            # Step 5: Preprocess
-            preprocessed_path = self._preprocessor.preprocess(stitched_path)
-            # Keep a separate preprocessed frame for interaction targeting.
-            # Click/scroll/NEXT should target the current visible frame,
-            # not the vertically stitched composite.
-            interaction_preprocessed_path = self._preprocessor.preprocess(frames[-1])
-            self._latest_preprocessed_image_path = interaction_preprocessed_path
-            #region agent log
-            _dbg(
-                location="controller/orchestrator/workflow_engine.py:process_question",
-                message="preprocess complete",
-                data={
-                    "stitched_path": str(stitched_path),
-                    "preprocessed_path": str(preprocessed_path),
-                },
-                hypothesisId="H1",
-            )
-            #endregion agent log
-
-            # Persist preprocess meta into the event log for replay/debug.
-            meta_path = preprocessed_path.parent / f"{preprocessed_path.stem}.preprocess_meta.json"
-            if meta_path.exists():
-                try:
-                    meta = json.loads(meta_path.read_text(encoding="utf-8"))
-                    self._log_event("preprocess_meta", {"stitched": True, "header_anchor": meta.get("header_anchor")})
-                except Exception:
-                    pass
-
-            # Step 5.25: OCR layout pass (whole screen, deterministic)
+            # Step 4: Layout detection + option detection.
+            # Runs layout detect → HoughCircles option detect in one pass.
+            # Pytesseract OCR runs as fallback only if option detection
+            # finds fewer than 3 options.
             if OCR_LAYOUT_PRIMARY_ENABLED:
                 self._latest_ocr_layout = self._ocr.analyze(preprocessed_path)
-                self._latest_interaction_ocr_layout = self._ocr.analyze(interaction_preprocessed_path)
+                self._latest_interaction_ocr_layout = self._latest_ocr_layout
             else:
                 self._latest_ocr_layout = None
                 self._latest_interaction_ocr_layout = None
 
-            # Detect question number from the raw (non-preprocessed) image
-            # header, which contains "Question No : N / M".
-            raw_ocr = self._ocr.analyze(image_path) if OCR_LAYOUT_PRIMARY_ENABLED else None
-            if raw_ocr is not None:
-                q_num = raw_ocr.detect_question_number()
-                if q_num is not None:
-                    current_q, total_q = q_num
-                    self._question_number = current_q
-                    logger.info(
-                        "Detected question number: %d / %d",
-                        current_q, total_q,
-                    )
-                    self._log_event("question_number_detected", {
-                        "current": current_q,
-                        "total": total_q,
-                    })
-
-            #region agent log
-            _dbg(
-                location="controller/orchestrator/workflow_engine.py:process_question",
-                message="ocr_layout done",
-                data={
-                    "ocr_layout_available": self._latest_ocr_layout is not None,
-                    "ocr_words": (len(self._latest_ocr_layout.words) if self._latest_ocr_layout is not None else 0),
-                    "question_number": self._question_number,
-                },
-                hypothesisId="H2",
-            )
-            #endregion agent log
+            # Question number: auto-incremented (OCR extraction skipped for speed).
+            self._question_number += 1
+            logger.info("Question number: %d (auto-incremented)", self._question_number)
 
             ai_response = None
             ai_model_used = ""
 
-            # Step 6: Query AI
-            # Collect the speculative early result (launched right after screen validation,
-            # before preprocessing/OCR/scroll). The speculative call fires the primary AI
-            # internally with up to 2 retries × 60s each = ~121s max (Gemini 2.5 Flash).
-            # We wait up to 130s to cover that full retry cycle.
-            # This applies for both stitched and non-stitched images.
-            SPECULATIVE_WAIT = 65  # seconds — covers Gemini non-reasoning 2-retry cycle (2×30+5s)
+            # Step 5: Query AI
+            # The speculative call was launched immediately after screen validation
+            # (before preprocessing), so it's been running in parallel.
+            SPECULATIVE_WAIT = 65  # seconds — covers Gemini non-reasoning 2-retry cycle
             if speculative_future is not None:
                 try:
                     spec_response, spec_model = speculative_future.result(
@@ -501,9 +382,8 @@ class WorkflowEngine:
                     ai_model_used = spec_model
                     self._api_calls += 1
                     logger.info(
-                        "Using speculative AI result (model=%s, answer=%s%s)",
+                        "Using speculative AI result (model=%s, answer=%s)",
                         spec_model, ai_response.answer,
-                        " [stitched-image-was-sent-separately]" if is_stitched else "",
                     )
                     self._log_event("ai_response", {
                         "model": ai_model_used,
@@ -512,29 +392,15 @@ class WorkflowEngine:
                     })
                 except Exception as spec_err:
                     logger.warning(
-                        "Speculative AI call did not complete in time (%s) — falling back to standard Gemini call",
+                        "Speculative AI call did not complete in time (%s) — falling back to standard call",
                         spec_err,
                     )
-                    ai_response = None  # fall through to standard call below
+                    ai_response = None
 
-            # For stitched images: even if speculative returned a result (based on first raw
-            # frame), the standard call with the full stitched composite is more accurate.
-            # Only discard speculative result when scrolling was required AND we got one.
-            if is_stitched and ai_response is not None:
-                logger.info(
-                    "Speculative result (answer=%s) available but stitched image requires re-query for completeness",
-                    ai_response.answer,
-                )
-                # Keep the speculative result as an emergency fallback, then try standard.
-                _speculative_fallback = (ai_response, ai_model_used)
-                ai_response = None
-            else:
-                _speculative_fallback = None
-
-            # Standard AI call: used for scroll/stitched cases or when speculative failed.
+            # Standard AI call: fallback when speculative failed/timed out.
             if ai_response is None:
                 try:
-                    ai_response, ai_model_used = self._query_gemini(stitched_path, is_stitched=is_stitched)
+                    ai_response, ai_model_used = self._query_gemini(image_path, is_stitched=False)
                     self._api_calls += 1
                     self._log_event("ai_response", {
                         "model": ai_model_used,
@@ -542,56 +408,15 @@ class WorkflowEngine:
                         "speculative": False,
                     })
                 except (GeminiAPIError, ParseError) as e:
-                    # Standard call failed. Last-resort: check if speculative future
-                    # has since completed (it runs independently in the executor thread).
-                    recovered = False
-                    if speculative_future is not None and speculative_future.done():
-                        try:
-                            spec_response, spec_model = speculative_future.result(timeout=0)
-                            ai_response = spec_response
-                            ai_model_used = spec_model
-                            self._api_calls += 1
-                            recovered = True
-                            logger.warning(
-                                "Standard call failed but speculative future completed — "
-                                "recovered with answer=%s",
-                                ai_response.answer,
-                            )
-                            self._log_event("ai_response", {
-                                "model": ai_model_used,
-                                "answer": ai_response.answer,
-                                "speculative": True,
-                                "recovery": True,
-                            })
-                        except Exception:
-                            pass
+                    self._sm.force_error(f"AI processing failed: {e}")
+                    self._alerts.raise_alert(
+                        AlertType.AI_PARSE_FAILURE,
+                        f"AI processing failed: {e}",
+                    )
+                    self._log_event("ai_error", {"error": str(e)})
+                    return None
 
-                    # Fall back to speculative result cached from stitched case.
-                    if not recovered and _speculative_fallback is not None:
-                        ai_response, ai_model_used = _speculative_fallback
-                        self._api_calls += 1
-                        recovered = True
-                        logger.warning(
-                            "Standard call failed — using speculative fallback result: answer=%s",
-                            ai_response.answer,
-                        )
-                        self._log_event("ai_response", {
-                            "model": ai_model_used,
-                            "answer": ai_response.answer,
-                            "speculative": True,
-                            "recovery": True,
-                        })
-
-                    if not recovered:
-                        self._sm.force_error(f"AI processing failed: {e}")
-                        self._alerts.raise_alert(
-                            AlertType.AI_PARSE_FAILURE,
-                            f"AI processing failed: {e}",
-                        )
-                        self._log_event("ai_error", {"error": str(e)})
-                        return None
-
-            # Step 7: Build decision directly from AI response.
+            # Step 6: Build decision directly from AI response.
             logger.info("Using AI answer directly: %s", ai_response.answer if ai_response else "None")
             decision = AnswerDecision(
                 outcome=DecisionOutcome.CLICK,
@@ -599,7 +424,7 @@ class WorkflowEngine:
                 source="ai_direct",
             )
 
-            # Step 8: Handle outcome
+            # Step 7: Handle outcome
             if decision.outcome == DecisionOutcome.CONFLICT:
                 self._sm.force_error("Answer conflict detected")
                 self._alerts.raise_alert(
@@ -613,11 +438,6 @@ class WorkflowEngine:
             if decision.outcome == DecisionOutcome.ERROR:
                 self._sm.force_error(decision.error_message or "Decision error")
                 return decision
-
-            # Use stitched image for AI solve only. Before click dispatch, capture
-            # a fresh frame and rebuild radio-button mapping from that live frame.
-            if decision.click_letter:
-                self._refresh_interaction_targets_post_ai()
 
             # Step 9: Execute click
             if decision.click_letter:
@@ -638,6 +458,10 @@ class WorkflowEngine:
         Click NEXT to advance to the next question.
         Follows Hardware Input Transaction flow (Canonical Law 5):
         send click → wait for navigation → verify screen changed → retry → alert.
+
+        Last-question guard: if the footer shows only "Prev" (no "Next"),
+        the exam has reached the last question. The system raises an alert,
+        sounds the alarm, and waits for manual intervention.
         """
         if self._sm.state != SystemState.RUNNING:
             return
@@ -647,6 +471,27 @@ class WorkflowEngine:
         # verify the screen actually changed afterwards.
         pre_next_path = self._capture_single_frame_for_ref()
 
+        # --- Last-question guard ---
+        # The ExamLayoutDetector parses the footer OCR during the initial
+        # analyze() pass. If it found "Prev" but no "Next", it set is_last_question.
+        if self._latest_ocr_layout and self._latest_ocr_layout.layout and self._latest_ocr_layout.layout.is_last_question:
+            logger.info(
+                "LAST QUESTION DETECTED — footer shows 'Prev' but no 'Next'. "
+                "All questions answered. Raising alert and waiting for operator."
+            )
+            self._log_event("last_question_detected", {
+                "question_number": self._question_number,
+            })
+            self._sm.force_error("All questions answered — last question reached")
+            self._alerts.raise_alert(
+                AlertType.TEST_COMPLETE,
+                "All questions have been answered. The exam has reached the last question. "
+                "Please review and submit manually.",
+                data={"question_number": self._question_number},
+            )
+            return
+
+        # Not the last question — proceed with NEXT click.
         self._click_next_best_target()
         self._log_event("click_next", {"after_question": self._question_number})
 
@@ -885,7 +730,7 @@ class WorkflowEngine:
         logger.info("Click attempt 1 for intended option %s", letter)
         dispatched_letter = self._click_option_best_target(letter)
         self._last_dispatched_click_letter = dispatched_letter
-        time.sleep(1.8)
+        time.sleep(2.2)
         verified = self._verify_option_click(dispatched_letter)
         if verified:
             logger.info("Click verified for option %s (dispatched=%s)", letter, dispatched_letter)
@@ -921,22 +766,12 @@ class WorkflowEngine:
 
         logger.info("Pre-retry check: option %s NOT yet selected — proceeding with retry click", letter)
 
-        # Force fresh option detection on the latest frame before retrying.
-        # The first click may have used stale/wrong coordinates from a cached
-        # detection; re-detecting gives us a chance to correct them.
-        try:
-            latest_img = self._latest_preprocessed_image_path
-            if latest_img is not None:
-                fresh_ocr = OCRLayoutAnalyzer().analyze(latest_img)
-                if fresh_ocr is not None:
-                    self._latest_interaction_ocr_layout = fresh_ocr
-                    logger.info("Refreshed option detection on latest frame before retry")
-        except Exception as e:
-            logger.warning("Failed to refresh option detection before retry: %s", e)
+        # Tripod-mounted capture: coordinates are stable, no need to
+        # re-detect options. The same click target is used for retry.
 
         dispatched_letter = self._click_option_best_target(letter)
         self._last_dispatched_click_letter = dispatched_letter
-        time.sleep(1.8)
+        time.sleep(2.2)
         verified = self._verify_option_click(dispatched_letter)
         if verified:
             logger.info("Retry click verified for option %s (dispatched=%s)", letter, dispatched_letter)
@@ -1033,7 +868,7 @@ class WorkflowEngine:
             logger.info("Post-recalibration retry click for option %s", letter)
             dispatched_letter = self._click_option_best_target(letter)
             self._last_dispatched_click_letter = dispatched_letter
-            time.sleep(1.8)
+            time.sleep(2.2)
             verified = self._verify_option_click(dispatched_letter)
             if verified:
                 logger.info(
@@ -1110,19 +945,15 @@ class WorkflowEngine:
         except Exception:
             pass
 
-    # Maximum screen-pixel X delta between live detection and calibration
-    # for the X-axis blend.  The radio-button column is stable across
-    # questions so deltas should be small.  If the X delta exceeds this
-    # threshold it indicates a misdetection and we fall back to pure
-    # calibration X.
-    _CALIB_BLEND_MAX_X_DELTA = 60
-
-    # Maximum screen-pixel Y delta between live detection and calibration
-    # for accepting live Y.  Moderate Y shifts (up to this value) are
-    # expected because question text length varies between questions,
-    # pushing options up or down.  Larger deltas suggest a misdetection
-    # (e.g. the detector found the wrong row).
-    _CALIB_BLEND_MAX_Y_DELTA = 120
+    # Calibration blend thresholds.
+    # The exam UI uses a responsive split-pane, so the radio-button column
+    # (X-axis) and item rows (Y-axis) can shift dramatically between
+    # questions when divider_x moves (observed: 2128 → 1642 = 486px shift
+    # in capture space, ~230px in screen space).
+    # Live detection from OptionDetector always reflects the CURRENT layout.
+    # Calibration is only used as a tiny stabilizer when positions are close.
+    _CALIB_BLEND_MAX_X_DELTA = 150   # beyond this, trust live X entirely
+    _CALIB_BLEND_MAX_Y_DELTA = 200   # beyond this, trust live Y entirely
 
     def _blend_with_calibration(
         self,
@@ -1131,13 +962,13 @@ class WorkflowEngine:
     ) -> tuple[float, float]:
         """Blend live-detected capture-normalized coords with calibration.
 
-        Split-axis strategy:
-        - X axis: use calibration (radio-button column is stable across
-          questions).  Live X is only used as a small nudge when close.
-        - Y axis: prefer live detection (option positions shift vertically
-          between questions depending on question text length).  Fall back
-          to calibration Y only when live detection is wildly off or
-          inter-option spacing looks inconsistent.
+        Live-detection-primary strategy:
+        - ALWAYS prefer live detection (OptionDetector finds circles on the
+          current frame, so it reflects the actual layout).
+        - Calibration is only used as a small smoothing factor when the
+          live detection is very close to calibration (within thresholds).
+        - When the split-pane divider shifts, calibration X/Y can be
+          hundreds of pixels off — we must NOT fall back to it.
         """
         try:
             from calibration.grid_mapper import GridMap
@@ -1157,34 +988,27 @@ class WorkflowEngine:
             dx = abs(live_sx - calib_sx)
             dy = abs(live_sy - calib_sy)
 
-            # --- X axis: use calibration (stable column) with tiny live nudge ---
+            # --- X axis: prefer live detection ---
             if dx <= self._CALIB_BLEND_MAX_X_DELTA:
-                # Small X delta: blend heavily toward calibration
-                final_sx = live_sx * 0.1 + calib_sx * 0.9
+                # Small X delta: light blend to smooth HoughCircles jitter
+                final_sx = live_sx * 0.8 + calib_sx * 0.2
+                x_mode = "blend"
             else:
-                # Large X delta: live X is unreliable, use pure calibration
-                final_sx = float(calib_sx)
+                # Large X delta: layout shifted (responsive UI), trust live
+                final_sx = float(live_sx)
+                x_mode = "live"
 
-            # --- Y axis: prefer live detection (adapts to question layout) ---
-            # Validate that the live Y detection is plausible by checking
-            # that the Y shift from calibration is within a reasonable range.
-            # Option Y positions can shift ~30-60px between questions due to
-            # different question text lengths, but shifts > 120px suggest
-            # the detector found the wrong row entirely.
-            live_y_trusted = dy <= self._CALIB_BLEND_MAX_Y_DELTA
-
-            if live_y_trusted:
-                # Trust live Y — it adapts to the current question's layout.
-                # Blend with a small calibration component for stability.
+            # --- Y axis: prefer live detection ---
+            if dy <= self._CALIB_BLEND_MAX_Y_DELTA:
+                # Moderate Y delta: blend primarily with live
                 final_sy = live_sy * 0.85 + calib_sy * 0.15
                 y_mode = "live_primary"
             else:
-                # Y delta too large — the detector may have found the wrong
-                # row.  Fall back to calibration Y.
-                final_sy = float(calib_sy)
-                y_mode = "calib_fallback"
+                # Large Y delta: trust live completely (question length varies)
+                final_sy = float(live_sy)
+                y_mode = "live_large_shift"
 
-            blend_mode = f"x=calib, y={y_mode}"
+            blend_mode = f"x={x_mode}, y={y_mode}"
 
             # Convert blended screen pixel back to capture-normalized.
             scale_x = float(gm.transform.get("scale_x", 1.0))

@@ -6,7 +6,6 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
-import android.widget.Spinner;
 import android.widget.TextView;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -56,12 +55,6 @@ public final class ActivityRemoteControlBinding implements ViewBinding {
   public final LinearLayout layoutDecisionPanel;
 
   @NonNull
-  public final Spinner spinnerAiProvider;
-
-  @NonNull
-  public final TextView txtAiProviderStatus;
-
-  @NonNull
   public final TextView txtAlertMessage;
 
   @NonNull
@@ -85,8 +78,7 @@ public final class ActivityRemoteControlBinding implements ViewBinding {
       @NonNull MaterialButton btnStart, @NonNull MaterialButton btnStatus,
       @NonNull MaterialButton btnStop, @NonNull MaterialButton btnUseAi,
       @NonNull MaterialButton btnUseDb, @NonNull LinearLayout layoutAlertPanel,
-      @NonNull LinearLayout layoutDecisionPanel, @NonNull Spinner spinnerAiProvider,
-      @NonNull TextView txtAiProviderStatus, @NonNull TextView txtAlertMessage,
+      @NonNull LinearLayout layoutDecisionPanel, @NonNull TextView txtAlertMessage,
       @NonNull TextView txtAlertType, @NonNull TextView txtConnectionStatus,
       @NonNull TextView txtLastAction, @NonNull TextView txtSystemStatus,
       @NonNull TextView txtWsStatus) {
@@ -102,8 +94,6 @@ public final class ActivityRemoteControlBinding implements ViewBinding {
     this.btnUseDb = btnUseDb;
     this.layoutAlertPanel = layoutAlertPanel;
     this.layoutDecisionPanel = layoutDecisionPanel;
-    this.spinnerAiProvider = spinnerAiProvider;
-    this.txtAiProviderStatus = txtAiProviderStatus;
     this.txtAlertMessage = txtAlertMessage;
     this.txtAlertType = txtAlertType;
     this.txtConnectionStatus = txtConnectionStatus;
@@ -205,18 +195,6 @@ public final class ActivityRemoteControlBinding implements ViewBinding {
         break missingId;
       }
 
-      id = R.id.spinnerAiProvider;
-      Spinner spinnerAiProvider = ViewBindings.findChildViewById(rootView, id);
-      if (spinnerAiProvider == null) {
-        break missingId;
-      }
-
-      id = R.id.txtAiProviderStatus;
-      TextView txtAiProviderStatus = ViewBindings.findChildViewById(rootView, id);
-      if (txtAiProviderStatus == null) {
-        break missingId;
-      }
-
       id = R.id.txtAlertMessage;
       TextView txtAlertMessage = ViewBindings.findChildViewById(rootView, id);
       if (txtAlertMessage == null) {
@@ -255,9 +233,8 @@ public final class ActivityRemoteControlBinding implements ViewBinding {
 
       return new ActivityRemoteControlBinding((ScrollView) rootView, btnPause, btnRecalibrate,
           btnRequeryAi, btnSkipQuestion, btnStart, btnStatus, btnStop, btnUseAi, btnUseDb,
-          layoutAlertPanel, layoutDecisionPanel, spinnerAiProvider, txtAiProviderStatus,
-          txtAlertMessage, txtAlertType, txtConnectionStatus, txtLastAction, txtSystemStatus,
-          txtWsStatus);
+          layoutAlertPanel, layoutDecisionPanel, txtAlertMessage, txtAlertType, txtConnectionStatus,
+          txtLastAction, txtSystemStatus, txtWsStatus);
     }
     String missingId = rootView.getResources().getResourceName(id);
     throw new NullPointerException("Missing required view with ID: ".concat(missingId));

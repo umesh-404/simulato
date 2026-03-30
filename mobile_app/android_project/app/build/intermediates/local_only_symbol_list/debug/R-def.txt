@@ -1,6 +1,5 @@
 R_DEF: Internal format may change without notice
 local
-array ai_providers
 color background
 color error
 color on_background
@@ -30,8 +29,6 @@ id editControllerIp
 id editControllerPort
 id layoutAlertPanel
 id layoutDecisionPanel
-id spinnerAiProvider
-id txtAiProviderStatus
 id txtAlertMessage
 id txtAlertType
 id txtConnectionStatus

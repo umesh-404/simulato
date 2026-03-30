@@ -191,7 +191,7 @@ class VerificationEngine:
         # band to tolerate slight click offset and capture the full
         # highlight row (selected options often get a full-width blue bar).
         tight_rx = 75
-        tight_ry = 45
+        tight_ry = 60
         tx1 = max(0, cx - tight_rx)
         ty1 = max(0, cy - tight_ry)
         tx2 = min(w, cx + tight_rx)
@@ -345,8 +345,8 @@ class VerificationEngine:
         scan_end_y = h - int(h * 0.05)
 
         hsv_strip = cv2.cvtColor(img[scan_start_y:scan_end_y, sx1:sx2], cv2.COLOR_BGR2HSV)
-        step = 30
-        band_half = 20
+        step = 20
+        band_half = 30
         best_y = -1
         best_blue_ratio = 0.0
 

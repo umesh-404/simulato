@@ -83,6 +83,7 @@ class ExamLayout:
     next_button: Optional[Rect] = None
     prev_button: Optional[Rect] = None
     clear_button: Optional[Rect] = None
+    is_last_question: bool = False
 
     # Navigation sidebar (far left numbered buttons)
     nav_sidebar: Optional[Rect] = None
@@ -123,7 +124,18 @@ class ExamLayoutDetector:
 
     Tunable thresholds are class-level constants.  Override them for
     calibration by subclassing or mutating the instance.
+
+    Results are cached per image path (deterministic — same image always
+    produces the same layout), which eliminates redundant detections when
+    multiple subsystems (OCR, scroll, validation) request the layout for
+    the same captured frame.
     """
+
+    # Per-path result cache.  Shared across ALL instances so OCRLayoutAnalyzer,
+    # ScreenValidator, ScrollDetector, etc. all benefit from a single detection.
+    # Max 10 entries to avoid unbounded memory growth.
+    _layout_cache: dict[str, "ExamLayout"] = {}
+    _CACHE_MAX = 10
 
     # --- Tunable thresholds -------------------------------------------
 
@@ -153,6 +165,10 @@ class ExamLayoutDetector:
         """
         Analyze an exam screenshot and return the detected layout.
 
+        Results are cached per resolved image path so that multiple
+        subsystems requesting the layout for the same frame get an
+        instant result (layout detection takes ~1s per call).
+
         Parameters
         ----------
         image_path : Path
@@ -163,6 +179,14 @@ class ExamLayoutDetector:
         ExamLayout
             Detected layout with pixel coordinates for all regions.
         """
+        cache_key = str(image_path.resolve())
+
+        # Fast path: return cached result
+        if cache_key in self._layout_cache:
+            cached = self._layout_cache[cache_key]
+            logger.debug("Layout cache HIT for %s (divider_x=%d)", image_path.name, cached.divider_x)
+            return cached
+
         logger.info("Detecting exam layout for: %s", image_path.name)
 
         try:
@@ -240,6 +264,13 @@ class ExamLayoutDetector:
             if layout.answer_panel else "None",
             layout.confidence,
         )
+
+        # Cache the result.  Evict oldest entries if cache is full.
+        if len(self._layout_cache) >= self._CACHE_MAX:
+            oldest_key = next(iter(self._layout_cache))
+            del self._layout_cache[oldest_key]
+        self._layout_cache[cache_key] = layout
+
         return layout
 
     # ------------------------------------------------------------------
@@ -366,10 +397,21 @@ class ExamLayoutDetector:
             )
 
             n = len(data.get("text", []))
+            has_next = False
+            has_prev = False
+            
             for i in range(n):
                 txt = str(data["text"][i]).strip().lower()
                 if not txt:
                     continue
+                
+                # Check for last-question keywords even if confidence is low, 
+                # but only trust for buttons if confidence is ok.
+                if "next" in txt:
+                    has_next = True
+                if "prev" in txt:
+                    has_prev = True
+                    
                 conf = float(data["conf"][i]) if data["conf"][i] != "-1" else 0
                 if conf < 30:
                     continue
@@ -385,6 +427,10 @@ class ExamLayoutDetector:
                     layout.prev_button = Rect(bx, by, bw, bh)
                 elif "clear" in txt:
                     layout.clear_button = Rect(bx, by, bw, bh)
+
+            if has_prev and not has_next:
+                layout.is_last_question = True
+                logger.info("ExamLayoutDetector: detected last question (Prev but no Next)")
 
         except Exception as e:
             logger.debug("Bottom button OCR failed, using fallback: %s", e)

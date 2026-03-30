@@ -119,52 +119,7 @@
             android:background="#E0E0E0"
             android:layout_marginBottom="16dp" />
 
-        <!-- AI Provider Selection -->
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="AI Provider"
-            android:textSize="18sp"
-            android:textStyle="bold"
-            android:layout_marginBottom="8dp" />
 
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:layout_marginBottom="4dp">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Active: "
-                android:textSize="14sp" />
-
-            <Spinner
-                android:id="@+id/spinnerAiProvider"
-                android:layout_width="0dp"
-                android:layout_height="48dp"
-                android:layout_weight="1"
-                android:entries="@array/ai_providers"
-                android:background="?android:attr/selectableItemBackground"
-                android:padding="8dp" />
-        </LinearLayout>
-
-        <TextView
-            android:id="@+id/txtAiProviderStatus"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Provider: —"
-            android:textSize="13sp"
-            android:textColor="#666666"
-            android:layout_marginBottom="16dp" />
-
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:background="#E0E0E0"
-            android:layout_marginBottom="16dp" />
 
         <!-- System Status -->
         <TextView

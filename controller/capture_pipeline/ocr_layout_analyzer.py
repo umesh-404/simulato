@@ -129,7 +129,7 @@ class OCRLayoutResult:
         return (nx, ny)
 
     def _letter_anchors(self) -> dict[str, list[OCRWord]]:
-        anchors: dict[str, list[OCRWord]] = {"A": [], "B": [], "C": [], "D": []}
+        anchors: dict[str, list[OCRWord]] = {"A": [], "B": [], "C": [], "D": [], "E": []}
         for w in self.words:
             if self.answer_panel is not None:
                 # Constrain anchors to the answer panel region to avoid
@@ -170,8 +170,9 @@ class OCRLayoutResult:
             diffs = [d for d in diffs if d > 0]
             if not diffs:
                 return None
-            step = int(round(float(sorted(diffs)[len(diffs) // 2])))
-            if step < 12 or step > 500:
+            # Global median step (fallback)
+            median_step = int(round(float(sorted(diffs)[len(diffs) // 2])))
+            if median_step < 12 or median_step > 500:
                 return None
 
             label_idx_map = {"A": 0, "B": 1, "C": 2, "D": 3, "E": 4}
@@ -181,22 +182,38 @@ class OCRLayoutResult:
             first_label_idx = label_idx_map.get(labels[0], 0)
             last_label_idx = label_idx_map.get(labels[-1], 4)
 
+            # Use LOCAL spacing for extrapolation (more accurate than
+            # global median when multi-line options create non-uniform gaps).
+            # For downward extrapolation: use the gap between last two.
+            # For upward: use the gap between first two.
+            local_down_step = diffs[-1] if diffs else median_step
+            local_up_step = diffs[0] if diffs else median_step
+
             if req_idx < first_label_idx:
+                step = local_up_step
                 y = ys[0] - step * (first_label_idx - req_idx)
             elif req_idx > last_label_idx:
+                step = local_down_step
                 y = ys[-1] + step * (req_idx - last_label_idx)
             else:
+                step = median_step
                 for i, lbl in enumerate(labels):
                     if label_idx_map.get(lbl, -1) >= req_idx:
+                        # Use local gap from the nearest detected option
+                        if i > 0:
+                            step = ys[i] - ys[i - 1]
                         offset = label_idx_map.get(lbl, 0) - req_idx
                         y = ys[i] - step * offset
                         break
                 else:
-                    y = ys[-1] + step
+                    y = ys[-1] + local_down_step
 
+            # Bounds validation: ensure extrapolated position stays within
+            # the answer panel and above the footer area (bottom 10%).
             if self.answer_panel is not None:
+                footer_margin = int(self.answer_panel.h * 0.10)
                 x = max(self.answer_panel.x, min(self.answer_panel.x2 - 1, x))
-                y = max(self.answer_panel.y, min(self.answer_panel.y2 - 1, y))
+                y = max(self.answer_panel.y, min(self.answer_panel.y2 - footer_margin, y))
             logger.info(
                 "Extrapolated option %s from %d detected rows (step=%d, y=%d, labels=%s)",
                 letter, len(ys), step, y, labels,
@@ -343,74 +360,62 @@ class OCRLayoutResult:
 
 class OCRLayoutAnalyzer:
     def analyze(self, image_path: Path) -> Optional[OCRLayoutResult]:
+        """Analyze exam image for layout and option positions.
+
+        Pipeline:
+          1. Layout detection (ExamLayoutDetector)
+          2. Option detection (HoughCircles via OptionDetector) - pre-cached
+          3. If < 3 options found -> pytesseract OCR fallback for text anchoring
+          4. Return result with pre-populated option cache
+        """
         try:
             import cv2
         except Exception as e:
             logger.debug("OCR analyzer unavailable: %s", e)
             return None
 
-        pytesseract = None
-        Output = None
-        try:
-            import pytesseract as _pytesseract
-            from pytesseract import Output as _Output
-            pytesseract = _pytesseract
-            Output = _Output
-            if TESSERACT_CMD.strip():
-                pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD.strip()
-        except Exception as e:
-            logger.warning("pytesseract unavailable; continuing with layout-only option targeting: %s", e)
-
         img = cv2.imread(str(image_path))
         if img is None:
             return None
         h, w = img.shape[:2]
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-        # Use deterministic layout detection to constrain anchors.
+        # --- Step 1: Layout detection ---
         layout: Optional[ExamLayout] = None
         try:
             layout = ExamLayoutDetector().detect(image_path)
             answer_panel = layout.answer_panel
         except Exception as e:
-            logger.debug("ExamLayoutDetector failed inside OCR analyzer: %s", e)
+            logger.debug("ExamLayoutDetector failed: %s", e)
             answer_panel = None
 
-        words: list[OCRWord] = []
-        if pytesseract is not None and Output is not None:
+        # --- Step 2: Option detection (HoughCircles - fast primary path) ---
+        option_map = None
+        option_count = 0
+        if layout is not None:
             try:
-                data = pytesseract.image_to_data(
-                    gray,
-                    output_type=Output.DICT,
-                    config=f"--oem 3 --psm {OCR_PSM}",
-                    timeout=OCR_TIMEOUT_SECONDS,
-                )
-                n = len(data.get("text", []))
-                for i in range(n):
-                    txt = str(data["text"][i]).strip()
-                    if not txt:
-                        continue
-                    try:
-                        conf = float(data["conf"][i])
-                    except Exception:
-                        conf = -1.0
-                    if conf < OCR_MIN_WORD_CONFIDENCE:
-                        continue
-                    words.append(
-                        OCRWord(
-                            text=txt,
-                            conf=conf,
-                            x=int(data["left"][i]),
-                            y=int(data["top"][i]),
-                            w=max(1, int(data["width"][i])),
-                            h=max(1, int(data["height"][i])),
-                        )
-                    )
+                option_map = OptionDetector().detect(image_path, layout)
+                option_count = option_map.count if option_map else 0
+                logger.info("Primary option detection: %d options found", option_count)
             except Exception as e:
-                logger.warning("OCR text extraction failed; continuing with layout-only option targeting: %s", e)
+                logger.warning("Primary option detection failed: %s", e)
 
-        logger.info("OCR words extracted: %d", len(words))
-        return OCRLayoutResult(
+        # --- Step 3: Pytesseract OCR fallback (only when needed) ---
+        words: list[OCRWord] = []
+        _MIN_OPTIONS_FAST = 3
+        if option_count < _MIN_OPTIONS_FAST:
+            logger.info(
+                "Option count %d < %d - running pytesseract OCR fallback",
+                option_count, _MIN_OPTIONS_FAST,
+            )
+            words = self._run_pytesseract(img)
+        else:
+            logger.info(
+                "Option count %d >= %d - skipping pytesseract (fast path)",
+                option_count, _MIN_OPTIONS_FAST,
+            )
+
+        # --- Build result with pre-populated option cache ---
+        result = OCRLayoutResult(
             image_w=w,
             image_h=h,
             words=words,
@@ -418,4 +423,51 @@ class OCRLayoutAnalyzer:
             image_path=image_path,
             layout=layout,
         )
+        if option_map is not None:
+            result._option_map_cache = option_map
+
+        return result
+
+    def _run_pytesseract(self, img) -> list[OCRWord]:
+        """Run pytesseract OCR text extraction (fallback path ~1s)."""
+        import cv2
+        words: list[OCRWord] = []
+        try:
+            import pytesseract as _pytesseract
+            from pytesseract import Output as _Output
+            if TESSERACT_CMD.strip():
+                _pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD.strip()
+
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            data = _pytesseract.image_to_data(
+                gray,
+                output_type=_Output.DICT,
+                config=f"--oem 3 --psm {OCR_PSM}",
+                timeout=OCR_TIMEOUT_SECONDS,
+            )
+            n = len(data.get("text", []))
+            for i in range(n):
+                txt = str(data["text"][i]).strip()
+                if not txt:
+                    continue
+                try:
+                    conf = float(data["conf"][i])
+                except Exception:
+                    conf = -1.0
+                if conf < OCR_MIN_WORD_CONFIDENCE:
+                    continue
+                words.append(
+                    OCRWord(
+                        text=txt,
+                        conf=conf,
+                        x=int(data["left"][i]),
+                        y=int(data["top"][i]),
+                        w=max(1, int(data["width"][i])),
+                        h=max(1, int(data["height"][i])),
+                    )
+                )
+            logger.info("Pytesseract fallback: %d words extracted", len(words))
+        except Exception as e:
+            logger.warning("Pytesseract fallback failed: %s", e)
+        return words
 

@@ -119,37 +119,49 @@ def _crop_answer_panel(image_path: Path) -> Optional[bytes]:
     return buf.tobytes()
 
 
-def _call_api(image_bytes: bytes, is_stitched: bool) -> str:
+def _call_api(image_bytes: bytes, is_stitched: bool, panel_crop_bytes: Optional[bytes] = None) -> str:
     """
     Make a single API call to Gemini via the google-genai SDK (Vertex AI).
 
     Uses non-reasoning mode (thinking_budget=0) for maximum speed.
+
+    Args:
+        image_bytes: Full exam screenshot JPEG bytes.
+        is_stitched: True if image is a multi-frame stitched composite.
+        panel_crop_bytes: Optional zoomed-in crop of the answer panel.
 
     Returns the raw text content from the response.
     Raises GeminiAPIError on errors.
     """
     client = _get_client()
 
-    # Choose system prompt and user prompt based on whether image is stitched
-    if is_stitched:
+    # Choose system prompt and user prompt based on available context
+    if panel_crop_bytes is not None:
+        system_prompt = SYSTEM_PROMPT_WITH_PANEL
+        user_prompt = USER_PROMPT_WITH_PANEL
+    elif is_stitched:
         system_prompt = SYSTEM_PROMPT
         user_prompt = USER_PROMPT_STITCHED
     else:
         system_prompt = SYSTEM_PROMPT
         user_prompt = USER_PROMPT
 
-    # Build content parts: text prompt + single full-res image
+    # Build content parts: text prompt + full image + optional panel crop
     contents = [
         user_prompt,
         types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"),
     ]
+    if panel_crop_bytes is not None:
+        contents.append(
+            types.Part.from_bytes(data=panel_crop_bytes, mime_type="image/jpeg"),
+        )
 
     # Configure: non-reasoning + low-res image (matches AI Studio token usage) + JSON output
     config = types.GenerateContentConfig(
         system_instruction=system_prompt,
         temperature=0,
         thinking_config=types.ThinkingConfig(thinking_budget=0),
-        media_resolution=types.MediaResolution.MEDIA_RESOLUTION_LOW,
+        media_resolution=types.MediaResolution.MEDIA_RESOLUTION_MEDIUM,
         response_mime_type="application/json",
         response_schema={
             "type": "OBJECT",
@@ -209,11 +221,17 @@ def query_gemini(image_path: Path, ocr_context: str = "", is_stitched: bool = Fa
     # Read main image as bytes
     image_bytes = image_path.read_bytes()
 
+    # Best-effort: crop the answer panel for a zoomed-in view that
+    # helps the AI read option text through watermarks/noise.
+    panel_crop = _crop_answer_panel(image_path)
+    if panel_crop is not None:
+        logger.info("Answer panel crop included (%d bytes)", len(panel_crop))
+
     last_error: Optional[Exception] = None
     for attempt in range(1, MAX_RETRIES + 1):
         logger.info("Gemini API call attempt %d/%d for %s", attempt, MAX_RETRIES, image_path.name)
         try:
-            raw_text = _call_api(image_bytes, is_stitched)
+            raw_text = _call_api(image_bytes, is_stitched, panel_crop_bytes=panel_crop)
             logger.info("Gemini raw response (attempt %d): %s", attempt, raw_text[:200])
             response = parse_ai_response(raw_text)
             logger.info(

@@ -77,7 +77,6 @@ animator mtrl_fab_hide_motion_spec
 animator mtrl_fab_show_motion_spec
 animator mtrl_fab_transformation_sheet_collapse_spec
 animator mtrl_fab_transformation_sheet_expand_spec
-array ai_providers
 attr SharedValue
 attr SharedValueId
 attr actionBarDivider
@@ -3517,7 +3516,6 @@ id snapMargins
 id south
 id spacer
 id special_effects_controller_view_tag
-id spinnerAiProvider
 id spline
 id split_action_bar
 id spread
@@ -3585,7 +3583,6 @@ id transition_position
 id transition_scene_layoutid_cache
 id transition_transform
 id triangle
-id txtAiProviderStatus
 id txtAlertMessage
 id txtAlertType
 id txtConnectionStatus
