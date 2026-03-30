@@ -308,15 +308,58 @@ class OptionDetector:
         )
 
         # ------------------------------------------------------------------
-        # Step 3: Build options — OCR text, assign labels, set click coords.
+        # Step 3: Estimate label offset for missed top options.
+        # ------------------------------------------------------------------
+        # When HoughCircles misses option A's circle (e.g. due to contrast),
+        # the first detected circle is actually option B. Without correction,
+        # every label shifts down by one, causing clicks to land one option
+        # below the intended target.
+        #
+        # Detection: if the gap from header_bottom to the first detected
+        # circle is significantly larger than the median inter-option step,
+        # it means one or more options are missing above.
+        #
+        # Example (live capture bug):
+        #   header_bottom=1056, first_circle=1446, step=203
+        #   gap=390, gap/step=1.92 → 1 option missing → label_offset=1
+        #   Labels shift: A→B, B→C (correct mapping)
+        #
+        # Example (test images, working correctly):
+        #   header_bottom=1032, first_circle=1172, step=260
+        #   gap=140, gap/step=0.54 → 0 missing → label_offset=0
+        #   Labels unchanged: A, B, C, D (correct)
+        # ------------------------------------------------------------------
+        label_offset = 0
+        if len(clusters) >= 2:
+            ys = [c["center_y"] for c in clusters]
+            steps = [ys[j + 1] - ys[j] for j in range(len(ys) - 1)]
+            median_step = sorted(steps)[len(steps) // 2]
+            if median_step > 30:
+                top_gap = ys[0] - header_bottom_y
+                if top_gap > 0:
+                    # int(ratio - 0.3) gives 0 when ratio < 1.3 (no missing),
+                    # 1 when ratio is ~1.3–2.3 (1 missing), etc.
+                    label_offset = max(0, int(top_gap / median_step - 0.3))
+                    label_offset = min(label_offset, 2)  # Safety cap
+                    if label_offset > 0:
+                        logger.info(
+                            "Label offset=%d: top_gap=%d, median_step=%d (%.1fx) "
+                            "— %d option(s) likely missed above first detected circle",
+                            label_offset, top_gap, median_step,
+                            top_gap / median_step, label_offset,
+                        )
+
+        # ------------------------------------------------------------------
+        # Step 4: Build options — OCR text, assign labels, set click coords.
         # ------------------------------------------------------------------
         options: list[DetectedOption] = []
 
         for i, cluster in enumerate(clusters):
-            if i >= len(OPTION_LABELS):
+            label_idx = i + label_offset
+            if label_idx >= len(OPTION_LABELS):
                 break
 
-            label = OPTION_LABELS[i]
+            label = OPTION_LABELS[label_idx]
             cx = cluster["center_x"]
             cy = cluster["center_y"]
             cr = cluster["median_r"]

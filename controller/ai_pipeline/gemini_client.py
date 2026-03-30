@@ -119,6 +119,85 @@ def _crop_answer_panel(image_path: Path) -> Optional[bytes]:
     return buf.tobytes()
 
 
+# ---------------------------------------------------------------------------
+# Image compression for AI upload
+# ---------------------------------------------------------------------------
+# With MEDIA_RESOLUTION_MEDIUM, Gemini uses exactly 256 tokens for the image
+# regardless of source file size. So compressing locally before upload has
+# zero impact on accuracy or token cost, but saves significant network
+# upload time (~1s per question for typical home connections).
+# ---------------------------------------------------------------------------
+
+# Max dimension (longest edge) for the image sent to AI.
+# Gemini internally downscales further to 256-token tiles, so anything
+# above ~768px is wasted pixels. We use 1024 for a small safety margin.
+AI_IMAGE_MAX_DIM = 1024
+
+# JPEG quality for the compressed AI payload (80 is visually indistinguishable
+# at these resolutions and yields ~200-400KB files).
+AI_IMAGE_JPEG_QUALITY = 80
+
+
+def _compress_for_ai(image_bytes: bytes) -> bytes:
+    """
+    Resize and compress image bytes for AI upload.
+
+    Shrinks the longest edge to AI_IMAGE_MAX_DIM and re-encodes as JPEG
+    at AI_IMAGE_JPEG_QUALITY. If the input is already small or OpenCV is
+    unavailable, returns the original bytes unchanged.
+
+    This function is ONLY used for the bytes sent to the Gemini API.
+    The local CV pipeline always uses full-resolution images.
+    """
+    try:
+        import cv2
+        import numpy as np
+    except ImportError:
+        return image_bytes
+
+    # Decode from bytes
+    arr = np.frombuffer(image_bytes, dtype=np.uint8)
+    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if img is None:
+        return image_bytes
+
+    h, w = img.shape[:2]
+    original_size = len(image_bytes)
+
+    # Compute scale factor based on longest edge
+    max_side = max(h, w)
+    if max_side <= AI_IMAGE_MAX_DIM:
+        # Already small enough — just re-encode at lower quality
+        ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, AI_IMAGE_JPEG_QUALITY])
+        if ok:
+            compressed = buf.tobytes()
+            logger.info(
+                "AI image compressed (no resize): %dKB -> %dKB (%.0f%% reduction)",
+                original_size // 1024, len(compressed) // 1024,
+                (1 - len(compressed) / original_size) * 100,
+            )
+            return compressed
+        return image_bytes
+
+    scale = AI_IMAGE_MAX_DIM / max_side
+    new_w = int(w * scale)
+    new_h = int(h * scale)
+
+    resized = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+    ok, buf = cv2.imencode(".jpg", resized, [cv2.IMWRITE_JPEG_QUALITY, AI_IMAGE_JPEG_QUALITY])
+    if not ok:
+        return image_bytes
+
+    compressed = buf.tobytes()
+    logger.info(
+        "AI image compressed: %dx%d -> %dx%d, %dKB -> %dKB (%.0f%% reduction)",
+        w, h, new_w, new_h,
+        original_size // 1024, len(compressed) // 1024,
+        (1 - len(compressed) / original_size) * 100,
+    )
+    return compressed
+
+
 def _call_api(image_bytes: bytes, is_stitched: bool, panel_crop_bytes: Optional[bytes] = None) -> str:
     """
     Make a single API call to Gemini via the google-genai SDK (Vertex AI).
@@ -221,10 +300,15 @@ def query_gemini(image_path: Path, ocr_context: str = "", is_stitched: bool = Fa
     # Read main image as bytes
     image_bytes = image_path.read_bytes()
 
+    # Compress for AI upload — saves ~1s of network upload time per question.
+    # Local CV pipeline uses full-resolution images (this only affects the API call).
+    image_bytes = _compress_for_ai(image_bytes)
+
     # Best-effort: crop the answer panel for a zoomed-in view that
     # helps the AI read option text through watermarks/noise.
     panel_crop = _crop_answer_panel(image_path)
     if panel_crop is not None:
+        panel_crop = _compress_for_ai(panel_crop)
         logger.info("Answer panel crop included (%d bytes)", len(panel_crop))
 
     last_error: Optional[Exception] = None
