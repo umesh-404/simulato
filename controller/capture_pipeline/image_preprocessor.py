@@ -65,40 +65,48 @@ class ImagePreprocessor:
         enhanced = clahe.apply(gray)
         img_enhanced = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
 
-        # --- PROPOSAL / NON-BINDING (now implemented): header anchored masking ---
-        # We keep the output image size identical to the input, so normalized targets
-        # remain compatible with the calibrated capture coordinate mapping.
+        # --- Header anchored masking ---
+        # In ghost mode (direct screen capture), there is no physical bezel
+        # in the image so header masking is unnecessary and skipped entirely.
+        # We keep the output image size identical to the input, so normalized
+        # targets remain compatible with the calibrated capture coordinate
+        # mapping.
         roi_y = 0
         mask_applied = False
         header_meta: dict | None = None
-        try:
-            from controller.capture_pipeline.header_anchor import HeaderAnchor
 
-            anchor_meta = HeaderAnchor.locate_anchor(image_path)
-            if anchor_meta is not None:
-                roi_y = int(anchor_meta.roi_y)
-                mask_applied = roi_y > 0
-                header_meta = anchor_meta.to_dict()
-            else:
-                roi_y = max(0, int(img.shape[0] * HeaderAnchor.FALLBACK_HEADER_HEIGHT_FRAC) - HeaderAnchor.ROI_MARGIN_PX)
-                mask_applied = roi_y > 0
-                header_meta = {
-                    "method": "no_template_or_match",
-                    "template_path": str(HeaderAnchor.TEMPLATE_PATH),
-                    "template_w": 0,
-                    "template_h": 0,
-                    "anchor_x": 0,
-                    "anchor_y": 0,
-                    "match_score": 0.0,
-                    "roi_x": 0,
-                    "roi_y": roi_y,
-                    "roi_w": img.shape[1],
-                    "roi_h": img.shape[0] - roi_y,
-                }
-        except Exception as e:
-            logger.debug("Header anchor masking failed: %s", e)
-            roi_y = 0
-            mask_applied = False
+        from controller.config import CAPTURE_MODE
+        if CAPTURE_MODE != "ghost":
+            try:
+                from controller.capture_pipeline.header_anchor import HeaderAnchor
+
+                anchor_meta = HeaderAnchor.locate_anchor(image_path)
+                if anchor_meta is not None:
+                    roi_y = int(anchor_meta.roi_y)
+                    mask_applied = roi_y > 0
+                    header_meta = anchor_meta.to_dict()
+                else:
+                    roi_y = max(0, int(img.shape[0] * HeaderAnchor.FALLBACK_HEADER_HEIGHT_FRAC) - HeaderAnchor.ROI_MARGIN_PX)
+                    mask_applied = roi_y > 0
+                    header_meta = {
+                        "method": "no_template_or_match",
+                        "template_path": str(HeaderAnchor.TEMPLATE_PATH),
+                        "template_w": 0,
+                        "template_h": 0,
+                        "anchor_x": 0,
+                        "anchor_y": 0,
+                        "match_score": 0.0,
+                        "roi_x": 0,
+                        "roi_y": roi_y,
+                        "roi_w": img.shape[1],
+                        "roi_h": img.shape[0] - roi_y,
+                    }
+            except Exception as e:
+                logger.debug("Header anchor masking failed: %s", e)
+                roi_y = 0
+                mask_applied = False
+        else:
+            header_meta = {"method": "ghost_mode_skip"}
 
         if mask_applied and roi_y > 0:
             img_enhanced[0:roi_y, :, :] = 0  # Mask out the top header region for OCR/local AI.

@@ -23,3 +23,8 @@ simulato-mobile-v1.apk
 fix_sh.py
 restore_imports.py
 clean_imports.py
+
+# Ghost Agent build artifacts (PyInstaller)
+ghost_agent/dist/
+ghost_agent/build/
+*.spec

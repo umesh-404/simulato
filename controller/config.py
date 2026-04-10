@@ -85,6 +85,15 @@ EMBEDDING_MODEL_NAME = "BAAI/bge-small-en-v1.5"
 MIN_IMAGE_WIDTH = 1600
 
 # ---------------------------------------------------------------------------
+# Ghost Agent — direct screen capture from exam laptop
+# When CAPTURE_MODE="ghost", the controller uses a TCP-connected agent on
+# the exam laptop instead of the capture phone.  See docs/GHOST_AGENT.md.
+# ---------------------------------------------------------------------------
+CAPTURE_MODE = os.environ.get("CAPTURE_MODE", "phone")  # "phone" or "ghost"
+GHOST_PORT = int(os.environ.get("GHOST_PORT", "9500"))
+GHOST_AGENT_TIMEOUT = int(os.environ.get("GHOST_AGENT_TIMEOUT", "5"))
+
+# ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
 LOG_FILE = LOGS_DIR / "system.log"

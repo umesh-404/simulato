@@ -254,6 +254,24 @@ def calibrate_from_screenshot(image_path: Path, resolution: tuple[int, int] = (1
     }
     gm.grid_size = (20, 20)
 
+    # Ghost mode identity detection:
+    # When the capture resolution matches the screen resolution, the image
+    # IS the screen — no bezel, no perspective, no transform needed.
+    # This happens when the Ghost Agent captures via DXGI at native res.
+    _is_identity = (w == resolution[0] and h == resolution[1])
+    if _is_identity:
+        gm.transform = {
+            "scale_x": 1.0,
+            "scale_y": 1.0,
+            "offset_x": 0.0,
+            "offset_y": 0.0,
+        }
+        logger.info(
+            "Identity transform: capture resolution (%dx%d) matches "
+            "screen resolution — pixel-perfect mapping (ghost mode)",
+            w, h,
+        )
+
     # Primary calibration path (robust): exam layout + radio-row option detector.
     # This matches runtime click mapping behavior and is more stable than global contours.
     #
@@ -357,25 +375,30 @@ def calibrate_from_screenshot(image_path: Path, resolution: tuple[int, int] = (1
             cell_w = float(resolution[0]) / float(max(1, gm.grid_size[0]))
             cell_h = float(resolution[1]) / float(max(1, gm.grid_size[1]))
 
-            detected = _detect_screen_bounds(gray, w, h, resolution[0], resolution[1])
-            if detected is not None:
-                fit_sx, fit_sy, fit_ox, fit_oy = detected
-                logger.info(
-                    "Using screen-boundary transform: "
-                    "scale=(%.6f, %.6f) offset=(%.1f, %.1f)",
-                    fit_sx, fit_sy, fit_ox, fit_oy,
-                )
+            if _is_identity:
+                # Ghost mode: capture IS the screen. Identity transform.
+                fit_sx, fit_sy, fit_ox, fit_oy = 1.0, 1.0, 0.0, 0.0
+                logger.info("Identity transform — skipping screen boundary detection")
             else:
-                fit_sx = naive_sx
-                fit_sy = naive_sy
-                fit_ox = 0.0
-                fit_oy = 0.0
-                logger.warning(
-                    "Screen boundary detection failed — using naive transform: "
-                    "scale=(%.6f, %.6f) offset=(0, 0). "
-                    "If clicks land off-target, check camera framing and lighting.",
-                    fit_sx, fit_sy,
-                )
+                detected = _detect_screen_bounds(gray, w, h, resolution[0], resolution[1])
+                if detected is not None:
+                    fit_sx, fit_sy, fit_ox, fit_oy = detected
+                    logger.info(
+                        "Using screen-boundary transform: "
+                        "scale=(%.6f, %.6f) offset=(%.1f, %.1f)",
+                        fit_sx, fit_sy, fit_ox, fit_oy,
+                    )
+                else:
+                    fit_sx = naive_sx
+                    fit_sy = naive_sy
+                    fit_ox = 0.0
+                    fit_oy = 0.0
+                    logger.warning(
+                        "Screen boundary detection failed — using naive transform: "
+                        "scale=(%.6f, %.6f) offset=(0, 0). "
+                        "If clicks land off-target, check camera framing and lighting.",
+                        fit_sx, fit_sy,
+                    )
 
             gm.transform = {
                 "scale_x": fit_sx,

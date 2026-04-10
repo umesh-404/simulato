@@ -969,7 +969,20 @@ class WorkflowEngine:
           live detection is very close to calibration (within thresholds).
         - When the split-pane divider shifts, calibration X/Y can be
           hundreds of pixels off — we must NOT fall back to it.
+
+        In ghost mode (CAPTURE_MODE=ghost), coordinates are pixel-perfect
+        (identity transform) so blending is skipped entirely.
         """
+        # Ghost mode: identity transform — live detection IS exact truth.
+        from controller.config import CAPTURE_MODE
+        if CAPTURE_MODE == "ghost":
+            logger.info(
+                "Ghost mode: using live detection for %s without blending "
+                "(identity transform, ±0px accuracy)",
+                letter,
+            )
+            return live_norm
+
         try:
             from calibration.grid_mapper import GridMap
             gm = GridMap.load()

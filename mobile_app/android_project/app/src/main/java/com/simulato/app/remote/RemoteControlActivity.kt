@@ -184,8 +184,18 @@ class RemoteControlActivity : AppCompatActivity() {
                         val apiCalls = payload?.get("api_calls")?.asInt ?: 0
                         val cacheHits = payload?.get("cache_hits")?.asInt ?: 0
                         val imageHashHits = payload?.get("image_hash_hits")?.asInt ?: 0
+                        val captureMode = payload?.get("capture_mode")?.asString ?: "unknown"
+                        
+                        val ghostElement = payload?.get("ghost_connected")
+                        val ghostConnected = if (ghostElement != null && !ghostElement.isJsonNull) {
+                            if (ghostElement.asBoolean) "CONNECTED" else "DISCONNECTED"
+                        } else {
+                            "N/A"
+                        }
+
                         "state=$state\n" +
                             "test=$test\n" +
+                            "mode=$captureMode (ghost: $ghostConnected)\n" +
                             "question=$qn api_calls=$apiCalls\n" +
                             "cache_hits=$cacheHits image_hash_hits=$imageHashHits"
                     } catch (_: Exception) {

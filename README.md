@@ -44,16 +44,20 @@ Ensure the following 5 devices are connected to the **same WiFi network**:
    cd simulato
    ```
 3. **Set API Keys and Configure AI:**
-   - **Cloud AI Keys (at least one required):**
-     - **Gemini** (default primary): Get a key from [aistudio.google.com](https://aistudio.google.com/).
-     - **Gemini** (alternate primary): Get a key from [console.x.ai](https://console.x.ai/).
+   - **Vertex AI (Gemini):** Set up Application Default Credentials:
+     ```bash
+     gcloud auth application-default login
+     ```
    - **Tesseract OCR:** Download from [github.com/UB-Mannheim/tesseract](https://github.com/UB-Mannheim/tesseract/wiki). Ensure `tesseract` is on PATH or set `TESSERACT_CMD` in `.env`.
    - **Configuration:** Edit `.env` in the project root:
      ```env
-     GCP_PROJECT_ID=xai-your-api-key
-     GCP_LOCATION=your-gemini-key
-     DEFAULT_AI_PROVIDER=gemini
+     GCP_PROJECT_ID=your-gcp-project-id
+     GCP_LOCATION=us-central1
+     GEMINI_MODEL=gemini-2.5-flash
      PI_HOST=192.168.1.xxx
+
+     # Capture mode: "phone" (camera) or "ghost" (direct screen capture)
+     CAPTURE_MODE=phone
      ```
 4. Run the startup script (Windows):
    ```powershell

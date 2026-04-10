@@ -34,15 +34,12 @@ if errorlevel 1 (
     echo     -> pytesseract already installed.
 )
 
-:: Verify .env has API keys
+:: Verify .env has required config
 if exist ".env" (
-    findstr /i "GROK_API_KEY" .env > nul 2>&1
+    findstr /i "GCP_PROJECT_ID" .env > nul 2>&1
     if errorlevel 1 (
-        findstr /i "GEMINI_API_KEY" .env > nul 2>&1
-        if errorlevel 1 (
-            echo [WARNING] No GROK_API_KEY or GEMINI_API_KEY found in .env
-            echo          Primary AI solver will not work!
-        )
+        echo [WARNING] No GCP_PROJECT_ID found in .env
+        echo          Vertex AI Gemini solver will not work!
     )
 )
 

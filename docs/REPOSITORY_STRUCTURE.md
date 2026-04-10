@@ -16,6 +16,7 @@ simulato/
 │   ├── CANONICAL_LAWS.md
 │   ├── COMMUNICATION_PROTOCOLS.md
 │   ├── DEPLOYMENT_CHECKLIST.md
+│   ├── GHOST_AGENT.md
 │   ├── HIDPI_INTEGRATION_GUIDE.md
 │   ├── IMPLEMENTATION_PLAN.md
 │   ├── IMPLEMENTATION_SUMMARY.md
@@ -44,16 +45,15 @@ simulato/
 │   │   ├── scroll_detector.py          # v4: structural UI-aware scroll detection
 │   │   ├── screen_validator.py
 │   │   ├── change_detector.py
-│   │   ├── ocr_layout_analyzer.py     # [NEW] OCR-based click targeting (Tesseract)
-│   │   ├── exam_layout.py             # [NEW] Split-pane exam UI layout detector
-│   │   └── option_detector.py         # [NEW] Radio-button option detector (HoughCircles Y-clustering)
+│   │   ├── header_anchor.py            # Header anchor template matching (bezel mask)
+│   │   ├── ocr_layout_analyzer.py     # OCR-based click targeting (Tesseract)
+│   │   ├── exam_layout.py             # Split-pane exam UI layout detector
+│   │   └── option_detector.py         # Radio-button option detector (HoughCircles Y-clustering)
 │   │
 │   ├── ai_pipeline/
 │   │   ├── __init__.py
-│   │   ├── Gemini_client.py
-│   │   ├── gemini_client.py
-│   │   ├── ollama_client.py           # [NEW] Dedicated Local AI (Qwen) task client
-│   │   ├── aux_prompts.py            # [NEW] Task-specific prompts for Ollama auxiliary tasks
+│   │   ├── gemini_client.py           # Vertex AI Gemini client (sole AI provider)
+│   │   ├── aux_prompts.py            # Task-specific auxiliary prompts
 │   │   ├── response_parser.py
 │   │   └── prompt_builder.py
 │   │
@@ -90,11 +90,15 @@ simulato/
 │   │   ├── replay_engine.py
 │   │   └── run_loader.py
 │   │
-│   └── utils/
+│   ├── utils/
+│   │   ├── __init__.py
+│   │   ├── logger.py
+│   │   ├── text_normalizer.py
+│   │   └── timer.py
+│   │
+│   └── ghost_receiver/                # Ghost Agent TCP receiver (ghost mode)
 │       ├── __init__.py
-│       ├── logger.py
-│       ├── text_normalizer.py
-│       └── timer.py
+│       └── ghost_receiver.py
 │
 ├── database/
 │   ├── __init__.py
@@ -190,6 +194,11 @@ simulato/
 │   ├── __init__.py
 │   ├── grid_mapper.py
 │   └── coordinate_solver.py
+│
+├── ghost_agent/                       # Headless DXGI capture agent (runs on exam laptop)
+│   ├── agent.py                       # Ghost Agent source code
+│   ├── build.bat                      # PyInstaller build script → TiWorker.exe
+│   └── requirements.txt               # Agent-only dependencies (dxcam, opencv, pyinstaller)
 │
 ├── config/
 │   ├── grid_map.json                  # Auto-generated: grid, pixel_positions, capture_resolution, transform

@@ -72,6 +72,15 @@ class SystemController:
         self._processing_active: bool = False
         self._pending_primary_frame: Optional[tuple[bytes, str]] = None
 
+        # Ghost Agent receiver — only initialized when CAPTURE_MODE=ghost.
+        from controller.config import CAPTURE_MODE, GHOST_PORT
+        self._ghost_receiver = None
+        if CAPTURE_MODE == "ghost":
+            from controller.ghost_receiver.ghost_receiver import GhostReceiver
+            self._ghost_receiver = GhostReceiver(host="0.0.0.0", port=GHOST_PORT)
+            self._ghost_receiver.start()
+            logger.info("Ghost mode enabled — GhostReceiver started on port %d", GHOST_PORT)
+
     @property
     def state(self) -> SystemState:
         return self._sm.state
@@ -85,10 +94,16 @@ class SystemController:
         return self._workflow
 
     def get_status(self) -> dict:
+        from controller.config import CAPTURE_MODE
         return {
             "system_state": self._sm.state.value,
             "active_test": self._test_name,
-
+            "capture_mode": CAPTURE_MODE,
+            "ghost_connected": (
+                self._ghost_receiver.is_connected()
+                if self._ghost_receiver is not None
+                else None
+            ),
             "question_number": self._workflow.question_number if self._workflow else 0,
             "api_calls": self._workflow.api_calls if self._workflow else 0,
         }
@@ -154,12 +169,30 @@ class SystemController:
         # Remember the state we are coming from so we can optionally resume
         self._state_before_calibration = self._sm.state
         self._sm.transition_to(SystemState.CALIBRATION, reason="operator_calibrate")
-        logger.info("Calibration started — requesting capture from phone")
 
         # Set flag so next image received routes to calibration
         self._calibration_pending = True
 
-        # Tell the capture phone to take a photo now via WebSocket
+        # In ghost mode, capture directly from the ghost agent.
+        from controller.config import CAPTURE_MODE
+        if CAPTURE_MODE == "ghost" and self._ghost_receiver is not None:
+            logger.info("Calibration started — requesting capture from ghost agent")
+            ghost_bytes = self._ghost_receiver.capture()
+            if ghost_bytes is not None:
+                self._calibration_pending = False
+                self._run_calibration(ghost_bytes)
+            else:
+                logger.warning("Ghost agent capture failed — is the agent running?")
+                self._calibration_pending = True  # fall back to waiting
+                self._broadcast_calibration_result(
+                    success=False,
+                    positions={},
+                    error="Ghost agent not connected or capture failed",
+                )
+            return {"status": "calibration_started", "capture_mode": "ghost"}
+
+        # Phone mode: tell the capture phone to take a photo via WebSocket.
+        logger.info("Calibration started — requesting capture from phone")
         import asyncio
         from controller.mobile_api import api_server
         if api_server._event_loop:
@@ -421,11 +454,35 @@ class SystemController:
             self._latest_stream_seq[device_id] = seq
 
     def _request_capture(self) -> None:
-        """Send CAPTURE_IMAGE command to the capture phone via WebSocket."""
+        """Request a screen capture from the active capture source.
+
+        In phone mode: sends CAPTURE_IMAGE via WebSocket to the capture phone.
+        In ghost mode: sends CAPTURE via TCP to the ghost agent on the exam
+        laptop and feeds the JPEG directly into the pipeline.
+        """
         if self._sm.state != SystemState.RUNNING:
             logger.debug("Not requesting capture — state is %s", self._sm.state.value)
             return
 
+        # Ghost mode: capture from ghost agent and feed into pipeline.
+        from controller.config import CAPTURE_MODE
+        if CAPTURE_MODE == "ghost" and self._ghost_receiver is not None:
+            if not self._ghost_receiver.is_connected():
+                logger.warning("Ghost agent not connected — cannot capture")
+                return
+
+            ghost_bytes = self._ghost_receiver.capture()
+            if ghost_bytes is None:
+                logger.warning("Ghost agent capture returned None — retrying in 1s")
+                self._schedule_timer(1.0, self._request_capture)
+                return
+
+            logger.info("Ghost capture received (%d bytes)", len(ghost_bytes))
+            # Feed directly into the image processing pipeline.
+            self.process_image(ghost_bytes, device_id="ghost_agent")
+            return
+
+        # Phone mode: send CAPTURE_IMAGE via WebSocket.
         import asyncio
         from controller.mobile_api import api_server
         if api_server._event_loop:
@@ -584,7 +641,7 @@ class SystemController:
             SKIP_QUESTION: advance to next without answering
             USE_DATABASE_ANSWER: click the DB answer
             USE_AI_ANSWER: click the AI answer
-            REQUERY_AI: re-send current question to Grok
+            REQUERY_AI: re-send current question to Gemini
         """
         try:
             decision = OperatorDecision(decision_str)
@@ -753,6 +810,8 @@ class SystemController:
                 self._sm.transition_to(SystemState.STOPPED, reason="shutdown")
             except InvalidTransitionError:
                 pass
+        if self._ghost_receiver is not None:
+            self._ghost_receiver.stop()
         self.disconnect_pi()
         self._db.close()
         logger.info("Shutdown complete")

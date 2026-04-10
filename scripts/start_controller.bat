@@ -4,7 +4,7 @@ REM Starts the FastAPI controller server for phone connections.
 REM
 REM Usage: start_controller.bat
 REM
-REM Optional env vars: PI_HOST, PI_PORT, CONTROLLER_PORT, GROK_API_KEY
+REM Optional env vars: PI_HOST, PI_PORT, CONTROLLER_PORT, GCP_PROJECT_ID
 REM NOTE: This script starts the controller only.
 
 cd /d "%~dp0\.."
@@ -13,10 +13,10 @@ echo === Simulato Controller ===
 echo Project: %CD%
 echo.
 
-if defined GROK_API_KEY (
-    echo [+] GROK_API_KEY is set
+if defined GCP_PROJECT_ID (
+    echo [+] GCP_PROJECT_ID is set
 ) else (
-    echo [*] GROK_API_KEY not set - AI features will fail until set
+    echo [*] GCP_PROJECT_ID not set - Vertex AI Gemini features will fail until set
 )
 
 if not defined CONTROLLER_PORT set CONTROLLER_PORT=8000
