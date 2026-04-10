@@ -11,6 +11,7 @@ color primary_variant
 color secondary
 color secondary_variant
 color surface
+drawable card_background_dark
 id btnCalibrate
 id btnCapture
 id btnPause
@@ -29,11 +30,18 @@ id editControllerIp
 id editControllerPort
 id layoutAlertPanel
 id layoutDecisionPanel
+id layoutGhostRow
 id txtAlertMessage
 id txtAlertType
+id txtApiCalls
+id txtCaptureMode
 id txtConnectionStatus
+id txtDevices
+id txtGhostStatus
 id txtLastAction
+id txtQuestionNumber
 id txtStatus
+id txtSystemState
 id txtSystemStatus
 id txtWsStatus
 id txtZoom

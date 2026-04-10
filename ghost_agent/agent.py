@@ -6,10 +6,12 @@ Runs on the exam laptop. Captures the screen at native resolution
 streams JPEG frames to the Simulato controller over TCP.
 
 Usage:
-    python agent.py --host 192.168.1.100 --port 9500
+    python agent.py                          (auto-discovers controller via UDP)
+    python agent.py --host 192.168.1.100     (explicit IP)
 
 Or as compiled .exe:
-    TiWorker.exe --host 192.168.1.100 --port 9500
+    TiWorker.exe                             (auto-discovers controller)
+    TiWorker.exe --host 192.168.1.100        (explicit IP)
 
 Protocol:
     1. Agent connects to Controller TCP server
@@ -99,6 +101,44 @@ def _connect_with_backoff(host: str, port: int) -> socket.socket:
             delay = min(delay * 2, RECONNECT_MAX_DELAY)
 
 
+# ---------------------------------------------------------------------------
+# UDP auto-discovery
+# ---------------------------------------------------------------------------
+DISCOVERY_PORT = 9501
+DISCOVERY_MAGIC = b"SIMULATO"
+DISCOVERY_TIMEOUT = 30.0  # seconds to wait before retrying
+
+
+def _discover_controller() -> tuple[str, int]:
+    """Listen for the controller's UDP beacon and return (host, port).
+
+    The controller broadcasts b"SIMULATO|<tcp_port>" on UDP port 9501
+    every 2 seconds.  This function blocks until it receives one.
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.settimeout(DISCOVERY_TIMEOUT)
+    sock.bind(("0.0.0.0", DISCOVERY_PORT))
+
+    try:
+        while True:
+            try:
+                data, addr = sock.recvfrom(256)
+            except socket.timeout:
+                continue  # keep listening
+
+            # Validate beacon format: b"SIMULATO|9500"
+            if data.startswith(DISCOVERY_MAGIC + b"|"):
+                try:
+                    tcp_port = int(data.split(b"|", 1)[1])
+                except (ValueError, IndexError):
+                    continue
+                controller_ip = addr[0]
+                return (controller_ip, tcp_port)
+    finally:
+        sock.close()
+
+
 def _do_handshake(sock: socket.socket) -> bool:
     """Perform the GHOS/ACK handshake. Returns True on success."""
     try:
@@ -165,19 +205,26 @@ def main() -> None:
     parser.add_argument(
         "--host",
         type=str,
-        default="192.168.1.100",
-        help="Controller IP address (default: 192.168.1.100)",
+        default=None,
+        help="Controller IP address. If omitted, auto-discovers via UDP beacon.",
     )
     parser.add_argument(
         "--port",
         type=int,
         default=9500,
-        help="Controller TCP port (default: 9500)",
+        help="Controller TCP port (default: 9500). Ignored if auto-discovery is used.",
     )
     args = parser.parse_args()
 
+    if args.host is not None:
+        # Explicit host provided — use it directly.
+        host, port = args.host, args.port
+    else:
+        # Auto-discover the controller on the local network.
+        host, port = _discover_controller()
+
     try:
-        run_agent(args.host, args.port)
+        run_agent(host, port)
     except KeyboardInterrupt:
         pass
 

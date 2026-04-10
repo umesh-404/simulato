@@ -71,6 +71,7 @@ class SystemController:
         self._processing_lock = threading.Lock()
         self._processing_active: bool = False
         self._pending_primary_frame: Optional[tuple[bytes, str]] = None
+        self._last_action: str = "System initialized"
 
         # Ghost Agent receiver — only initialized when CAPTURE_MODE=ghost.
         from controller.config import CAPTURE_MODE, GHOST_PORT
@@ -95,9 +96,14 @@ class SystemController:
 
     def get_status(self) -> dict:
         from controller.config import CAPTURE_MODE
+        from controller.mobile_api import api_server
+
+        connected_devices = api_server.registry.get_connected_ids()
+
         return {
             "system_state": self._sm.state.value,
             "active_test": self._test_name,
+            "run_id": self._run_ctx.run_id if self._run_ctx else None,
             "capture_mode": CAPTURE_MODE,
             "ghost_connected": (
                 self._ghost_receiver.is_connected()
@@ -106,6 +112,11 @@ class SystemController:
             ),
             "question_number": self._workflow.question_number if self._workflow else 0,
             "api_calls": self._workflow.api_calls if self._workflow else 0,
+            "waiting_for_scroll": (
+                self._workflow.is_waiting_for_scroll if self._workflow else False
+            ),
+            "connected_devices": len(connected_devices),
+            "last_action": self._last_action,
         }
 
     # ------------------------------------------------------------------
@@ -177,12 +188,14 @@ class SystemController:
         from controller.config import CAPTURE_MODE
         if CAPTURE_MODE == "ghost" and self._ghost_receiver is not None:
             logger.info("Calibration started — requesting capture from ghost agent")
+            self._last_action = "Calibrating (ghost capture)"
             ghost_bytes = self._ghost_receiver.capture()
             if ghost_bytes is not None:
                 self._calibration_pending = False
                 self._run_calibration(ghost_bytes)
             else:
                 logger.warning("Ghost agent capture failed — is the agent running?")
+                self._last_action = "Calibration failed (ghost agent not connected)"
                 self._calibration_pending = True  # fall back to waiting
                 self._broadcast_calibration_result(
                     success=False,
@@ -272,6 +285,7 @@ class SystemController:
 
 
         self._sm.transition_to(SystemState.RUNNING, reason=f"start_test:{test_name}")
+        self._last_action = f"Test started: {test_name}"
         logger.info("Test started: %s (run: %s)", test_name, self._run_ctx.run_id)
 
         # Trigger the first capture to start the autonomous loop
@@ -295,6 +309,7 @@ class SystemController:
         # Resume path
         if self._sm.state == SystemState.PAUSED:
             self._sm.transition_to(SystemState.RUNNING, reason="operator_continue")
+            self._last_action = "Resumed by operator"
             self._request_capture()
             return {"status": "resumed"}
 
@@ -302,11 +317,13 @@ class SystemController:
 
     def _handle_pause(self, payload: dict) -> dict:
         self._sm.transition_to(SystemState.PAUSED, reason="operator_pause")
+        self._last_action = "Paused by operator"
         logger.info("System paused by operator")
         return {"status": "paused"}
 
     def _handle_stop(self, payload: dict) -> dict:
         self._sm.transition_to(SystemState.STOPPED, reason="operator_stop")
+        self._last_action = "Stopped by operator"
         logger.info("System stopped by operator")
         self._cleanup()
         return {"status": "stopped"}
@@ -469,6 +486,7 @@ class SystemController:
         if CAPTURE_MODE == "ghost" and self._ghost_receiver is not None:
             if not self._ghost_receiver.is_connected():
                 logger.warning("Ghost agent not connected — cannot capture")
+                self._last_action = "Waiting for ghost agent connection..."
                 return
 
             ghost_bytes = self._ghost_receiver.capture()
@@ -478,6 +496,7 @@ class SystemController:
                 return
 
             logger.info("Ghost capture received (%d bytes)", len(ghost_bytes))
+            self._last_action = f"Processing Q{self._workflow.question_number + 1 if self._workflow else '?'}"
             # Feed directly into the image processing pipeline.
             self.process_image(ghost_bytes, device_id="ghost_agent")
             return

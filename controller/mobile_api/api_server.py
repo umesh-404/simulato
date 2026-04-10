@@ -332,8 +332,9 @@ async def remote_command(req: RemoteCommandRequest):
     extra_payload = {k: v for k, v in req.payload.items() if k != "command"}
     logger.info("Remote command: device=%s, command=%s", req.device_id, command)
 
-    # Enforce: commands that depend on a capture device require one to be connected.
-    if command in ("CALIBRATE", "START") and not registry.has_role("capture"):
+    # Enforce: commands that depend on a capture device require one to be connected (unless in ghost mode).
+    from controller.config import CAPTURE_MODE
+    if command in ("CALIBRATE", "START") and CAPTURE_MODE != "ghost" and not registry.has_role("capture"):
         logger.warning("Command %s rejected — no capture device connected", command)
         return {
             "type": "COMMAND_ACK",
@@ -366,8 +367,9 @@ async def operator_decision(req: OperatorDecisionRequest):
 @app.get("/api/status")
 async def get_status():
     if _status_provider:
-        return _status_provider()
-    return StatusResponse(system_state="UNKNOWN")
+        status = _status_provider()
+        return {"type": "STATUS", "payload": status}
+    return {"type": "STATUS", "payload": {"system_state": "UNKNOWN"}}
 
 
 # ---------------------------------------------------------------------------

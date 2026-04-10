@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:background="#121212">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -9,137 +10,309 @@
         android:orientation="vertical"
         android:padding="16dp">
 
-        <!-- Connection Status -->
+        <!-- Header -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:layout_marginBottom="8dp">
+            android:gravity="center_vertical"
+            android:layout_marginBottom="12dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Simulato Control"
+                android:textSize="22sp"
+                android:textStyle="bold"
+                android:textColor="#FFFFFF" />
 
             <TextView
                 android:id="@+id/txtConnectionStatus"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Disconnected"
-                android:textSize="14sp"
-                android:textColor="#FF5722" />
-
-            <TextView
-                android:id="@+id/txtWsStatus"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="WebSocket: —"
-                android:textSize="14sp"
-                android:textColor="#666666" />
+                android:text="● Disconnected"
+                android:textSize="13sp"
+                android:textColor="#FF5252" />
         </LinearLayout>
 
-        <View
+        <!-- Live Status Card -->
+        <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:background="#E0E0E0"
-            android:layout_marginBottom="16dp" />
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/card_background_dark"
+            android:padding="16dp"
+            android:layout_marginBottom="12dp">
 
-        <!-- Command Buttons -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginBottom="8dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="System State"
+                    android:textSize="12sp"
+                    android:textColor="#9E9E9E" />
+
+                <TextView
+                    android:id="@+id/txtSystemState"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="IDLE"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:textColor="#4CAF50" />
+            </LinearLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="#2A2A2A"
+                android:layout_marginBottom="8dp" />
+
+            <!-- Capture Mode Row -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginBottom="6dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Capture Mode"
+                    android:textSize="12sp"
+                    android:textColor="#9E9E9E" />
+
+                <TextView
+                    android:id="@+id/txtCaptureMode"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="phone"
+                    android:textSize="13sp"
+                    android:textColor="#B0BEC5" />
+            </LinearLayout>
+
+            <!-- Ghost Agent Row -->
+            <LinearLayout
+                android:id="@+id/layoutGhostRow"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginBottom="6dp"
+                android:visibility="gone">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Ghost Agent"
+                    android:textSize="12sp"
+                    android:textColor="#9E9E9E" />
+
+                <TextView
+                    android:id="@+id/txtGhostStatus"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="—"
+                    android:textSize="13sp"
+                    android:textColor="#B0BEC5" />
+            </LinearLayout>
+
+            <!-- Question / API Row -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginBottom="6dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Question"
+                    android:textSize="12sp"
+                    android:textColor="#9E9E9E" />
+
+                <TextView
+                    android:id="@+id/txtQuestionNumber"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="#0"
+                    android:textSize="13sp"
+                    android:textColor="#B0BEC5" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginBottom="6dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="AI Calls"
+                    android:textSize="12sp"
+                    android:textColor="#9E9E9E" />
+
+                <TextView
+                    android:id="@+id/txtApiCalls"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="0"
+                    android:textSize="13sp"
+                    android:textColor="#B0BEC5" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginBottom="6dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Devices Online"
+                    android:textSize="12sp"
+                    android:textColor="#9E9E9E" />
+
+                <TextView
+                    android:id="@+id/txtDevices"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="0"
+                    android:textSize="13sp"
+                    android:textColor="#B0BEC5" />
+            </LinearLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="#2A2A2A"
+                android:layout_marginBottom="8dp" />
+
+            <!-- Last Action -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Last Action"
+                android:textSize="10sp"
+                android:textColor="#616161"
+                android:layout_marginBottom="2dp" />
+
+            <TextView
+                android:id="@+id/txtLastAction"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="—"
+                android:textSize="12sp"
+                android:textColor="#78909C" />
+
+        </LinearLayout>
+
+        <!-- WebSocket Status -->
+        <TextView
+            android:id="@+id/txtWsStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="WebSocket: —"
+            android:textSize="11sp"
+            android:textColor="#616161"
+            android:layout_marginBottom="12dp" />
+
+        <!-- System Commands -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="System Commands"
-            android:textSize="18sp"
+            android:text="SYSTEM COMMANDS"
+            android:textSize="11sp"
             android:textStyle="bold"
-            android:layout_marginBottom="12dp" />
+            android:textColor="#616161"
+            android:letterSpacing="0.1"
+            android:layout_marginBottom="10dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnStart"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:text="▶  START"
+            android:textSize="15sp"
+            android:layout_marginBottom="6dp" />
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:layout_marginBottom="8dp">
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnStart"
-                android:layout_width="0dp"
-                android:layout_height="56dp"
-                android:layout_weight="1"
-                android:text="START" />
-        </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:layout_marginBottom="8dp">
+            android:layout_marginBottom="6dp">
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnPause"
                 android:layout_width="0dp"
-                android:layout_height="56dp"
+                android:layout_height="48dp"
                 android:layout_weight="1"
                 android:layout_marginEnd="4dp"
-                android:text="PAUSE"
+                android:text="⏸  PAUSE"
                 style="@style/Widget.Material3.Button.TonalButton" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnStop"
                 android:layout_width="0dp"
-                android:layout_height="56dp"
+                android:layout_height="48dp"
                 android:layout_weight="1"
                 android:layout_marginStart="4dp"
-                android:text="STOP"
+                android:text="⏹  STOP"
                 style="@style/Widget.Material3.Button.OutlinedButton" />
         </LinearLayout>
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnStatus"
-            android:layout_width="match_parent"
-            android:layout_height="48dp"
-            android:text="GET STATUS"
-            android:layout_marginBottom="12dp"
-            style="@style/Widget.Material3.Button.TextButton" />
-
-        <TextView
-            android:id="@+id/txtLastAction"
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="—"
-            android:textSize="14sp"
-            android:textColor="#666666"
-            android:layout_marginBottom="8dp" />
+            android:orientation="horizontal"
+            android:layout_marginBottom="16dp">
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnRecalibrate"
-            android:layout_width="match_parent"
-            android:layout_height="48dp"
-            android:text="Recalibrate Screen"
-            android:layout_marginBottom="16dp"
-            style="@style/Widget.Material3.Button.OutlinedButton" />
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnRecalibrate"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="1"
+                android:layout_marginEnd="4dp"
+                android:text="🔄 RECALIBRATE"
+                android:textSize="11sp"
+                style="@style/Widget.Material3.Button.OutlinedButton" />
 
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:background="#E0E0E0"
-            android:layout_marginBottom="16dp" />
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnStatus"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="1"
+                android:layout_marginStart="4dp"
+                android:text="↻  REFRESH"
+                android:textSize="11sp"
+                style="@style/Widget.Material3.Button.TextButton" />
+        </LinearLayout>
 
-
-
-        <!-- System Status -->
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="System Status"
-            android:textSize="18sp"
-            android:textStyle="bold"
-            android:layout_marginBottom="8dp" />
-
+        <!-- System Status (monospace fallback) -->
         <TextView
             android:id="@+id/txtSystemStatus"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Tap GET STATUS to refresh"
-            android:textSize="13sp"
+            android:visibility="gone"
+            android:textSize="11sp"
             android:fontFamily="monospace"
-            android:background="#F5F5F5"
-            android:padding="12dp"
-            android:layout_marginBottom="16dp" />
+            android:background="#1E1E1E"
+            android:padding="10dp"
+            android:textColor="#78909C"
+            android:layout_marginBottom="12dp" />
 
         <!-- Alert Panel -->
         <LinearLayout
@@ -147,32 +320,34 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:background="#FFF3E0"
+            android:background="#3E2723"
             android:padding="16dp"
-            android:layout_marginBottom="16dp"
+            android:layout_marginBottom="12dp"
             android:visibility="gone">
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="ALERT"
-                android:textSize="16sp"
+                android:text="⚠  ALERT"
+                android:textSize="14sp"
                 android:textStyle="bold"
-                android:textColor="#E65100"
-                android:layout_marginBottom="8dp" />
+                android:textColor="#FF8A65"
+                android:layout_marginBottom="6dp" />
 
             <TextView
                 android:id="@+id/txtAlertType"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:textSize="14sp"
-                android:textStyle="bold" />
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:textColor="#FFAB91" />
 
             <TextView
                 android:id="@+id/txtAlertMessage"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:textSize="13sp"
+                android:textSize="12sp"
+                android:textColor="#BCAAA4"
                 android:layout_marginTop="4dp" />
         </LinearLayout>
 
@@ -182,47 +357,48 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:background="#E3F2FD"
+            android:background="#1A237E"
             android:padding="16dp"
+            android:layout_marginBottom="12dp"
             android:visibility="gone">
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Operator Decision Required"
-                android:textSize="16sp"
+                android:text="🧠 Operator Decision Required"
+                android:textSize="14sp"
                 android:textStyle="bold"
-                android:textColor="#1565C0"
-                android:layout_marginBottom="12dp" />
+                android:textColor="#9FA8DA"
+                android:layout_marginBottom="10dp" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnRequeryAi"
                 android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:text="Re-Query AI"
-                android:layout_marginBottom="8dp" />
+                android:layout_height="44dp"
+                android:text="🔁  Re-Query AI"
+                android:layout_marginBottom="6dp" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnUseDb"
                 android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:text="Use Database Answer"
-                android:layout_marginBottom="8dp"
+                android:layout_height="44dp"
+                android:text="📚  Use Database Answer"
+                android:layout_marginBottom="6dp"
                 style="@style/Widget.Material3.Button.TonalButton" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnUseAi"
                 android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:text="Use AI Answer"
-                android:layout_marginBottom="8dp"
+                android:layout_height="44dp"
+                android:text="🤖  Use AI Answer"
+                android:layout_marginBottom="6dp"
                 style="@style/Widget.Material3.Button.TonalButton" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnSkipQuestion"
                 android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:text="Skip Question"
+                android:layout_height="44dp"
+                android:text="⏭  Skip Question"
                 style="@style/Widget.Material3.Button.OutlinedButton" />
         </LinearLayout>
 

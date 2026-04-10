@@ -39,6 +39,11 @@ CMD_SHUTDOWN = bytes([0xFF])
 _HEARTBEAT_INTERVAL = 5.0
 _HEARTBEAT_TIMEOUT = 2.0
 
+# UDP discovery beacon — lets ghost agents find the controller automatically.
+_DISCOVERY_PORT = 9501
+_BEACON_INTERVAL = 2.0
+_BEACON_MAGIC = b"SIMULATO"
+
 
 class GhostReceiver:
     """TCP server that communicates with the Ghost Agent on the exam laptop.
@@ -58,6 +63,7 @@ class GhostReceiver:
         self._cmd_lock = threading.Lock()
         self._accept_thread: Optional[threading.Thread] = None
         self._heartbeat_thread: Optional[threading.Thread] = None
+        self._beacon_thread: Optional[threading.Thread] = None
         self._running = False
 
     # ------------------------------------------------------------------
@@ -90,10 +96,19 @@ class GhostReceiver:
         )
         self._heartbeat_thread.start()
 
+        self._beacon_thread = threading.Thread(
+            target=self._beacon_loop, daemon=True, name="ghost-beacon"
+        )
+        self._beacon_thread.start()
+
         logger.info(
             "GhostReceiver started — waiting for ghost agent connection on %s:%d",
             self._host,
             self._port,
+        )
+        logger.info(
+            "UDP discovery beacon active on port %d",
+            _DISCOVERY_PORT,
         )
 
     def stop(self) -> None:
@@ -199,6 +214,31 @@ class GhostReceiver:
                     "Ghost agent heartbeat failed — marking as disconnected"
                 )
                 self._disconnect_agent()
+
+    # ------------------------------------------------------------------
+    # Internal — UDP discovery beacon
+    # ------------------------------------------------------------------
+
+    def _beacon_loop(self) -> None:
+        """Background thread: broadcast UDP beacon so agents can discover us.
+
+        Beacon payload: b"SIMULATO|<tcp_port>"
+        Sent to 255.255.255.255:<DISCOVERY_PORT> every _BEACON_INTERVAL seconds.
+        """
+        beacon_payload = _BEACON_MAGIC + b"|" + str(self._port).encode()
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        sock.settimeout(1.0)
+
+        try:
+            while self._running:
+                try:
+                    sock.sendto(beacon_payload, ("255.255.255.255", _DISCOVERY_PORT))
+                except OSError:
+                    pass  # network blip — retry next interval
+                time.sleep(_BEACON_INTERVAL)
+        finally:
+            sock.close()
 
     # ------------------------------------------------------------------
     # Internal — command helpers
