@@ -466,9 +466,28 @@ class WorkflowEngine:
                 self._sm.force_error(decision.error_message or "Decision error")
                 return decision
 
-            # Step 9: Execute click
+            # Step 9: Execute click or Text Typing
             if decision.click_letter:
-                self._execute_click_with_verification(decision.click_letter)
+                if decision.click_letter.startswith("FITB:"):
+                    text_to_type = decision.click_letter.replace("FITB:", "", 1).strip()
+                    logger.info("Executing FITB textual typing: '%s'", text_to_type)
+                    if self._latest_layout is not None:
+                        tb_coords = self._option_detector.detect_textbox(
+                            image_path, self._latest_layout,
+                        )
+                        if tb_coords:
+                            self._click_dispatcher.click_and_type_at_normalized(
+                                tb_coords[0], tb_coords[1], text_to_type
+                            )
+                            # Bypassing the highlighted-bubble CV CV verification for textual inputs
+                            self._last_dispatched_click_letter = decision.click_letter
+                        else:
+                            self._sm.force_error("Could not locate text box bounds for FITB answer")
+                            self._alerts.raise_alert(AlertType.UNEXPECTED_SCREEN, "No TEXT BOX found on answer panel")
+                    else:
+                        logger.error("No valid layout available to execute FITB.")
+                else:
+                    self._execute_click_with_verification(decision.click_letter)
 
             if decision.click_letter:
                 self._log_event("answer_decision", {

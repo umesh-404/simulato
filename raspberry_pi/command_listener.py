@@ -156,7 +156,7 @@ def _process_message(message: dict, hid: HIDController) -> dict:
             coords = None
     if coords is None:
         coords = _command_to_coords(command)
-    if coords is None:
+    if coords is None and command != "TYPE_TEXT":
         detail = "Unknown command or no coordinates"
         # If controller didn't provide coords, we fall back to local grid_map.json.
         # If that fallback is missing a key (often E), report it explicitly.
@@ -168,15 +168,21 @@ def _process_message(message: dict, hid: HIDController) -> dict:
         return {"type": "PI_RESPONSE", "payload": {"command": command, "status": "error", "detail": detail}}
 
     try:
-        if command == "SCROLL_DOWN":
+        if command == "TYPE_TEXT":
+            text_to_type = payload.get("text", "")
+            hid.type_text(text_to_type)
+            print(f"[Pi] Executed: {command} ('{text_to_type}')")
+        elif command == "SCROLL_DOWN":
             hid.move_to_absolute(coords[0], coords[1])
             hid.scroll(-24)
+            print(f"[Pi] Executed: {command} at {coords}")
         elif command == "SCROLL_UP":
             hid.move_to_absolute(coords[0], coords[1])
             hid.scroll(24)
+            print(f"[Pi] Executed: {command} at {coords}")
         else:
             hid.click_at(coords[0], coords[1])
-        print(f"[Pi] Executed: {command} at {coords}")
+            print(f"[Pi] Executed: {command} at {coords}")
         return {"type": "PI_RESPONSE", "payload": {"command": command, "status": "executed"}}
     except Exception as e:
         print(f"[Pi] Execution error: {command}: {e}")

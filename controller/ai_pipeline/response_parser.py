@@ -47,17 +47,24 @@ class AIResponse(BaseModel):
     @field_validator("answer")
     @classmethod
     def validate_answer_letter(cls, v: str) -> str:
-        v = v.strip().upper()
-        if not v:
+        v_stripped = v.strip()
+        if not v_stripped:
             raise ValueError("answer is empty")
+            
+        # Support Fill-in-the-Blank textual responses natively
+        if v_stripped.upper().startswith("FITB:"):
+            return v_stripped
+            
+        v_upper = v_stripped.upper()
         # Take only the first character — models sometimes return "C - explanation"
-        if len(v) > 1:
-            first_char = v[0]
+        if len(v_upper) > 1 and not v_upper.startswith("FITB:"):
+            first_char = v_upper[0]
             if first_char in ("A", "B", "C", "D", "E"):
                 return first_char
-        if v not in ("A", "B", "C", "D", "E"):
-            raise ValueError(f"answer must be A, B, C, D, or E — got '{v}'")
-        return v
+                
+        if v_upper not in ("A", "B", "C", "D", "E"):
+            raise ValueError(f"answer must be A, B, C, D, E, or start with 'FITB:' — got '{v}'")
+        return v_upper
 
 
 # Backward-compatible aliases so existing imports don't break
@@ -93,14 +100,19 @@ def _extract_bare_letter(text: str) -> Optional[str]:
     Try to extract a bare answer letter from text that isn't valid JSON.
     Handles cases like: "C", "The answer is B", "A\n", etc.
     """
-    text = text.strip().upper()
+    text_upper = text.strip().upper()
+    
+    # Check for Fill-in-the-Blank syntax
+    if text_upper.startswith("FITB:"):
+        return text.strip()  # preserve original casing for the typed answer
+        
     # Exact single letter
-    if text in ("A", "B", "C", "D", "E"):
-        return text
+    if text_upper in ("A", "B", "C", "D", "E"):
+        return text_upper
     # First character is a valid letter followed by non-alpha
-    if len(text) >= 1 and text[0] in ("A", "B", "C", "D", "E"):
-        if len(text) == 1 or not text[1].isalpha():
-            return text[0]
+    if len(text_upper) >= 1 and text_upper[0] in ("A", "B", "C", "D", "E"):
+        if len(text_upper) == 1 or not text_upper[1].isalpha():
+            return text_upper[0]
     return None
 
 

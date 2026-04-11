@@ -1343,3 +1343,80 @@ class OptionDetector:
         except Exception as e:
             logger.debug("OCR failed: %s", e)
             return ("", 0.0)
+
+    def detect_textbox(
+        self,
+        image_path: Path,
+        layout: ExamLayout,
+    ) -> Optional[tuple[float, float]]:
+        """
+        Detect a single text input box in the answer panel (for Fill in the Blank).
+        Returns normalized (x, y) coordinates of the text box center.
+        """
+        logger.info("Detecting text box for: %s", image_path.name)
+        
+        try:
+            import cv2
+        except ImportError:
+            logger.warning("OpenCV not available")
+            return None
+
+        img = cv2.imread(str(image_path))
+        if img is None:
+            logger.warning("Could not read image: %s", image_path)
+            return None
+
+        if layout.answer_panel is None:
+            logger.warning("No answer panel in layout")
+            return None
+
+        ap = layout.answer_panel
+        img_h, img_w = img.shape[:2]
+
+        crop = img[ap.y:ap.y2, ap.x:ap.x2]
+        if crop.size == 0:
+            return None
+
+        # Convert to grayscale and apply Canny edge detection
+        gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+        
+        # A text box is usually a crisp white rectangle with a border.
+        # Edge detection + morphological close helps solidify the rectangle edges.
+        edges = cv2.Canny(gray, 50, 150)
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+        closed = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel)
+
+        contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        best_contour = None
+        max_area = 0
+        
+        # Heuristics for a text box:
+        # width > 50px, height > 20px
+        for cnt in contours:
+            x, y, w, h = cv2.boundingRect(cnt)
+            area = w * h
+            aspect_ratio = float(w) / max(1, h)
+            
+            # FITB boxes are usually wide (aspect ratio > 2.0) but bounded
+            if w > 50 and h > 20 and aspect_ratio > 1.5 and aspect_ratio < 20.0:
+                if area > max_area:
+                    max_area = area
+                    best_contour = (x, y, w, h)
+                    
+        if best_contour is None:
+            logger.warning("No text box contour found in answer panel")
+            # Fallback to absolute center of the answer panel if cv2 fails to find edges
+            cx = ap.x + ap.w // 2
+            cy = ap.y + ap.h // 2
+            logger.info("Falling back to center of Answer Panel for text box: (%d, %d)", cx, cy)
+        else:
+            bx, by, bw, bh = best_contour
+            # Calculate absolute coordinates using a top-left bias to ensure safe clicks
+            cx = ap.x + bx + bw // 4
+            cy = ap.y + by + h // 2
+            logger.info("Found text box contour. Clicking point px: (%d, %d)", cx, cy)
+            
+        nx = max(0.0, min(1.0, float(cx) / float(max(1, img_w - 1))))
+        ny = max(0.0, min(1.0, float(cy) / float(max(1, img_h - 1))))
+        return (nx, ny)

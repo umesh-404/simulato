@@ -15,12 +15,16 @@ import time
 from typing import Optional
 
 try:
-    from hidpi import Mouse
+    from hidpi import Mouse, Keyboard
     from hidpi.mouse_buttons import LEFT
+    from hidpi.keyboard_keys import KEY_LEFT_CTRL, KEY_A, KEY_DELETE
     _HIDPI_AVAILABLE = True
 except ImportError:
     _HIDPI_AVAILABLE = False
     LEFT = 1  # standard HID left-button bitmask for raw report fallback
+    KEY_LEFT_CTRL = 0x01
+    KEY_A = 0x04
+    KEY_DELETE = 0x4c
 
 from raspberry_pi.device_config import HID_MOUSE_DEVICE
 
@@ -77,6 +81,26 @@ class HIDController:
             Mouse.move(self._last_x, self._last_y, amount)
         else:
             self._write_6byte_report(0, self._last_x, self._last_y, amount)
+
+    def type_text(self, text: str) -> None:
+        """
+        Wipe the current text box using CTRL+A -> DEL, then type the new text.
+        Requires the target input box to already be clicked and focused.
+        """
+        if not self._use_hidpi:
+            print(f"[HID] type_text fallback: simulated typing '{text}' (HIDPi missing)")
+            return
+
+        # 1. Select All (CTRL + A)
+        Keyboard.send_key(KEY_LEFT_CTRL, KEY_A)
+        time.sleep(0.05)
+        
+        # 2. Delete selection
+        Keyboard.send_key(0, KEY_DELETE)
+        time.sleep(0.05)
+        
+        # 3. Type new text with a small delay for software to keep up
+        Keyboard.send_text(text, delay=0.02)
 
     # ------------------------------------------------------------------
     # Fallback: raw 6-byte absolute report (matches HIDPi descriptor)

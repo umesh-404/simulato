@@ -34,13 +34,16 @@ STEP 2 — REASON AND SOLVE: Apply your expert knowledge to solve the question:
    - Eliminate wrong options one by one.
    - Select the ONE option that is objectively correct.
    - DO NOT guess. THINK IT THROUGH.
-STEP 3 — OUTPUT: Return ONLY the raw JSON object with JUST the answer letter.
+STEP 3 — OUTPUT: Return ONLY the raw JSON object with the answer. 
 
 REQUIRED JSON OUTPUT:
+- If the question is MULTIPLE CHOICE, return the single letter:
 {"answer": "<A/B/C/D/E>"}
+- If the question is a FILL-IN-THE-BLANK (no radio buttons, demands text string), return:
+{"answer": "FITB: <your exact textual answer>"}
 
 CRITICAL RULES:
-• "answer" MUST be exactly one letter: A, B, C, D, or E.
+• "answer" MUST be exactly one letter if multiple choice, or prefixed with 'FITB: ' if text entry.
 • Output ONLY the raw JSON object. No explanations, no markdown, no codeblocks.
 """
 
@@ -62,13 +65,16 @@ STEP 2 — REASON AND SOLVE: Apply your expert knowledge to solve the question:
    - Eliminate wrong options one by one.
    - Select the ONE option that is objectively correct.
    - DO NOT guess. THINK IT THROUGH.
-STEP 3 — OUTPUT: Return ONLY the raw JSON object with JUST the answer letter.
+STEP 3 — OUTPUT: Return ONLY the raw JSON object with the answer. 
 
 REQUIRED JSON OUTPUT:
+- If the question is MULTIPLE CHOICE, return the single letter:
 {"answer": "<A/B/C/D/E>"}
+- If the question is a FILL-IN-THE-BLANK (no radio buttons, demands text string), return:
+{"answer": "FITB: <your exact textual answer>"}
 
 CRITICAL RULES:
-• "answer" MUST be exactly one letter: A, B, C, D, or E.
+• "answer" MUST be exactly one letter if multiple choice, or prefixed with 'FITB: ' if text entry.
 • Output ONLY the raw JSON object. No explanations, no markdown, no codeblocks.
 """
 
@@ -76,19 +82,19 @@ CRITICAL RULES:
 # User prompt — kept minimal; the image carries the context
 # ---------------------------------------------------------------------------
 
-USER_PROMPT = "Solve this exam question. Return ONLY valid JSON with just the answer letter."
+USER_PROMPT = "Solve this exam question. Return ONLY valid JSON with just the answer."
 
 USER_PROMPT_STITCHED = (
     "This image is a vertically stitched composite of two overlapping captures "
     "(the exam screen was scrolled to reveal more content). Treat it as a single "
     "continuous question. Deduplicate any repeated text or options. "
-    "Return ONLY valid JSON with just the answer letter."
+    "Return ONLY valid JSON with just the answer."
 )
 
 USER_PROMPT_WITH_PANEL = (
     "The FIRST image is the full exam screenshot. "
     "The SECOND image is a zoomed-in crop of the answer options panel for easier reading. "
-    "Solve the question. Return ONLY valid JSON with just the answer letter."
+    "Solve the question. Return ONLY valid JSON with just the answer."
 )
 
 

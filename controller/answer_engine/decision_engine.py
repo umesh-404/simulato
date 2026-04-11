@@ -119,6 +119,18 @@ def decide_answer(
                 match_result=match,
             )
 
+        # Fast-track FITB inputs to bypass multiple-choice validation mapping
+        answer_letter = match.question_record.get("answer_letter", "")
+        if answer_letter and answer_letter.startswith("FITB:"):
+            logger.info("Restored FITB textual answer from DB: %s", answer_letter)
+            return AnswerDecision(
+                outcome=DecisionOutcome.CLICK,
+                click_letter=answer_letter,
+                source=match.source.value,
+                question_id=match.question_record["question_id"],
+                match_result=match,
+            )
+
         option_match = match_option_by_content(db_answer, options_dict)
         if not option_match.found:
             return AnswerDecision(

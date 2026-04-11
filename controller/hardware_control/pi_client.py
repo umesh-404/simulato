@@ -24,6 +24,7 @@ MAX_RESPONSE_BYTES = 65536
 VALID_COMMANDS = {
     "CLICK_A", "CLICK_B", "CLICK_C", "CLICK_D", "CLICK_E",
     "CLICK_NEXT", "SCROLL_LEFT", "SCROLL_RIGHT", "SCROLL_DOWN", "SCROLL_UP",
+    "TYPE_TEXT",
 }
 
 
@@ -73,7 +74,7 @@ class PiClient:
     def is_connected(self) -> bool:
         return self._socket is not None
 
-    def send_command(self, command: str, coords: Optional[tuple[int, int]] = None) -> dict:
+    def send_command(self, command: str, coords: Optional[tuple[int, int]] = None, **kwargs) -> dict:
         """
         Send a command to the Pi and wait for ACK.
 
@@ -96,7 +97,7 @@ class PiClient:
         last_error: Optional[Exception] = None
         for attempt in range(1, COMMAND_MAX_RETRIES + 1):
             try:
-                return self._send_once(command, attempt, coords)
+                return self._send_once(command, attempt, coords, **kwargs)
             except (socket.timeout, socket.error, json.JSONDecodeError) as e:
                 logger.warning(
                     "Pi command '%s' attempt %d/%d failed: %s",
@@ -108,10 +109,11 @@ class PiClient:
             f"Command '{command}' failed after {COMMAND_MAX_RETRIES} attempts: {last_error}"
         )
 
-    def _send_once(self, command: str, attempt: int, coords: Optional[tuple[int, int]]) -> dict:
+    def _send_once(self, command: str, attempt: int, coords: Optional[tuple[int, int]], **kwargs) -> dict:
         payload: dict[str, object] = {"command": command}
         if coords is not None:
             payload["coords"] = [int(coords[0]), int(coords[1])]
+        payload.update(kwargs)
         message = json.dumps({"type": "PI_COMMAND", "payload": payload})
 
         with ExecutionTimer(f"pi_command_{command}_attempt_{attempt}"):
