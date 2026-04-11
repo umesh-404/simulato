@@ -37,12 +37,12 @@ CONTROLLER_PORT = int(os.environ.get("CONTROLLER_PORT", "8000"))
 PI_HOST = os.environ.get("PI_HOST", "192.168.1.101")
 PI_PORT = int(os.environ.get("PI_PORT", "9000"))
 
-# Gemini AI via Vertex AI (sole AI provider — Gemini 2.5 Flash, non-reasoning)
+# Gemini AI via Vertex AI
 # Authentication: uses Application Default Credentials (ADC)
 #   Run: gcloud auth application-default login
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3-flash-preview")
 GCP_PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "")
-GCP_LOCATION = os.environ.get("GCP_LOCATION", "us-central1")
+GCP_LOCATION = os.environ.get("GCP_LOCATION", "global")
 AI_API_MAX_RETRIES = int(os.environ.get("AI_API_MAX_RETRIES", "2"))
 AI_API_BACKOFF_BASE_SECONDS = float(os.environ.get("AI_API_BACKOFF_BASE_SECONDS", "1.0"))
 

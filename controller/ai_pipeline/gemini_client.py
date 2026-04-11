@@ -235,20 +235,14 @@ def _call_api(image_bytes: bytes, is_stitched: bool, panel_crop_bytes: Optional[
             types.Part.from_bytes(data=panel_crop_bytes, mime_type="image/jpeg"),
         )
 
-    # Configure: non-reasoning + low-res image (matches AI Studio token usage) + JSON output
+    # Configure: non-reasoning + low-res image (matches AI Studio token usage) 
+    # We omit explicit response_mime_type/schema because Vertex AI's structured 
+    # decoding layer can add 1-3s of latency overhead compared to raw text.
     config = types.GenerateContentConfig(
         system_instruction=system_prompt,
         temperature=0,
-        thinking_config=types.ThinkingConfig(thinking_budget=0),
+        thinking_config=types.ThinkingConfig(thinking_level="MINIMAL"),
         media_resolution=types.MediaResolution.MEDIA_RESOLUTION_MEDIUM,
-        response_mime_type="application/json",
-        response_schema={
-            "type": "OBJECT",
-            "properties": {
-                "answer": {"type": "STRING"}
-            },
-            "required": ["answer"],
-        },
     )
 
     try:
@@ -306,10 +300,17 @@ def query_gemini(image_path: Path, ocr_context: str = "", is_stitched: bool = Fa
 
     # Best-effort: crop the answer panel for a zoomed-in view that
     # helps the AI read option text through watermarks/noise.
-    panel_crop = _crop_answer_panel(image_path)
-    if panel_crop is not None:
-        panel_crop = _compress_for_ai(panel_crop)
-        logger.info("Answer panel crop included (%d bytes)", len(panel_crop))
+    # In ghost mode, DXGI captures are perfectly clear, so we skip the
+    # duplicate layout scan and double-image embedding inference to save ~2s.
+    from controller.config import CAPTURE_MODE
+    panel_crop = None
+    if CAPTURE_MODE != "ghost":
+        panel_crop = _crop_answer_panel(image_path)
+        if panel_crop is not None:
+            panel_crop = _compress_for_ai(panel_crop)
+            logger.info("Answer panel crop included (%d bytes)", len(panel_crop))
+    else:
+        logger.info("Ghost mode: skipping answer panel crop for faster AI inference")
 
     last_error: Optional[Exception] = None
     for attempt in range(1, MAX_RETRIES + 1):

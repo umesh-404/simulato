@@ -26,7 +26,7 @@ from controller.hardware_control.pi_client import PiClient, PiConnectionError, P
 from controller.hardware_control.verification_engine import VerificationEngine
 from controller.mobile_api.api_server import queue_alert_for_broadcast
 from controller.orchestrator.state_machine import StateMachine, SystemState, InvalidTransitionError
-from controller.orchestrator.workflow_engine import WorkflowEngine
+from controller.orchestrator.workflow_engine import WorkflowEngine, RetryCaptureError
 
 from controller.replay.run_loader import create_run, RunContext
 from controller.utils.logger import get_logger, EventLogger
@@ -451,6 +451,10 @@ class SystemController:
                 AlertType.INPUT_FAILURE,
                 f"Pi not connected during click: {e}. Start Pi listener and press CONTINUE.",
             )
+        except RetryCaptureError as e:
+            logger.info("Question processing aborted for retry: %s", e)
+            # Fetch a new frame in 0.5s to give the screen time to render
+            self._schedule_timer(0.5, self._request_capture)
         except PiCommandError as e:
             logger.error("Pi command failed during processing: %s", e)
             self._sm.force_error(f"pi_command_failed:{e}")

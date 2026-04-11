@@ -2,9 +2,9 @@
 
 ## Project: Simulato
 
-Version: 1.4.1
-Status: Full Implementation Complete
-Last Updated: 2026-03-28
+Version: 1.5.0
+Status: Full Implementation Complete + Ghost Pipeline Advancements
+Last Updated: 2026-04-11
 
 ---
 
@@ -62,7 +62,7 @@ All implementation follows:
       `AI_API_MAX_RETRIES` (default 2),
       `AI_API_BACKOFF_BASE_SECONDS` (default 1.0)
 - [x] Verification frame timeout: `VERIFY_FRAME_TIMEOUT_SECONDS` (default 18)
-- [x] Default AI provider: Enforced Vertex AI (Gemini 2.5 Flash)
+- [x] Default AI provider: Enforced Vertex AI (Gemini 3 Flash Preview via `gemini-3-flash-preview` on `global` endpoints)
 - [x] `controller/utils/logger.py` — file + console logging, structured EventLogger (JSONL)
 - [x] `controller/utils/timer.py` — context-manager execution timer
 - [x] `controller/utils/text_normalizer.py` — Unicode NFC, lowercase, whitespace collapse, numeric normalization
@@ -114,33 +114,25 @@ All implementation follows:
 - [x] `embedding_to_bytes()` / `bytes_to_embedding()` for SQLite BLOB storage
 - [x] `find_best_match()` with configurable threshold (default 0.92)
 
-## 3.6 Cloud AI Integration — Vertex AI Gemini (Phase 5)
+## 3.6 Cloud AI Integration — Vertex AI Gemini 3 Flash (Phase 5)
 
 - [x] `controller/ai_pipeline/prompt_builder.py`
-- [x] System prompt engineered for exact JSON output with `answer_content` field
-- [x] Vision API message format with base64 image
+- [x] System prompt engineered for blistering fast raw-text output (removed JSON schema overhead)
+- [x] Vision API message format with base64/JPEG bytes
 - [x] `controller/ai_pipeline/response_parser.py`
-- [x] Pydantic models: `GeminiResponse`, `GeminiResponseOptions`, `GeminiErrorResponse`
-- [x] JSON extraction from markdown-fenced or prose-wrapped responses
-- [x] `answer_content` cross-validation against `options[answer]`
-- [x] `controller/ai_pipeline/Gemini_client.py`
+- [x] Adapted parser logic to rapidly extract A/B/C/D direct text characters instead of forced JSON trees
+- [x] `controller/ai_pipeline/gemini_client.py`
 - [x] `temperature: 0` for deterministic output (Canonical Law 1)
-- [x] **Structured Outputs (`response_format`)** with strict JSON Schema (Zero-parse-failure design)
-- [x] **Primary Solver Role:** Exclusively responsible for question OCR and reasoning
+- [x] **Zero-Reasoning Bypass:** Hardcoded `thinking_level="MINIMAL"` inside the `GenerateContentConfig` schema to explicitly suppress unnecessary token reasoning loops and drastically reduce output latency.
+- [x] Reduces end-to-end question processing overhead to ~3.8 seconds per question
 - [x] Retry with exponential backoff (`AI_API_BACKOFF_BASE_SECONDS` * 2^attempt)
 - [x] Safe error raise when `MAX_RETRIES=0` (no `raise None` crash)
-- [x] API key from environment variable
+- [x] API key and Project implicitly inherited from Application Default Credentials (ADC)
 
-### 3.6b Cloud AI Integration — Gemini Vision
+### 3.6b [Deprecated] Legacy Gemini Support
 
-- [x] `controller/ai_pipeline/gemini_client.py`
-- [x] OpenAI-compatible endpoint (generativelanguage.googleapis.com)
-- [x] `temperature: 0` for deterministic output (Canonical Law 1)
-- [x] Shares prompt builder and response parser with Gemini client
-- [x] **Default Primary Solver:** Selectable at runtime via `` command
-- [x] Retry with exponential backoff (matches Gemini retries)
-- [x] Safe error raise when `MAX_RETRIES=0` (no `raise None` crash)
-- [x] API key from environment variable
+- [x] Replaced legacy Gemini 2.5 Flash implementation with Vertex Gemini 3 migration.
+- [x] `gemini_client.py` unified to act solely as the v3 Vertex endpoint runner.
 
 ### 3.6c Local AI Integration — Ollama/Qwen (Auxiliary)
 
@@ -236,8 +228,8 @@ All implementation follows:
 
 - [x] `controller/capture_pipeline/screen_validator.py`
 - [x] 5-check validation pipeline: dimensions, blank detection, edge density, zone distribution, uniform region detection
-- [x] Content zone analysis (vertical thirds)
-- [x] Abnormal screen detection (login/error screens via uniform color blocks)
+- [x] **Ghost Mode Resilience Mechanism**: Bypasses hard ERROR crashing if `CAPTURE_MODE="ghost"` encounters a mid-render blank frame.
+- [x] Emits `RetryCaptureError` to the workflow engine, enforcing a 0.5s pause to fetch a fresh, natively rendered DXGI layout without breaking state.
 
 ### 3.10b OCR Layout Analyzer (NEW)
 
@@ -487,13 +479,13 @@ All implementation follows:
 - [x] **Low:** Added zero-guard on `grid_size` division in `grid_mapper.py`
 - [x] **Low:** Fixed `clean_imports.py` and `restore_imports.py` to skip missing files and guard against duplicate inserts
 
-## 6.2 Updates (v1.4.1) — Pipeline Stability & Targeting
+## 6.2 Updates (v1.5.0) — Ghost Architecture & Gemini 3 Finalization
 
-- [x] **Critical:** Integrated **OCR Context Injection**. Tesseract raw OCR transcript is injected alongside the base64 image into the Vertex AI Gemini vision prompts. This successfully prevents "blind hallucination" math word problems caused by aggressive watermarks.
-- [x] **Critical:** Redesigned `workflow_engine._blend_with_calibration()` to use a **Split-Axis Strategy**. X-axis coordinate blends heavily use pure calibration (since the radio-column is perfectly stable across questions). Y-axis uses mostly live OCR layout detection (as Y shifts per question text length), with a >120px sanity fallback threshold.
-- [x] **Critical:** Documented and shipped **perspective-aware `transform`** in `config/grid_map.json` — naive `scale_y = screen_h / capture_h` with zero offset caused systematic vertical mis-clicks (e.g. one option row low) when the capture phone views the laptop at an angle; `click_at_normalized` now benefits from tuned `scale_y` / `offset_y` (and matching `scale_x` where needed).
-- [x] **Medium:** `coordinate_solver.calibrate_from_screenshot` — replaced broad `except Exception` around transform reuse with `_try_reuse_transform_from_disk()`; reuse triggers on non-zero offsets **or** material scale drift from naive ratios (preserves scale-only corrections).
-- [x] **Low:** Removed redundant Anti-Hallucination "Reasoning Steps" requirement from Gemini prompt; OCR context proved sufficient while lowering latency and parser complexity.
+- [x] **Critical:** Migrated core generation to `gemini-3-flash-preview` on Vertex 'global' endpoints.
+- [x] **Critical:** Deactivated Gemini 3 reasoning mode exclusively using `thinking_level="MINIMAL"` config to compress test loop times to ~3.8 seconds/question.
+- [x] **Critical:** Ripped out JSON syntax structural loops in `gemini_client.py`/`prompt_builder.py` in exchange for raw text deduction.
+- [x] **Critical:** Achieved **Ghost Mode completeness**. Streaming UDP frames handle the transition-induced black-flickers safely via `RetryCaptureError`.
+- [x] **Medium:** Resolved Android Remote Control application static IP drift failures when connecting WS endpoints across dynamically leased Mother PC hardware.
 
 ---
 

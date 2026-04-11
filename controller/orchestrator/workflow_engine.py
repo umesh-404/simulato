@@ -68,6 +68,11 @@ SCROLL_FRAME_TIMEOUT = 10  # seconds
 VERIFY_FRAME_TIMEOUT = VERIFY_FRAME_TIMEOUT_SECONDS
 
 
+class RetryCaptureError(Exception):
+    """Raised when capture needs to be retried (e.g. mid-render blank screen)."""
+    pass
+
+
 class WorkflowEngine:
     """
     Executes the main question-processing workflow loop.
@@ -187,6 +192,7 @@ class WorkflowEngine:
         self._last_dispatched_click_letter = None
         self._mapping_frame_data = None
         self._is_waiting_mapping_flag = False
+        self._blank_frame_retry_count = 0
         self._mapping_frame_event.set()
         logger.info("Test context set: %s", test_name)
 
@@ -329,7 +335,20 @@ class WorkflowEngine:
                     logger.warning(
                         "Bypassing low-density screen validation failure because exam layout/options were detected"
                     )
+                    self._blank_frame_retry_count = 0
                 else:
+                    is_blank = any("Image appears blank or solid" in issue for issue in validation.issues)
+                    if is_blank or (_GHOST and validation.confidence <= 0.3):
+                        self._blank_frame_retry_count += 1
+                        if self._blank_frame_retry_count <= 4:
+                            logger.warning(
+                                "Screen valid failed with blank/mid-render features. Retrying capture (attempt %d).", 
+                                self._blank_frame_retry_count
+                            )
+                            raise RetryCaptureError(f"Blank screen: {validation.issues}")
+                        else:
+                            logger.error("Max retries exceeded for blank screen.")
+                    
                     self._sm.force_error(f"Screen validation failed: {validation.issues}")
                     self._alerts.raise_alert(
                         AlertType.UNEXPECTED_SCREEN,
@@ -337,6 +356,8 @@ class WorkflowEngine:
                     )
                     self._log_event("screen_validation_failed", {"issues": validation.issues})
                     return None
+            else:
+                self._blank_frame_retry_count = 0
 
             # --- Speculative early AI call ---
             # Fire the AI query with the raw image BEFORE preprocessing/OCR.

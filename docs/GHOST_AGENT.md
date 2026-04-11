@@ -1,8 +1,8 @@
 # GHOST AGENT — Direct Screen Capture from Exam Laptop
 
-**Status:** Implemented (controller integration complete, agent ready for build)  
-**Version:** v1.0  
-**Last Updated:** 2026-04-06
+**Status:** Fully Deployed in Production (v1.6.0)
+**Version:** v1.6.0
+**Last Updated:** 2026-04-11
 
 ---
 

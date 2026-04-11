@@ -68,43 +68,17 @@ class MockVerificationEngine:
 
 # --- Main Test ---
 def run_test():
-    TEST_IMAGE = Path('datasets/ghost_test/raw/ghost_q1.jpg')
-    if not TEST_IMAGE.exists():
-        import glob
-        files = glob.glob('runs/**/screenshots/capture_*.jpg', recursive=True)
-        if files:
-            TEST_IMAGE = Path(files[5]) # Try to grab one
-            
-    if not TEST_IMAGE.exists():
-        print("No test image found.")
-        sys.exit(1)
-        
-    print(f"=== TESTING Ghost Mode Pipeline ===")
-    print(f"Using image: {TEST_IMAGE.name}")
+    import glob
+    files = sorted(glob.glob('runs/default_test_20260410_155432/screenshots/capture_000*.jpg'))
+    # Filter out preprocessed ones just in case
+    files = [f for f in files if "preprocessed" not in f]
     
-    # 1. Test Option Detection / Layout (Right vs Left panel check)
-    t0 = time.time()
-    layout = ExamLayoutDetector().detect(TEST_IMAGE)
-    opt_map = OptionDetector().detect(TEST_IMAGE, layout)
-    t_layout = time.time() - t0
-    
-    print(f"\n[Layout Check]")
-    print(f"Divider X: {layout.divider_x if layout else 'None'}")
-    if layout and layout.answer_panel:
-        print(f"Answer Panel (Click Target Zone): X=[{layout.answer_panel.x} to {layout.answer_panel.x + layout.answer_panel.w}]")
-    else:
-        print("No answer panel detected.")
-        
-    print(f"\n[Option Coordinates] (Verify these fall on the RIGHT panel)")
-    if opt_map:
-        for opt in opt_map.options:
-            print(f"Option {opt.label}: click_x={opt.click_x}, click_y={opt.click_y}, text='{opt.text}'")
-    else:
-        print("No options detected.")
-        
-    # 2. Test Full Pipeline via WorkflowEngine
-    print(f"\n=== Running Full API Pipeline ===")
-    img_bytes = TEST_IMAGE.read_bytes()
+    test_images = [Path(f) for f in files[:4]]
+    if len(test_images) < 4:
+         print("Not enough test images found. Found:", len(test_images))
+         sys.exit(1)
+         
+    print(f"=== TESTING Ghost Mode Pipeline (4 Questions) ===")
     
     sm = MockStateMachine()
     receiver = MockImageReceiver()
@@ -112,54 +86,64 @@ def run_test():
     workflow = WorkflowEngine(sm, MockAlertManager(), click, MockVerificationEngine(), receiver, MockEventLogger())
     workflow.set_test_context("test_speed_run")
     
-    # Override receive_image in the receiver to just return our pre-existing file path
-    def fake_receive(data):
-        import shutil
-        out_path = Path(f"runs/test_working/{TEST_IMAGE.name}")
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy(TEST_IMAGE, out_path)
-        return out_path
-    receiver.receive_image = fake_receive
+    total_start = time.time()
     
-    # Fake the wait method to simulate frames arriving instantly
-    def fake_wait(timeout=None):
-        # Simulate arrival without immediately calling into the workflow to prevent recursion depth/crash issues
-        return True
+    for idx, TEST_IMAGE in enumerate(test_images):
+        print(f"\n--- Question {idx+1}/4 ---")
+        print(f"Using image: {TEST_IMAGE.name}")
         
-    workflow._verification_frame_event.wait = fake_wait
-    
-    t_pipe_start = time.time()
-    
-    try:
-         workflow.process_question(img_bytes)
-    except Exception as e:
-         print(f"Exception in pipeline (ignoring for validation): {e}")
-         
-    t_pipe_end = time.time()
-    
+        # We need receiver to return the current loop's image
+        def fake_receive(data, current_img=TEST_IMAGE):
+            import shutil
+            out_path = Path(f"runs/test_working/{current_img.name}")
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                shutil.copy(current_img, out_path)
+            except shutil.SameFileError:
+                pass
+            return out_path
+            
+        receiver.receive_image = fake_receive
+        
+        img_bytes = TEST_IMAGE.read_bytes()
+        
+        def fake_wait(timeout=None, bytes_data=img_bytes):
+            workflow.on_verification_frame_received(bytes_data)
+            return True
+        workflow._verification_frame_event.wait = fake_wait
+        
+        click.clicks.clear()
+        
+        q_start = time.time()
+        try:
+             workflow.process_question(img_bytes)
+        except Exception as e:
+             print(f"Exception in pipeline (ignoring for validation): {e}")
+        q_end = time.time()
+        
+        print(f"Cycle time: {q_end - q_start:.2f}s")
+        if len(click.clicks) > 0 and isinstance(click.clicks[0], dict):
+            nx = click.clicks[0]["nx"]
+            ny = click.clicks[0]["ny"]
+            
+            img = cv2.imread(str(TEST_IMAGE))
+            h, w = img.shape[:2]
+            pixel_x = int(nx * w)
+            pixel_y = int(ny * h)
+            
+            # Draw a red crosshair
+            cv2.drawMarker(img, (pixel_x, pixel_y), (0, 0, 255), cv2.MARKER_CROSS, 40, 3)
+            cv2.circle(img, (pixel_x, pixel_y), 5, (0, 0, 255), -1)
+            
+            res_file = f"runs/test_working/accuracy_{TEST_IMAGE.name}"
+            cv2.imwrite(res_file, img)
+            print(f"Mapped click coordinate: ({pixel_x}, {pixel_y}) -> Saved map.")
+
+    total_end = time.time()
+    total_time = total_end - total_start
     print(f"\n=== Test Results ===")
-    print(f"Layout/Option pass time: {t_layout:.2f}s")
-    print(f"Full pipeline cycle time : {t_pipe_end - t_pipe_start:.2f}s")
-    
-    # Check Accuracy Visuals
-    print(f"\nDispatched Clicks: {click.clicks}")
-    if len(click.clicks) > 0 and isinstance(click.clicks[0], dict):
-        nx = click.clicks[0]["nx"]
-        ny = click.clicks[0]["ny"]
-        
-        img = cv2.imread(str(TEST_IMAGE))
-        h, w = img.shape[:2]
-        pixel_x = int(nx * w)
-        pixel_y = int(ny * h)
-        print(f"Mapped click coordinate: {pixel_x}, {pixel_y}")
-        
-        # Draw a red crosshair
-        cv2.drawMarker(img, (pixel_x, pixel_y), (0, 0, 255), cv2.MARKER_CROSS, 40, 3)
-        cv2.circle(img, (pixel_x, pixel_y), 5, (0, 0, 255), -1)
-        
-        res_file = f"runs/test_working/accuracy_{TEST_IMAGE.name}"
-        cv2.imwrite(res_file, img)
-        print(f"Accuracy image saved to: {res_file}")
+    print(f"Total time for 4 questions: {total_time:.2f}s")
+    print(f"Average time per question: {total_time/4:.2f}s")
 
 if __name__ == '__main__':
     run_test()

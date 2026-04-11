@@ -4,7 +4,7 @@
 
 Version: 1.5.0\
 Status: Authoritative Architecture Specification\
-Last Updated: 2026-03-29
+Last Updated: 2026-04-11
 
 ------------------------------------------------------------------------
 
@@ -138,9 +138,9 @@ Responsibilities:
 -   detect question boundaries
 -   detect scrolling requirements
 -   stitch image segments
--   call Cloud AI (Vertex AI Gemini) for question solving — **always, for every question**
+-   call Cloud AI (Vertex AI Gemini 3 Flash Preview) for question solving — **always, for every question**
 -   call Local AI (Ollama/Qwen) for auxiliary screen analysis (scroll/answer verification)
--   process structured AI responses (via `response_format`)
+-   process raw format AI responses (via direct text string extraction without JSON bounds for zero-overhead inference)
 -   determine answer actions from AI response
 -   dispatch commands to Raspberry Pi
 -   verify input results
@@ -408,8 +408,7 @@ Every question is sent directly to the cloud AI — there is no database pre-che
 or image-hash cache layer in the processing path.
 
 1.  **Primary Solver (Cloud AI):**
-    -   **Vertex AI Gemini** (default primary): xAI's fast vision model with Structured Outputs.
-    -   **Gemini 2.5 Flash** (fallback): Google's vision model, automatically engaged if Gemini fails parsing or transport.
+    -   **Vertex AI Gemini 3 Flash Preview** (default primary): Google's bleeding edge fast vision model with zero-reasoning parameters enabled (`thinking_level="MINIMAL"`).
     The primary solver is fed the stitched question image along with an **OCR Text Injection** (a complete raw transcript of all text extracted by Tesseract). This forces the LLM to ground its reasoning on the actual pixels, virtually eliminating hallucinated answers when watermarks degrade visual clarity.
     When the image is a multi-frame stitched composite, a dedicated `USER_PROMPT_STITCHED` message explicitly tells the AI to treat it as a single continuous question and deduplicate any repeated content.
 
@@ -434,8 +433,8 @@ Processing steps:
 
 1.  capture and stitch question image
 2.  run OCR layout pass
-3.  call Primary Solver (Vertex AI Gemini) with image + OCR context
-4.  parse structured JSON response
+3.  call Primary Solver (Vertex AI Gemini 3 Flash Preview) with image + OCR context
+4.  parse direct textual response stream (A/B/C/D) via raw extraction
 5.  remap AI answer letter to live on-screen option content (handles shuffled options)
 
 ------------------------------------------------------------------------
@@ -460,7 +459,7 @@ returned answer letter to the **current live on-screen option content**.
 
 Steps:
 
-1.  AI returns answer letter (e.g. "A") and answer content text
+1.  AI returns answer letter (e.g. "A") and answer content text (raw textual output without JSON overhead)
 2.  OCR reads current on-screen option texts from the answer panel
 3.  System matches AI answer content against live option texts
 4.  The live-matched letter is used for click dispatch
