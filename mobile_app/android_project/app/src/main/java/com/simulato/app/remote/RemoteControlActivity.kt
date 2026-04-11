@@ -96,6 +96,7 @@ class RemoteControlActivity : AppCompatActivity() {
         binding.btnStop.setOnClickListener { sendCommand("STOP", "Stopping...") }
         binding.btnRecalibrate.setOnClickListener { sendCommand("CALIBRATE", "Calibrating...") }
         binding.btnStatus.setOnClickListener { fetchStatus() }
+        binding.btnReconnectGhost.setOnClickListener { sendCommand("RECONNECT_GHOST", "Resetting Exam PC link...") }
 
         // --- Decision buttons ---
         binding.btnRequeryAi.setOnClickListener { sendDecision(Constants.OperatorDecisions.REQUERY_AI) }
@@ -175,11 +176,13 @@ class RemoteControlActivity : AppCompatActivity() {
 
                     // Capture mode
                     val captureMode = payload?.get("capture_mode")?.asString ?: "unknown"
-                    binding.txtCaptureMode.text = captureMode.uppercase()
 
-                    // Ghost agent row (visible only in ghost mode)
+                    // ---- Section 2: Exam PC Connection card ----
                     if (captureMode == "ghost") {
-                        binding.layoutGhostRow.visibility = View.VISIBLE
+                        binding.layoutExamPcCard.visibility = View.VISIBLE
+                        binding.txtCaptureMode.text = "GHOST"
+
+                        // Ghost connection status
                         val ghostEl = payload?.get("ghost_connected")
                         if (ghostEl != null && !ghostEl.isJsonNull) {
                             val connected = ghostEl.asBoolean
@@ -188,11 +191,20 @@ class RemoteControlActivity : AppCompatActivity() {
                                 if (connected) 0xFF4CAF50.toInt() else 0xFFFF5252.toInt()
                             )
                         } else {
-                            binding.txtGhostStatus.text = "—"
-                            binding.txtGhostStatus.setTextColor(0xFF616161.toInt())
+                            binding.txtGhostStatus.text = "● Waiting..."
+                            binding.txtGhostStatus.setTextColor(0xFFFFC107.toInt())
+                        }
+
+                        // Ghost agent IP
+                        val ghostIpEl = payload?.get("ghost_agent_ip")
+                        if (ghostIpEl != null && !ghostIpEl.isJsonNull) {
+                            binding.txtGhostIp.text = ghostIpEl.asString
+                        } else {
+                            binding.txtGhostIp.text = "—"
                         }
                     } else {
-                        binding.layoutGhostRow.visibility = View.GONE
+                        binding.layoutExamPcCard.visibility = View.GONE
+                        binding.txtCaptureMode.text = captureMode.uppercase()
                     }
 
                     // Question number

@@ -278,23 +278,26 @@ class ExamLayoutDetector:
     # ------------------------------------------------------------------
 
     def _detect_divider(
-        self,
-        gray: np.ndarray,
-        content_top: int,
-        content_bottom: int,
-        nav_w: int,
-        img_w: int,
+        self, gray: np.ndarray, content_top: int, content_bottom: int, nav_w: int, img_w: int
     ) -> int:
         """
-        Find the vertical divider line in the content area.
-
-        Strategy:
-            1. Crop to the expected horizontal region (38-58% of width).
-            2. Apply Sobel-X edge detection → vertical edges.
-            3. Project vertically (sum each column) → peak = divider.
-            4. Validate the candidate has a continuous vertical span.
+        Dynamically find the vertical divider between the question and answers.
+        1. Limit search to the middle region of the page
+        2. Detect strongest vertical edge (Sobel-X)
+        3. Check for drag handle dot pattern as fallback
+        4. Validate the candidate has a continuous vertical span.
         """
         import cv2
+
+        # Ghost captures are direct screenshots of a CSS split-view.
+        # The split has no visible gray border or structural drag-handle dots,
+        # but bounding it is strict. Visual scan will falsely trip on text.
+        try:
+            from controller.config import CAPTURE_MODE
+            if CAPTURE_MODE == "ghost":
+                return int(img_w * 0.46)
+        except Exception:
+            pass
 
         content_region = gray[content_top:content_bottom, :]
         c_h, c_w = content_region.shape[:2]

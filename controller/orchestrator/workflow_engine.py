@@ -31,10 +31,15 @@ from controller.ai_pipeline.gemini_client import query_gemini, GeminiAPIError
 
 from controller.ai_pipeline.response_parser import AIResponse, ParseError
 from controller.config import (
+    CAPTURE_MODE,
     OCR_LAYOUT_PRIMARY_ENABLED,
     GEMINI_MODEL,
     VERIFY_FRAME_TIMEOUT_SECONDS,
 )
+
+# Ghost mode uses drastically shorter sleeps because captures are
+# instant (~50ms via DXGI+LAN) vs phone-camera mode (~2s shutter lag).
+_GHOST = CAPTURE_MODE == "ghost"
 from controller.answer_engine.decision_engine import (
     AnswerDecision,
     DecisionOutcome,
@@ -234,7 +239,7 @@ class WorkflowEngine:
             # picking up false positives (e.g. the Clear button).
             try:
                 self._click.click_option(retry_letter)
-                time.sleep(1.8)
+                time.sleep(0.3 if _GHOST else 1.8)
                 verified = self._verify_option_click(retry_letter)
                 if verified:
                     logger.info("Post-recalibration click verified for option %s", retry_letter)
@@ -249,7 +254,8 @@ class WorkflowEngine:
             self.advance_to_next()
             return None
 
-        self._question_number += 1
+        if not _GHOST:
+            self._question_number += 1
         logger.info("=== Processing question %d ===", self._question_number)
         # Prevent stale layout/target coordinates from previous question.
         self._latest_ocr_layout = None
@@ -362,9 +368,9 @@ class WorkflowEngine:
                 self._latest_ocr_layout = None
                 self._latest_interaction_ocr_layout = None
 
-            # Question number: auto-incremented (OCR extraction skipped for speed).
-            self._question_number += 1
-            logger.info("Question number: %d (auto-incremented)", self._question_number)
+            # (Duplicate increment removed. In ghost mode, question sequence is irrelevant.)
+            if not _GHOST:
+                logger.info("Question number: %d (auto-increment skipped in ghost mode)", self._question_number)
 
             ai_response = None
             ai_model_used = ""
@@ -496,7 +502,7 @@ class WorkflowEngine:
         self._log_event("click_next", {"after_question": self._question_number})
 
         # Browser needs time to process the click and navigate.
-        time.sleep(2.5)
+        time.sleep(0.5 if _GHOST else 2.5)
 
         result = self._verify_next_click_by_change(pre_next_path)
         if result.verified:
@@ -507,7 +513,7 @@ class WorkflowEngine:
 
         # Passive re-check: wait a bit and compare again.
         logger.warning("NEXT click verification borderline — passive re-check")
-        time.sleep(1.5)
+        time.sleep(0.3 if _GHOST else 1.5)
         recheck = self._verify_next_click_by_change(pre_next_path)
         if recheck.verified:
             logger.info("NEXT re-check verified (screen changed)")
@@ -520,7 +526,7 @@ class WorkflowEngine:
         # that we're still on the same screen (the option is still selected).
         logger.warning("NEXT click missed (re-check confirmed no change) — retrying NEXT click")
         self._click_next_best_target()
-        time.sleep(2.5)
+        time.sleep(0.5 if _GHOST else 2.5)
         retry_result = self._verify_next_click_by_change(pre_next_path)
         if retry_result.verified:
             logger.info("NEXT retry click verified (screen changed)")
@@ -730,7 +736,7 @@ class WorkflowEngine:
         logger.info("Click attempt 1 for intended option %s", letter)
         dispatched_letter = self._click_option_best_target(letter)
         self._last_dispatched_click_letter = dispatched_letter
-        time.sleep(2.2)
+        time.sleep(0.3 if _GHOST else 2.2)
         verified = self._verify_option_click(dispatched_letter)
         if verified:
             logger.info("Click verified for option %s (dispatched=%s)", letter, dispatched_letter)
@@ -748,7 +754,7 @@ class WorkflowEngine:
         # If the option IS already selected (first click worked, verification
         # was a false negative due to timing/crop), re-clicking would TOGGLE
         # the selection OFF — a destructive outcome worse than a missed click.
-        time.sleep(1.0)
+        time.sleep(0.2 if _GHOST else 1.0)
         pre_retry_verified = self._verify_option_click(dispatched_letter)
         if pre_retry_verified:
             logger.info(
@@ -771,7 +777,7 @@ class WorkflowEngine:
 
         dispatched_letter = self._click_option_best_target(letter)
         self._last_dispatched_click_letter = dispatched_letter
-        time.sleep(2.2)
+        time.sleep(0.3 if _GHOST else 2.2)
         verified = self._verify_option_click(dispatched_letter)
         if verified:
             logger.info("Retry click verified for option %s (dispatched=%s)", letter, dispatched_letter)
@@ -868,7 +874,7 @@ class WorkflowEngine:
             logger.info("Post-recalibration retry click for option %s", letter)
             dispatched_letter = self._click_option_best_target(letter)
             self._last_dispatched_click_letter = dispatched_letter
-            time.sleep(2.2)
+            time.sleep(0.3 if _GHOST else 2.2)
             verified = self._verify_option_click(dispatched_letter)
             if verified:
                 logger.info(

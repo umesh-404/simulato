@@ -28,6 +28,9 @@ public final class ActivityRemoteControlBinding implements ViewBinding {
   public final MaterialButton btnRecalibrate;
 
   @NonNull
+  public final MaterialButton btnReconnectGhost;
+
+  @NonNull
   public final MaterialButton btnRequeryAi;
 
   @NonNull
@@ -55,7 +58,7 @@ public final class ActivityRemoteControlBinding implements ViewBinding {
   public final LinearLayout layoutDecisionPanel;
 
   @NonNull
-  public final LinearLayout layoutGhostRow;
+  public final LinearLayout layoutExamPcCard;
 
   @NonNull
   public final TextView txtAlertMessage;
@@ -74,6 +77,9 @@ public final class ActivityRemoteControlBinding implements ViewBinding {
 
   @NonNull
   public final TextView txtDevices;
+
+  @NonNull
+  public final TextView txtGhostIp;
 
   @NonNull
   public final TextView txtGhostStatus;
@@ -95,20 +101,22 @@ public final class ActivityRemoteControlBinding implements ViewBinding {
 
   private ActivityRemoteControlBinding(@NonNull ScrollView rootView,
       @NonNull MaterialButton btnPause, @NonNull MaterialButton btnRecalibrate,
-      @NonNull MaterialButton btnRequeryAi, @NonNull MaterialButton btnSkipQuestion,
-      @NonNull MaterialButton btnStart, @NonNull MaterialButton btnStatus,
-      @NonNull MaterialButton btnStop, @NonNull MaterialButton btnUseAi,
-      @NonNull MaterialButton btnUseDb, @NonNull LinearLayout layoutAlertPanel,
-      @NonNull LinearLayout layoutDecisionPanel, @NonNull LinearLayout layoutGhostRow,
-      @NonNull TextView txtAlertMessage, @NonNull TextView txtAlertType,
-      @NonNull TextView txtApiCalls, @NonNull TextView txtCaptureMode,
-      @NonNull TextView txtConnectionStatus, @NonNull TextView txtDevices,
-      @NonNull TextView txtGhostStatus, @NonNull TextView txtLastAction,
-      @NonNull TextView txtQuestionNumber, @NonNull TextView txtSystemState,
-      @NonNull TextView txtSystemStatus, @NonNull TextView txtWsStatus) {
+      @NonNull MaterialButton btnReconnectGhost, @NonNull MaterialButton btnRequeryAi,
+      @NonNull MaterialButton btnSkipQuestion, @NonNull MaterialButton btnStart,
+      @NonNull MaterialButton btnStatus, @NonNull MaterialButton btnStop,
+      @NonNull MaterialButton btnUseAi, @NonNull MaterialButton btnUseDb,
+      @NonNull LinearLayout layoutAlertPanel, @NonNull LinearLayout layoutDecisionPanel,
+      @NonNull LinearLayout layoutExamPcCard, @NonNull TextView txtAlertMessage,
+      @NonNull TextView txtAlertType, @NonNull TextView txtApiCalls,
+      @NonNull TextView txtCaptureMode, @NonNull TextView txtConnectionStatus,
+      @NonNull TextView txtDevices, @NonNull TextView txtGhostIp, @NonNull TextView txtGhostStatus,
+      @NonNull TextView txtLastAction, @NonNull TextView txtQuestionNumber,
+      @NonNull TextView txtSystemState, @NonNull TextView txtSystemStatus,
+      @NonNull TextView txtWsStatus) {
     this.rootView = rootView;
     this.btnPause = btnPause;
     this.btnRecalibrate = btnRecalibrate;
+    this.btnReconnectGhost = btnReconnectGhost;
     this.btnRequeryAi = btnRequeryAi;
     this.btnSkipQuestion = btnSkipQuestion;
     this.btnStart = btnStart;
@@ -118,13 +126,14 @@ public final class ActivityRemoteControlBinding implements ViewBinding {
     this.btnUseDb = btnUseDb;
     this.layoutAlertPanel = layoutAlertPanel;
     this.layoutDecisionPanel = layoutDecisionPanel;
-    this.layoutGhostRow = layoutGhostRow;
+    this.layoutExamPcCard = layoutExamPcCard;
     this.txtAlertMessage = txtAlertMessage;
     this.txtAlertType = txtAlertType;
     this.txtApiCalls = txtApiCalls;
     this.txtCaptureMode = txtCaptureMode;
     this.txtConnectionStatus = txtConnectionStatus;
     this.txtDevices = txtDevices;
+    this.txtGhostIp = txtGhostIp;
     this.txtGhostStatus = txtGhostStatus;
     this.txtLastAction = txtLastAction;
     this.txtQuestionNumber = txtQuestionNumber;
@@ -169,6 +178,12 @@ public final class ActivityRemoteControlBinding implements ViewBinding {
       id = R.id.btnRecalibrate;
       MaterialButton btnRecalibrate = ViewBindings.findChildViewById(rootView, id);
       if (btnRecalibrate == null) {
+        break missingId;
+      }
+
+      id = R.id.btnReconnectGhost;
+      MaterialButton btnReconnectGhost = ViewBindings.findChildViewById(rootView, id);
+      if (btnReconnectGhost == null) {
         break missingId;
       }
 
@@ -226,9 +241,9 @@ public final class ActivityRemoteControlBinding implements ViewBinding {
         break missingId;
       }
 
-      id = R.id.layoutGhostRow;
-      LinearLayout layoutGhostRow = ViewBindings.findChildViewById(rootView, id);
-      if (layoutGhostRow == null) {
+      id = R.id.layoutExamPcCard;
+      LinearLayout layoutExamPcCard = ViewBindings.findChildViewById(rootView, id);
+      if (layoutExamPcCard == null) {
         break missingId;
       }
 
@@ -265,6 +280,12 @@ public final class ActivityRemoteControlBinding implements ViewBinding {
       id = R.id.txtDevices;
       TextView txtDevices = ViewBindings.findChildViewById(rootView, id);
       if (txtDevices == null) {
+        break missingId;
+      }
+
+      id = R.id.txtGhostIp;
+      TextView txtGhostIp = ViewBindings.findChildViewById(rootView, id);
+      if (txtGhostIp == null) {
         break missingId;
       }
 
@@ -305,10 +326,11 @@ public final class ActivityRemoteControlBinding implements ViewBinding {
       }
 
       return new ActivityRemoteControlBinding((ScrollView) rootView, btnPause, btnRecalibrate,
-          btnRequeryAi, btnSkipQuestion, btnStart, btnStatus, btnStop, btnUseAi, btnUseDb,
-          layoutAlertPanel, layoutDecisionPanel, layoutGhostRow, txtAlertMessage, txtAlertType,
-          txtApiCalls, txtCaptureMode, txtConnectionStatus, txtDevices, txtGhostStatus,
-          txtLastAction, txtQuestionNumber, txtSystemState, txtSystemStatus, txtWsStatus);
+          btnReconnectGhost, btnRequeryAi, btnSkipQuestion, btnStart, btnStatus, btnStop, btnUseAi,
+          btnUseDb, layoutAlertPanel, layoutDecisionPanel, layoutExamPcCard, txtAlertMessage,
+          txtAlertType, txtApiCalls, txtCaptureMode, txtConnectionStatus, txtDevices, txtGhostIp,
+          txtGhostStatus, txtLastAction, txtQuestionNumber, txtSystemState, txtSystemStatus,
+          txtWsStatus);
     }
     String missingId = rootView.getResources().getResourceName(id);
     throw new NullPointerException("Missing required view with ID: ".concat(missingId));

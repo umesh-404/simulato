@@ -16,6 +16,7 @@ id btnCalibrate
 id btnCapture
 id btnPause
 id btnRecalibrate
+id btnReconnectGhost
 id btnRemote
 id btnRequeryAi
 id btnSkipQuestion
@@ -30,13 +31,14 @@ id editControllerIp
 id editControllerPort
 id layoutAlertPanel
 id layoutDecisionPanel
-id layoutGhostRow
+id layoutExamPcCard
 id txtAlertMessage
 id txtAlertType
 id txtApiCalls
 id txtCaptureMode
 id txtConnectionStatus
 id txtDevices
+id txtGhostIp
 id txtGhostStatus
 id txtLastAction
 id txtQuestionNumber

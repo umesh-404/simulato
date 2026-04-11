@@ -3190,6 +3190,7 @@ id btnCalibrate
 id btnCapture
 id btnPause
 id btnRecalibrate
+id btnReconnectGhost
 id btnRemote
 id btnRequeryAi
 id btnSkipQuestion
@@ -3342,7 +3343,7 @@ id labeled
 id layout
 id layoutAlertPanel
 id layoutDecisionPanel
-id layoutGhostRow
+id layoutExamPcCard
 id left
 id leftToRight
 id legacy
@@ -3591,6 +3592,7 @@ id txtApiCalls
 id txtCaptureMode
 id txtConnectionStatus
 id txtDevices
+id txtGhostIp
 id txtGhostStatus
 id txtLastAction
 id txtQuestionNumber

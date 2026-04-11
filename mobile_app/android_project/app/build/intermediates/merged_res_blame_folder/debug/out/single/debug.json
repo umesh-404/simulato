@@ -8,15 +8,15 @@
         "source": "com.simulato.app-main-41:/layout/activity_remote_control.xml"
     },
     {
-        "merged": "com.simulato.app-merged_res-39:/drawable_card_background_dark.xml.flat",
-        "source": "com.simulato.app-main-41:/drawable/card_background_dark.xml"
-    },
-    {
         "merged": "C:\\Users\\jumes\\.gradle\\daemon\\8.5\\com.simulato.app-merged_res-39:\\layout_activity_capture.xml.flat",
         "source": "C:\\Users\\jumes\\.gradle\\daemon\\8.5\\com.simulato.app-main-41:\\layout\\activity_capture.xml"
     },
     {
         "merged": "C:\\Users\\jumes\\.gradle\\daemon\\8.5\\com.simulato.app-merged_res-39:\\layout_activity_remote_control.xml.flat",
         "source": "C:\\Users\\jumes\\.gradle\\daemon\\8.5\\com.simulato.app-main-41:\\layout\\activity_remote_control.xml"
+    },
+    {
+        "merged": "C:\\Users\\jumes\\.gradle\\daemon\\8.5\\com.simulato.app-merged_res-39:\\drawable_card_background_dark.xml.flat",
+        "source": "C:\\Users\\jumes\\.gradle\\daemon\\8.5\\com.simulato.app-main-41:\\drawable\\card_background_dark.xml"
     }
 ]

@@ -165,6 +165,30 @@ class OptionDetector:
     # OCR text crop starts this many pixels right of the circle edge.
     TEXT_OFFSET_X_PX = 20
 
+    # --- Ghost-mode specific HoughCircles parameters ---
+    # Ghost captures are pixel-perfect 1920x1080 screenshots via DXGI.
+    # Radio circles are thin, low-contrast, r=5–7px.  Smaller blur kernel,
+    # lower accumulator threshold, tighter radius range.
+    GHOST_HOUGH_DP = 1.0
+    GHOST_HOUGH_MIN_DIST = 50
+    GHOST_HOUGH_PARAM1 = 50
+    GHOST_HOUGH_PARAM2 = 8
+    GHOST_HOUGH_MIN_RADIUS = 3
+    GHOST_HOUGH_MAX_RADIUS = 12
+    GHOST_BLUR_KERNEL = (5, 5)
+    GHOST_BLUR_SIGMA = 1.5
+    # In ghost mode the header is much smaller relative to the panel.
+    # The "Answer here" text ends ~70px below panel top, options start ~100px.
+    GHOST_HEADER_SKIP_FRAC = 0.08
+
+    def _is_ghost_mode(self) -> bool:
+        """Check if the system is running in ghost capture mode."""
+        try:
+            from controller.config import CAPTURE_MODE
+            return CAPTURE_MODE == "ghost"
+        except Exception:
+            return False
+
     def detect(
         self,
         image_path: Path,
@@ -176,8 +200,13 @@ class OptionDetector:
 
         Strategy: crop to the options zone (below the fixed header),
         detect circles, cluster, label, OCR.
+
+        In ghost mode (pixel-perfect screenshots), uses tuned parameters
+        for thin, low-contrast radio circles and skips the edge quality
+        filter (no camera noise to reject).
         """
         logger.info("Detecting options for: %s", image_path.name)
+        ghost_mode = self._is_ghost_mode()
 
         empty = lambda: OptionMap(
             options=[], image_w=layout.image_w, image_h=layout.image_h
@@ -204,7 +233,15 @@ class OptionDetector:
         # ------------------------------------------------------------------
         # Step 1: Determine the options zone by removing the header.
         # ------------------------------------------------------------------
-        header_bottom_y = self._determine_header_bottom(img, ap)
+        if ghost_mode:
+            # Ghost mode: use a much smaller header skip.  The "Answer here"
+            # header is compact on the 1080p screen; the large fractional
+            # skip designed for phone photos eats the first option row.
+            header_bottom_y = ap.y + max(1, int(ap.h * self.GHOST_HEADER_SKIP_FRAC))
+            logger.info("Ghost mode: header_bottom_y=%d (%.0f%% of panel)",
+                        header_bottom_y, self.GHOST_HEADER_SKIP_FRAC * 100)
+        else:
+            header_bottom_y = self._determine_header_bottom(img, ap)
         footer_top_y = ap.y2 - max(1, int(ap.h * self.BOTTOM_SKIP_FRAC))
 
         options_y1 = max(ap.y, min(header_bottom_y, footer_top_y - 1))
@@ -225,14 +262,20 @@ class OptionDetector:
         # ------------------------------------------------------------------
         # Step 2: Detect radio circles in a left strip of the options zone.
         # ------------------------------------------------------------------
-        strip_w = max(
-            min(int(ap.w * self.RADIO_STRIP_WIDTH_FRAC), self.RADIO_STRIP_MAX_PX),
-            40,
-        )
-        # Ensure the strip covers at least 15% of the panel width,
-        # which is enough to capture the radio button column even
-        # on wider answer panels where buttons are further indented.
-        strip_w = max(strip_w, int(ap.w * 0.15))
+        if ghost_mode:
+            # Ghost mode: use a narrow 100px strip — radio buttons are at
+            # a known fixed X column (~11px from panel edge).  The narrow
+            # strip avoids picking up text circles further right.
+            strip_w = 100
+        else:
+            strip_w = max(
+                min(int(ap.w * self.RADIO_STRIP_WIDTH_FRAC), self.RADIO_STRIP_MAX_PX),
+                40,
+            )
+            # Ensure the strip covers at least 15% of the panel width,
+            # which is enough to capture the radio button column even
+            # on wider answer panels where buttons are further indented.
+            strip_w = max(strip_w, int(ap.w * 0.15))
         strip_x1 = ap.x
         strip_x2 = min(ap.x2, ap.x + strip_w)
 
@@ -245,9 +288,14 @@ class OptionDetector:
             )
 
         gray = cv2.cvtColor(strip_img, cv2.COLOR_BGR2GRAY)
-        blurred = cv2.GaussianBlur(gray, (9, 9), 2)
 
-        circles = self._find_circles(cv2, blurred)
+        if ghost_mode:
+            # Ghost mode: smaller Gaussian kernel for thin circles.
+            blurred = cv2.GaussianBlur(gray, self.GHOST_BLUR_KERNEL, self.GHOST_BLUR_SIGMA)
+            circles = self._find_circles_ghost(cv2, blurred)
+        else:
+            blurred = cv2.GaussianBlur(gray, (9, 9), 2)
+            circles = self._find_circles(cv2, blurred)
 
         if circles is None or len(circles) == 0:
             logger.warning("No radio circles detected in options zone")
@@ -267,9 +315,17 @@ class OptionDetector:
         circles = self._filter_by_radius(circles)
         after_radius = len(circles)
 
-        # Layer 1b: Edge quality — reject circles without clear radio-button edges.
-        circles = self._filter_by_edge_quality(circles, gray)
-        after_edge = len(circles)
+        if ghost_mode:
+            # Ghost mode: skip edge quality filter.  Ghost screenshots
+            # are pixel-perfect with no camera noise; the thin, clean
+            # radio circles have low contrast by design and the edge
+            # filter incorrectly rejects them.
+            after_edge = after_radius
+            logger.debug("Ghost mode: edge quality filter skipped")
+        else:
+            # Layer 1b: Edge quality — reject circles without clear radio-button edges.
+            circles = self._filter_by_edge_quality(circles, gray)
+            after_edge = len(circles)
 
         # Layer 1c: X-column filter — identify the radio button column and
         # discard circles that are too far from it. Radio buttons sit in a
@@ -302,9 +358,10 @@ class OptionDetector:
 
         logger.info(
             "%d raw > %d radius > %d edge > %d x-col > %d clusters > "
-            "%d validated (cap %d)",
+            "%d validated (cap %d)%s",
             raw_count, after_radius, after_edge, after_x_col,
             cluster_count_raw, len(clusters), effective_max,
+            " [ghost]" if ghost_mode else "",
         )
 
         # ------------------------------------------------------------------
@@ -685,6 +742,36 @@ class OptionDetector:
                     logger.debug(
                         "Fallback added %d circles (total %d)", added, len(result),
                     )
+
+        return result
+
+    def _find_circles_ghost(
+        self, cv2, blurred: np.ndarray,
+    ) -> list[tuple[int, int, int]]:
+        """Find radio circles in a ghost-mode (pixel-perfect) screenshot.
+
+        Ghost captures produce thin, low-contrast circles at r=5–7px.
+        A single pass with tuned parameters is sufficient because there
+        is no camera noise, watermark distortion, or perspective warping.
+        The min_dist is set high (50px) to avoid duplicate detections in
+        the same option row.
+        """
+        raw = cv2.HoughCircles(
+            blurred, cv2.HOUGH_GRADIENT,
+            dp=self.GHOST_HOUGH_DP,
+            minDist=self.GHOST_HOUGH_MIN_DIST,
+            param1=self.GHOST_HOUGH_PARAM1,
+            param2=self.GHOST_HOUGH_PARAM2,
+            minRadius=self.GHOST_HOUGH_MIN_RADIUS,
+            maxRadius=self.GHOST_HOUGH_MAX_RADIUS,
+        )
+
+        if raw is not None:
+            result = np.round(raw[0]).astype(int).tolist()
+            logger.debug("Ghost HoughCircles: %d circles", len(result))
+        else:
+            result = []
+            logger.debug("Ghost HoughCircles found nothing")
 
         return result
 

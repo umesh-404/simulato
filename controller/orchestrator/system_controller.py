@@ -100,16 +100,20 @@ class SystemController:
 
         connected_devices = api_server.registry.get_connected_ids()
 
+        ghost_ip = None
+        ghost_connected = None
+        if self._ghost_receiver is not None:
+            ghost_connected = self._ghost_receiver.is_connected()
+            if self._ghost_receiver._agent_addr is not None:
+                ghost_ip = self._ghost_receiver._agent_addr[0]
+
         return {
             "system_state": self._sm.state.value,
             "active_test": self._test_name,
             "run_id": self._run_ctx.run_id if self._run_ctx else None,
             "capture_mode": CAPTURE_MODE,
-            "ghost_connected": (
-                self._ghost_receiver.is_connected()
-                if self._ghost_receiver is not None
-                else None
-            ),
+            "ghost_connected": ghost_connected,
+            "ghost_agent_ip": ghost_ip,
             "question_number": self._workflow.question_number if self._workflow else 0,
             "api_calls": self._workflow.api_calls if self._workflow else 0,
             "waiting_for_scroll": (
@@ -156,7 +160,7 @@ class SystemController:
             "PAUSE": self._handle_pause,
             "STOP": self._handle_stop,
             "STATUS": self._handle_status,
-
+            "RECONNECT_GHOST": self._handle_reconnect_ghost,
         }
 
         handler = handlers.get(command)
@@ -328,6 +332,14 @@ class SystemController:
         self._cleanup()
         return {"status": "stopped"}
 
+    def _handle_reconnect_ghost(self, payload: dict) -> dict:
+        self._last_action = "Forcing Exam PC (Ghost) to reconnect"
+        if self._ghost_receiver is not None:
+            self._ghost_receiver._disconnect_agent()
+            logger.info("Ghost agent connection forcibly dropped by operator")
+            return {"status": "ghost_reconnecting"}
+        return {"error": "System is not running in Ghost Capture Mode"}
+
     def _handle_status(self, payload: dict) -> dict:
         return self.get_status()
 
@@ -429,7 +441,8 @@ class SystemController:
                     return
                 self._workflow.advance_to_next()
                 # Trigger the next capture after a brief delay for the screen to settle
-                self._schedule_timer(1.5, self._request_capture)
+                from controller.config import CAPTURE_MODE
+                self._schedule_timer(0.3 if CAPTURE_MODE == "ghost" else 1.5, self._request_capture)
 
         except PiConnectionError as e:
             logger.error("Pi connection error during processing: %s", e)
@@ -498,7 +511,7 @@ class SystemController:
             logger.info("Ghost capture received (%d bytes)", len(ghost_bytes))
             self._last_action = f"Processing Q{self._workflow.question_number + 1 if self._workflow else '?'}"
             # Feed directly into the image processing pipeline.
-            self.process_image(ghost_bytes, device_id="ghost_agent")
+            self.on_image_received(ghost_bytes, device_id="ghost_agent")
             return
 
         # Phone mode: send CAPTURE_IMAGE via WebSocket.

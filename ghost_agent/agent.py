@@ -149,43 +149,78 @@ def _do_handshake(sock: socket.socket) -> bool:
         return False
 
 
-def run_agent(host: str, port: int) -> None:
-    """Main agent loop: connect, handshake, serve commands."""
+def _command_loop(sock: socket.socket, camera) -> None:
+    """Serve commands from the controller until connection drops.
+
+    Raises on any connection error so the caller can reconnect.
+    """
+    sock.settimeout(30.0)  # generous timeout for command reads
+    while True:
+        data = sock.recv(1)
+        if not data:
+            # Controller closed connection.
+            return
+
+        cmd = data[0]
+
+        if cmd == CMD_CAPTURE:
+            jpeg_bytes = _grab_and_encode(camera)
+            _send_payload(sock, jpeg_bytes)
+
+        elif cmd == CMD_PING:
+            _send_payload(sock, b"PONG")
+
+        elif cmd == CMD_SHUTDOWN:
+            raise SystemExit("Shutdown command received")
+
+
+def run_agent(host: str | None, port: int) -> None:
+    """Main agent loop: discover/connect, handshake, serve commands, reconnect.
+
+    Args:
+        host: Explicit controller IP, or None for UDP auto-discovery.
+        port: Controller TCP port (only used if host is not None).
+    """
     import dxcam
 
     camera = dxcam.create(output_color="RGB")
+    use_discovery = host is None
 
     while True:
-        sock = _connect_with_backoff(host, port)
+        # --- Step 1: Resolve controller address ---
+        if use_discovery:
+            try:
+                resolved_host, resolved_port = _discover_controller()
+            except Exception:
+                time.sleep(RECONNECT_BASE_DELAY)
+                continue
+        else:
+            resolved_host, resolved_port = host, port
 
+        # --- Step 2: TCP connect with backoff ---
+        try:
+            sock = _connect_with_backoff(resolved_host, resolved_port)
+        except Exception:
+            time.sleep(RECONNECT_BASE_DELAY)
+            continue
+
+        # --- Step 3: Handshake ---
         if not _do_handshake(sock):
             sock.close()
             time.sleep(RECONNECT_BASE_DELAY)
             continue
 
-        # Handshake succeeded — enter command loop.
-        sock.settimeout(30.0)  # generous timeout for command reads
+        # --- Step 4: Command loop (blocks until connection drops) ---
         try:
-            while True:
-                data = sock.recv(1)
-                if not data:
-                    # Controller closed connection.
-                    break
-
-                cmd = data[0]
-
-                if cmd == CMD_CAPTURE:
-                    jpeg_bytes = _grab_and_encode(camera)
-                    _send_payload(sock, jpeg_bytes)
-
-                elif cmd == CMD_PING:
-                    _send_payload(sock, b"PONG")
-
-                elif cmd == CMD_SHUTDOWN:
-                    sock.close()
-                    return  # clean exit
-
-        except (OSError, socket.timeout, ConnectionResetError):
+            _command_loop(sock, camera)
+        except SystemExit:
+            # Clean shutdown requested by controller.
+            try:
+                sock.close()
+            except OSError:
+                pass
+            return
+        except (OSError, socket.timeout, ConnectionResetError, BrokenPipeError):
             pass  # connection lost — will reconnect
         finally:
             try:
@@ -216,15 +251,8 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if args.host is not None:
-        # Explicit host provided — use it directly.
-        host, port = args.host, args.port
-    else:
-        # Auto-discover the controller on the local network.
-        host, port = _discover_controller()
-
     try:
-        run_agent(host, port)
+        run_agent(args.host, args.port)
     except KeyboardInterrupt:
         pass
 

@@ -299,7 +299,12 @@ class GhostReceiver:
         return bytes(buf)
 
     def _disconnect_agent(self) -> None:
-        """Close the current agent connection (if any)."""
+        """Close the current agent connection (if any).
+
+        Note: _agent_addr is intentionally preserved so the status API
+        can still report the last-known Exam PC IP after a disconnect.
+        It gets overwritten on the next successful accept/handshake.
+        """
         if self._agent_sock is not None:
             addr_str = (
                 f"{self._agent_addr[0]}:{self._agent_addr[1]}"
@@ -311,7 +316,6 @@ class GhostReceiver:
             except OSError:
                 pass
             self._agent_sock = None
-            self._agent_addr = None
             if self._connected:
                 self._connected = False
                 logger.info("Ghost agent disconnected (%s)", addr_str)
