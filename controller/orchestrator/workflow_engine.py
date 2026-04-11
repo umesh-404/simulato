@@ -477,7 +477,7 @@ class WorkflowEngine:
                             image_path, self._latest_ocr_layout.layout,
                         )
                         if tb_coords:
-                            self._click_dispatcher.click_and_type_at_normalized(
+                            self._click.click_and_type_at_normalized(
                                 tb_coords[0], tb_coords[1], text_to_type
                             )
                             # Bypassing the highlighted-bubble CV CV verification for textual inputs

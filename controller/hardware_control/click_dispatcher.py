@@ -182,9 +182,9 @@ class ClickDispatcher:
         Click at a normalized target, pause to allow focus, then type text.
         """
         logger.info("Dispatching CLICK then TYPE_TEXT ('%s') at normalized (%.4f, %.4f)", text, norm_x, norm_y)
-        self.click_at_normalized(norm_x, norm_y, command="CLICK_NEXT")  # Reuses CLICK_NEXT as an absolute clicker alias
+        self.click_at_normalized(norm_x, norm_y, command="CLICK")
         
         import time
-        time.sleep(0.1)  # small delay for cursor focus to lock in on exam UI
+        time.sleep(0.8)  # generous delay for cursor focus to lock in on exam UI
         
         return self._pi.send_command("TYPE_TEXT", text=text)

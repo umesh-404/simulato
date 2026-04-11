@@ -84,23 +84,40 @@ class HIDController:
 
     def type_text(self, text: str) -> None:
         """
-        Wipe the current text box using CTRL+A -> DEL, then type the new text.
+        Type the new text directly via raw 8-byte HID payload to /dev/hidg0.
         Requires the target input box to already be clicked and focused.
         """
-        if not self._use_hidpi:
-            print(f"[HID] type_text fallback: simulated typing '{text}' (HIDPi missing)")
-            return
+        # HID Keyboard Usage IDs mapping
+        usb_keys = {
+            'a': 4, 'b': 5, 'c': 6, 'd': 7, 'e': 8, 'f': 9, 'g': 10, 'h': 11, 'i': 12, 'j': 13,
+            'k': 14, 'l': 15, 'm': 16, 'n': 17, 'o': 18, 'p': 19, 'q': 20, 'r': 21, 's': 22, 't': 23,
+            'u': 24, 'v': 25, 'w': 26, 'x': 27, 'y': 28, 'z': 29,
+            '1': 30, '2': 31, '3': 32, '4': 33, '5': 34, '6': 35, '7': 36, '8': 37, '9': 38, '0': 39,
+            ' ': 44, '-': 45, '=': 46, '[': 47, ']': 48, '\\': 49, ';': 51, "'": 52, '`': 53, ',': 54, '.': 55, '/': 56,
+        }
 
-        # 1. Select All (CTRL + A)
-        Keyboard.send_key(KEY_LEFT_CTRL, KEY_A)
-        time.sleep(0.05)
-        
-        # 2. Delete selection
-        Keyboard.send_key(0, KEY_DELETE)
-        time.sleep(0.05)
-        
-        # 3. Type new text with a small delay for software to keep up
-        Keyboard.send_text(text, delay=0.02)
+        try:
+            with open("/dev/hidg0", "wb") as kb:
+                for char in str(text):
+                    lower_char = char.lower()
+                    modifier = 0x02 if char.isupper() else 0x00
+                    keycode = usb_keys.get(lower_char, 0)
+                    
+                    if keycode > 0:
+                        import struct
+                        # Key press
+                        kb.write(struct.pack("8B", modifier, 0, keycode, 0, 0, 0, 0, 0))
+                        kb.flush()
+                        time.sleep(0.05)
+                        # Key release
+                        kb.write(struct.pack("8B", 0, 0, 0, 0, 0, 0, 0, 0))
+                        kb.flush()
+                        time.sleep(0.05)
+        except Exception as e:
+            print(f"[HID] Raw keyboard write failed: {e}")
+            if self._use_hidpi:
+                print("[HID] Falling back to HIDPi Keyboard.send_text...")
+                Keyboard.send_text(str(text), delay=0.04)
 
     # ------------------------------------------------------------------
     # Fallback: raw 6-byte absolute report (matches HIDPi descriptor)

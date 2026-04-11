@@ -1412,9 +1412,9 @@ class OptionDetector:
             logger.info("Falling back to center of Answer Panel for text box: (%d, %d)", cx, cy)
         else:
             bx, by, bw, bh = best_contour
-            # Calculate absolute coordinates using a top-left bias to ensure safe clicks
-            cx = ap.x + bx + bw // 4
-            cy = ap.y + by + h // 2
+            # Calculate absolute coordinates using dead-center centroid
+            cx = ap.x + bx + bw // 2
+            cy = ap.y + by + bh // 2
             logger.info("Found text box contour. Clicking point px: (%d, %d)", cx, cy)
             
         nx = max(0.0, min(1.0, float(cx) / float(max(1, img_w - 1))))
