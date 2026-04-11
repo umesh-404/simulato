@@ -100,6 +100,7 @@ class WorkflowEngine:
         self._screen_validator = ScreenValidator()
         self._preprocessor = ImagePreprocessor()
         self._ocr = OCRLayoutAnalyzer()
+        self._option_detector = OptionDetector()
         self._latest_ocr_layout: Optional[OCRLayoutResult] = None
         self._latest_interaction_ocr_layout: Optional[OCRLayoutResult] = None
         self._latest_preprocessed_image_path: Optional[Path] = None
@@ -471,9 +472,9 @@ class WorkflowEngine:
                 if decision.click_letter.startswith("FITB:"):
                     text_to_type = decision.click_letter.replace("FITB:", "", 1).strip()
                     logger.info("Executing FITB textual typing: '%s'", text_to_type)
-                    if self._latest_layout is not None:
+                    if self._latest_ocr_layout is not None and self._latest_ocr_layout.layout is not None:
                         tb_coords = self._option_detector.detect_textbox(
-                            image_path, self._latest_layout,
+                            image_path, self._latest_ocr_layout.layout,
                         )
                         if tb_coords:
                             self._click_dispatcher.click_and_type_at_normalized(

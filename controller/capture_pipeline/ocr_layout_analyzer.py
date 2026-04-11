@@ -404,10 +404,19 @@ class OCRLayoutAnalyzer:
         _MIN_OPTIONS_FAST = 3
         if option_count < _MIN_OPTIONS_FAST:
             logger.info(
-                "Option count %d < %d - running pytesseract OCR fallback",
+                "Option count %d < %d - evaluating pytesseract OCR fallback...",
                 option_count, _MIN_OPTIONS_FAST,
             )
-            words = self._run_pytesseract(img)
+            
+            tb_coords = None
+            if layout is not None:
+                tb_coords = OptionDetector().detect_textbox(image_path, layout)
+                
+            if tb_coords is not None:
+                logger.info("FITB Text Box detected! Skipping Pytesseract fallback entirely (fast path).")
+            else:
+                logger.info("No text box found. Running slow pytesseract OCR fallback...")
+                words = self._run_pytesseract(img)
         else:
             logger.info(
                 "Option count %d >= %d - skipping pytesseract (fast path)",
