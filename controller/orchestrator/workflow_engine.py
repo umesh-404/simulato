@@ -390,6 +390,31 @@ class WorkflowEngine:
                 self._latest_ocr_layout = None
                 self._latest_interaction_ocr_layout = None
 
+            # Optional Step 4b: Question Panel Scroll Verification
+            # If the bottom of the question is clipped (e.g. Venn diagrams), we must scroll
+            # and recapture so the AI has the complete question context.
+            if self._latest_ocr_layout is not None and self._latest_ocr_layout.layout is not None:
+                scroll_res = self._scroll_detector.detect_dual(preprocessed_path, self._latest_ocr_layout.layout)
+                if scroll_res.question.needs_scroll:
+                    logger.info("Question panel content truncated (score %.2f). Discarding speculative AI call and scrolling...", scroll_res.question.confidence)
+                    # Discard speculative future completely
+                    if speculative_future is not None:
+                        speculative_future.cancel()
+                        speculative_future = None
+                    
+                    # Capture the hidden content
+                    scroll_frames = self._capture_scroll_frames("down")
+                    if scroll_frames:
+                        logger.info("Scroll complete. Rescanning layout from post-scroll frame.")
+                        image_path = scroll_frames[-1]
+                        preprocessed_path = self._preprocessor.preprocess(image_path)
+                        self._latest_preprocessed_image_path = preprocessed_path
+                        
+                        # Re-run layout detection so coordinate mapping works with the new scrolled image
+                        if OCR_LAYOUT_PRIMARY_ENABLED:
+                            self._latest_ocr_layout = self._ocr.analyze(preprocessed_path)
+                            self._latest_interaction_ocr_layout = self._latest_ocr_layout
+
             # (Duplicate increment removed. In ghost mode, question sequence is irrelevant.)
             if not _GHOST:
                 logger.info("Question number: %d (auto-increment skipped in ghost mode)", self._question_number)
