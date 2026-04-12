@@ -360,21 +360,7 @@ class WorkflowEngine:
             else:
                 self._blank_frame_retry_count = 0
 
-            # --- Speculative early AI call ---
-            # Fire the AI query with the raw image BEFORE preprocessing/OCR.
-            # The AI response will already be waiting by the time local
-            # processing completes, eliminating the blocking API wait.
-            speculative_future: Optional[concurrent.futures.Future] = None
-            try:
-                speculative_future = self._ai_executor.submit(
-                    self._speculative_ai_query, image_path,
-                )
-                logger.info("Speculative AI call launched with raw image")
-            except Exception as e:
-                logger.warning("Failed to launch speculative AI call: %s", e)
-
             # Step 3: Preprocess the single captured frame.
-            # No scroll detection or stitching — the exam UI fits in one frame.
             preprocessed_path = self._preprocessor.preprocess(image_path)
             self._latest_preprocessed_image_path = preprocessed_path
             is_stitched = False
@@ -390,30 +376,52 @@ class WorkflowEngine:
                 self._latest_ocr_layout = None
                 self._latest_interaction_ocr_layout = None
 
-            # Optional Step 4b: Question Panel Scroll Verification
-            # If the bottom of the question is clipped (e.g. Venn diagrams), we must scroll
-            # and recapture so the AI has the complete question context.
+            # Step 4b: Question Panel Scroll Detection
+            # Check if the question content is clipped (e.g. Venn diagrams, long text).
+            # This MUST happen BEFORE the AI call so we only make ONE API request
+            # with the correct image (original or stitched).
+            ai_image_path = image_path  # Default: send original frame to AI
+            pre_scroll_image_path = image_path
             if self._latest_ocr_layout is not None and self._latest_ocr_layout.layout is not None:
                 scroll_res = self._scroll_detector.detect_dual(preprocessed_path, self._latest_ocr_layout.layout)
                 if scroll_res.question.needs_scroll:
-                    logger.info("Question panel content truncated (score %.2f). Discarding speculative AI call and scrolling...", scroll_res.question.confidence)
-                    # Discard speculative future completely
-                    if speculative_future is not None:
-                        speculative_future.cancel()
-                        speculative_future = None
-                    
-                    # Capture the hidden content
+                    logger.info(
+                        "Question panel content truncated (score %.2f). Scrolling to capture full content...",
+                        scroll_res.question.confidence,
+                    )
+
+                    # Capture the hidden content (scrolls down on question panel)
                     scroll_frames = self._capture_scroll_frames("down")
                     if scroll_frames:
-                        logger.info("Scroll complete. Rescanning layout from post-scroll frame.")
-                        image_path = scroll_frames[-1]
-                        preprocessed_path = self._preprocessor.preprocess(image_path)
+                        # Stitch pre-scroll + post-scroll frames into one composite.
+                        # The AI needs BOTH: question text (pre-scroll) + diagram (post-scroll).
+                        all_frames = [pre_scroll_image_path] + scroll_frames
+                        stitch_output = pre_scroll_image_path.parent / f"{pre_scroll_image_path.stem}_stitched.jpg"
+                        stitched_path = self._stitcher.stitch(all_frames, stitch_output)
+                        logger.info(
+                            "Stitched %d frames -> %s for AI consumption",
+                            len(all_frames), stitched_path.name,
+                        )
+                        is_stitched = True
+                        ai_image_path = stitched_path  # AI gets the full stitched composite
+
+                        # For click coordinates: use the LAST scroll frame (what's on screen now).
+                        # The OCR layout must match the current visible screen state.
+                        post_scroll_path = scroll_frames[-1]
+                        preprocessed_path = self._preprocessor.preprocess(post_scroll_path)
                         self._latest_preprocessed_image_path = preprocessed_path
-                        
-                        # Re-run layout detection so coordinate mapping works with the new scrolled image
+
+                        # Re-run layout detection on the post-scroll frame so click coordinate
+                        # mapping works with what's actually visible on screen.
                         if OCR_LAYOUT_PRIMARY_ENABLED:
                             self._latest_ocr_layout = self._ocr.analyze(preprocessed_path)
                             self._latest_interaction_ocr_layout = self._latest_ocr_layout
+
+                        self._log_event("scroll_stitch", {
+                            "frames": len(all_frames),
+                            "stitched_path": str(stitched_path),
+                            "scroll_confidence": scroll_res.question.confidence,
+                        })
 
             # (Duplicate increment removed. In ghost mode, question sequence is irrelevant.)
             if not _GHOST:
@@ -422,52 +430,25 @@ class WorkflowEngine:
             ai_response = None
             ai_model_used = ""
 
-            # Step 5: Query AI
-            # The speculative call was launched immediately after screen validation
-            # (before preprocessing), so it's been running in parallel.
-            SPECULATIVE_WAIT = 65  # seconds — covers Gemini non-reasoning 2-retry cycle
-            if speculative_future is not None:
-                try:
-                    spec_response, spec_model = speculative_future.result(
-                        timeout=SPECULATIVE_WAIT,
-                    )
-                    ai_response = spec_response
-                    ai_model_used = spec_model
-                    self._api_calls += 1
-                    logger.info(
-                        "Using speculative AI result (model=%s, answer=%s)",
-                        spec_model, ai_response.answer,
-                    )
-                    self._log_event("ai_response", {
-                        "model": ai_model_used,
-                        "answer": ai_response.answer,
-                        "speculative": True,
-                    })
-                except Exception as spec_err:
-                    logger.warning(
-                        "Speculative AI call did not complete in time (%s) — falling back to standard call",
-                        spec_err,
-                    )
-                    ai_response = None
-
-            # Standard AI call: fallback when speculative failed/timed out.
-            if ai_response is None:
-                try:
-                    ai_response, ai_model_used = self._query_gemini(image_path, is_stitched=False)
-                    self._api_calls += 1
-                    self._log_event("ai_response", {
-                        "model": ai_model_used,
-                        "answer": ai_response.answer,
-                        "speculative": False,
-                    })
-                except (GeminiAPIError, ParseError) as e:
-                    self._sm.force_error(f"AI processing failed: {e}")
-                    self._alerts.raise_alert(
-                        AlertType.AI_PARSE_FAILURE,
-                        f"AI processing failed: {e}",
-                    )
-                    self._log_event("ai_error", {"error": str(e)})
-                    return None
+            # Step 5: Query AI — ONE call with the correct image.
+            # If scroll was needed, ai_image_path points to the stitched composite.
+            # If no scroll, ai_image_path points to the original captured frame.
+            try:
+                ai_response, ai_model_used = self._query_gemini(ai_image_path, is_stitched=is_stitched)
+                self._api_calls += 1
+                self._log_event("ai_response", {
+                    "model": ai_model_used,
+                    "answer": ai_response.answer,
+                    "is_stitched": is_stitched,
+                })
+            except (GeminiAPIError, ParseError) as e:
+                self._sm.force_error(f"AI processing failed: {e}")
+                self._alerts.raise_alert(
+                    AlertType.AI_PARSE_FAILURE,
+                    f"AI processing failed: {e}",
+                )
+                self._log_event("ai_error", {"error": str(e)})
+                return None
 
             # Step 6: Build decision directly from AI response.
             logger.info("Using AI answer directly: %s", ai_response.answer if ai_response else "None")
@@ -1282,9 +1263,23 @@ class WorkflowEngine:
                     hypothesisId="H5",
                 )
                 #endregion agent log
-                self._click.scroll_down_at_normalized(sx, sy)
+                # Fire multiple scroll wheel events for reliable scroll depth.
+                # A single -24 wheel tick may not scroll enough for exam questions with
+                # large diagrams.  Three bursts of -24 should scroll ~3 page-lengths.
+                for _scroll_burst in range(3):
+                    self._click.scroll_down_at_normalized(sx, sy)
+                    time.sleep(0.15)
 
-            # Request a new capture from the phone
+            # CRITICAL: In ghost mode, DXGI captures happen within ~50ms.
+            # Without a delay, the next capture grabs the screen BEFORE the
+            # browser has rendered the scroll.  Wait for the browser animation
+            # to complete before requesting a new frame.
+            if _GHOST:
+                time.sleep(1.0)  # browser scroll animation settling time
+            else:
+                time.sleep(0.5)  # phone-camera mode — shutter lag provides natural delay
+
+            # Request a new capture
             self._scroll_frame_event.clear()
             self._scroll_frame_data = None
             # Set a flag to explicit mark as waiting since initial state is also clear
